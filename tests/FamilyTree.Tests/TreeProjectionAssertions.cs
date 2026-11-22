@@ -29,21 +29,32 @@ internal static class TreeProjectionAssertions
         var auth = new SyntheticAuthorization(people.Where(p => p.Id != secret.Id).Select(p => p.Id));
         var defaultTree = await PersonTreeProjector.ProjectAsync(
             viewer, center.Id, people, links, new TreeOptions(), auth);
-        Ensure(defaultTree is not null, "authorized center must be visible");
-        var defaultIds = defaultTree!.Nodes.Select(x => x.Person.Id).ToHashSet();
+        var verifiedTree = defaultTree ?? throw new InvalidOperationException("authorized center must be visible");
+        var defaultIds = verifiedTree.Nodes.Select(x => x.Person.Id).ToHashSet();
         Ensure(defaultIds.SetEquals(new[] {center.Id, father.Id, mother.Id, child.Id, sibling.Id, spouse.Id }),
             "default tree must show direct family, sibling, spouse, but no social contacts");
-        Ensure(defaultTree.Relationships.All(e => defaultIds.Contains(e.FromPersonId) && defaultIds.Contains(e.ToPersonId)),
+        Ensure(verifiedTree.Relationships.All(e => defaultIds.Contains(e.FromPersonId) && defaultIds.Contains(e.ToPersonId)),
             "tree links must have authorized endpoints");
         Ensure(!defaultIds.Contains(secret.Id), "hidden people must never appear in nodes");
-        Ensure(defaultTree.Relationships.All(e => e.FromPersonId != secret.Id && e.ToPersonId != secret.Id),
+        Ensure(verifiedTree.Relationships.All(e => e.FromPersonId != secret.Id && e.ToPersonId != secret.Id),
             "hidden people must never leak through edges");
-        Ensure(defaultTree.Nodes.Single(x => x.Person.Id == father.Id).Generation == -1,
+        Ensure(verifiedTree.Nodes.Single(x => x.Person.Id == father.Id).Generation == -1,
             "ancestor must be positioned above center");
-        Ensure(defaultTree.Nodes.Single(x => x.Person.Id == child.Id).Generation == 1,
+        Ensure(verifiedTree.Nodes.Single(x => x.Person.Id == child.Id).Generation == 1,
             "descendant must be positioned below center");
-        Ensure(defaultTree.Nodes.Single(x => x.Person.Id == sibling.Id).Generation == 0,
+        Ensure(verifiedTree.Nodes.Single(x => x.Person.Id == sibling.Id).Generation == 0,
             "sibling must stay in same generation");
+
+        var zeroDepthSiblings = await PersonTreeProjector.ProjectAsync(
+            viewer, center.Id, people, links, new TreeOptions(0, 0, false, true, false), auth);
+        Ensure(zeroDepthSiblings is not null, "authorized zero-depth tree must exist");
+        Ensure(zeroDepthSiblings!.Nodes.Select(x => x.Person.Id)
+            .ToHashSet().SetEquals(new[] {center.Id, sibling.Id}),
+            "zero-depth sibling view must exclude the out-of-depth parent");
+        Ensure(zeroDepthSiblings.InferredSiblingConnections.Any(e =>
+            (e.FirstPersonId == center.Id && e.SecondPersonId == sibling.Id)
+            || (e.FirstPersonId == sibling.Id && e.SecondPersonId == center.Id)),
+            "inferred sibling link must remain visible without leaking the parent");
 
         var social = await PersonTreeProjector.ProjectAsync(
             viewer, center.Id, people, links, new TreeOptions(0, 0, false, false, true), auth);
