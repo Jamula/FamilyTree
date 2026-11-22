@@ -1,15 +1,19 @@
 namespace FamilyTree.Domain;
 
-/// <summary>
-/// A filtered tree projection. Callers must never combine these results with
-/// unfiltered people, links, counts, or search indexes.
-/// </summary>
+/// <summary>A filtered tree projection; never merge it with unfiltered records or indexes.</summary>
 public sealed record PersonTreeNode(Person Person, int Generation);
+
+/// <summary>
+/// An inferred link from two visible people having an authorized common-parent
+/// relationship. No parent ID is disclosed if the parent is outside the depth limit.
+/// </summary>
+public sealed record InferredSiblingConnection(Guid FirstPersonId, Guid SecondPersonId);
 
 public sealed record PersonTreeProjection(
     Guid CenterPersonId,
     IReadOnlyList<PersonTreeNode> Nodes,
-    IReadOnlyList<Relationship> Relationships);
+    IReadOnlyList<Relationship> Relationships,
+    IReadOnlyList<InferredSiblingConnection> InferredSiblingConnections);
 
 public static class PersonTreeProjector
 {
@@ -28,8 +32,8 @@ public static class PersonTreeProjector
         ArgumentNullException.ThrowIfNull(authorization);
         options.Validate();
 
-        // Authorize before constructing an output graph. Unknown and invisible centers
-        // both return null. API endpoints must map both to an indistinguishable result.
+        // Authorization is applied before projection. Unknown and invisible centers
+        // both return null; the API must return the same status and response to each.
         var byId = people.ToDictionary(p => p.Id);
         if (!byId.ContainsKey(centerPersonId))
             return null;
@@ -41,7 +45,6 @@ public static class PersonTreeProjector
             if (await authorization.CanSeePersonAsync(viewerId, person.Id, cancellationToken))
                 visible.Add(person.Id);
         }
-
         if (!visible.Contains(centerPersonId))
             return null;
 
@@ -55,84 +58,120 @@ public static class PersonTreeProjector
                 allowedEdges.Add(relation);
         }
 
+        // Build authorized adjacency indexes only once, rather than scanning
+        // every relationship for every person in a wide or deep graph.
+        var parentsOf = new Dictionary<Guid, HashSet<Guid>>();
+        var childrenOf = new Dictionary<Guid, HashSet<Guid>>();
+        var explicitSiblingsOf = new Dictionary<Guid, HashSet<Guid>>();
+        var spousesOf = new Dictionary<Guid, HashSet<Guid>>();
+        var socialOf = new Dictionary<Guid, HashSet<Guid>>();
+        var explicitSiblingPairs = new HashSet<(Guid, Guid)>();
+
+        static void Add(Dictionary<Guid, HashSet<Guid>> map, Guid from, Guid to)
+        {
+            if (!map.TryGetValue(from, out var values))
+                map[from] = values = new HashSet<Guid>();
+            values.Add(to);
+        }
+        static void Both(Dictionary<Guid, HashSet<Guid>> map, Guid first, Guid second)
+        {
+            Add(map, first, second);
+            Add(map, second, first);
+        }
+        static (Guid, Guid) OrderedPair(Guid a, Guid b) =>
+            a.CompareTo(b) <= 0 ? (a, b) : (b, a);
+
+        foreach (var edge in allowedEdges)
+        {
+            switch (edge.Kind)
+            {
+                case RelationKind.Parent:
+                    Add(parentsOf, edge.ToPersonId, edge.FromPersonId);
+                    Add(childrenOf, edge.FromPersonId, edge.ToPersonId);
+                    break;
+                case RelationKind.Sibling:
+                    Both(explicitSiblingsOf, edge.FromPersonId, edge.ToPersonId);
+                    explicitSiblingPairs.Add(OrderedPair(edge.FromPersonId, edge.ToPersonId));
+                    break;
+                case RelationKind.Spouse:
+                case RelationKind.Partner:
+                    Both(spousesOf, edge.FromPersonId, edge.ToPersonId);
+                    break;
+                case RelationKind.Friend:
+                case RelationKind.Neighbor:
+                case RelationKind.Mentor:
+                case RelationKind.Other:
+                    Both(socialOf, edge.FromPersonId, edge.ToPersonId);
+                    break;
+            }
+        }
+
         var included = new Dictionary<Guid, int> { [centerPersonId] = 0 };
 
-        // Direct parent chains, bounded independently above and below center.
-        void Traverse(bool ancestors, int maximumDepth)
+        void Traverse(Dictionary<Guid, HashSet<Guid>> adjacency, int limit, bool above)
         {
             var frontier = new HashSet<Guid> { centerPersonId };
-            for (var depth = 1; depth <= maximumDepth && frontier.Count > 0; depth++)
+            var visited = new HashSet<Guid> { centerPersonId };
+            for (var depth = 1; depth <= limit && frontier.Count > 0; depth++)
             {
                 var next = new HashSet<Guid>();
-                foreach (var edge in allowedEdges)
+                foreach (var personId in frontier)
                 {
-                    if (edge.Kind != RelationKind.Parent)
+                    if (!adjacency.TryGetValue(personId, out var neighbors))
                         continue;
-
-                    var anchor = ancestors ? edge.ToPersonId : edge.FromPersonId;
-                    var candidate = ancestors ? edge.FromPersonId : edge.ToPersonId;
-                    if (!frontier.Contains(anchor))
-                        continue;
-
-                    included.TryAdd(candidate, ancestors ? -depth : depth);
-                    next.Add(candidate);
+                    foreach (var person in neighbors.Where(visited.Add))
+                    {
+                        included.TryAdd(person, above ? -depth : depth);
+                        next.Add(person);
+                    }
                 }
                 frontier = next;
             }
         }
 
-        Traverse(ancestors: true, options.GenerationsAbove);
-        Traverse(ancestors: false, options.GenerationsBelow);
+        Traverse(parentsOf, options.GenerationsAbove, above: true);
+        Traverse(childrenOf, options.GenerationsBelow, above: false);
 
+        var inferredSiblings = new HashSet<(Guid, Guid)>();
         if (options.SiblingBranches)
         {
             foreach (var (personId, generation) in included.ToArray())
             {
-                // Explicit sibling edges and inferred siblings of an allowed parent.
-                var parentIds = allowedEdges
-                    .Where(e => e.Kind == RelationKind.Parent && e.ToPersonId == personId)
-                    .Select(e => e.FromPersonId).ToHashSet();
+                if (explicitSiblingsOf.TryGetValue(personId, out var explicitNeighbors))
+                    foreach (var sibling in explicitNeighbors)
+                        included.TryAdd(sibling, generation);
 
-                foreach (var edge in allowedEdges)
+                if (!parentsOf.TryGetValue(personId, out var parents))
+                    continue;
+
+                foreach (var parent in parents)
                 {
-                    if (edge.Kind == RelationKind.Sibling)
+                    if (!childrenOf.TryGetValue(parent, out var children))
+                        continue;
+                    foreach (var sibling in children.Where(sibling => sibling != personId))
                     {
-                        if (edge.FromPersonId == personId)
-                            included.TryAdd(edge.ToPersonId, generation);
-                        if (edge.ToPersonId == personId)
-                            included.TryAdd(edge.FromPersonId, generation);
+                        included.TryAdd(sibling, generation);
+                        var pair = OrderedPair(personId, sibling);
+                        if (!explicitSiblingPairs.Contains(pair))
+                            inferredSiblings.Add(pair);
                     }
-                    if (edge.Kind == RelationKind.Parent && parentIds.Contains(edge.FromPersonId))
-                        included.TryAdd(edge.ToPersonId, generation);
                 }
             }
         }
 
         if (options.Spouses)
-        {
             foreach (var (personId, generation) in included.ToArray())
-                foreach (var edge in allowedEdges)
-                    if (edge.Kind is RelationKind.Spouse or RelationKind.Partner)
-                    {
-                        if (edge.FromPersonId == personId)
-                            included.TryAdd(edge.ToPersonId, generation);
-                        if (edge.ToPersonId == personId)
-                            included.TryAdd(edge.FromPersonId, generation);
-                    }
-        }
+                if (spousesOf.TryGetValue(personId, out var partners))
+                    foreach (var partner in partners)
+                        included.TryAdd(partner, generation);
 
         if (options.SocialConnections)
         {
-            // One hop only: associations do not recursively expand a genealogy tree.
+            // A social link is a one-hop association, not an ancestor chain.
             foreach (var (personId, generation) in included.ToArray())
-                foreach (var edge in allowedEdges)
-                    if (edge.Kind is RelationKind.Friend or RelationKind.Neighbor or RelationKind.Mentor or RelationKind.Other)
-                    {
-                        if (edge.FromPersonId == personId)
-                            included.TryAdd(edge.ToPersonId, generation);
-                        if (edge.ToPersonId == personId)
-                            included.TryAdd(edge.FromPersonId, generation);
-                    }
+                if (socialOf.TryGetValue(personId, out var acquaintances))
+                    foreach (var acquaintance in acquaintances)
+                        included.TryAdd(acquaintance, generation);
         }
 
         var nodes = included.Select(x => new PersonTreeNode(byId[x.Key], x.Value))
@@ -150,6 +189,13 @@ public static class PersonTreeProjector
                 _ => true
             }).ToArray();
 
-        return new(centerPersonId, nodes, permittedLinks);
+        var inferred = inferredSiblings
+            .Where(pair => included.ContainsKey(pair.Item1) && included.ContainsKey(pair.Item2))
+            .Select(pair => new InferredSiblingConnection(pair.Item1, pair.Item2))
+            .OrderBy(pair => pair.FirstPersonId)
+            .ThenBy(pair => pair.SecondPersonId)
+            .ToArray();
+
+        return new(centerPersonId, nodes, permittedLinks, inferred);
     }
 }
