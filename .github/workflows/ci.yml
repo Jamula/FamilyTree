@@ -17,5 +17,31 @@ jobs:
         run: dotnet restore FamilyTree.slnx
       - name: Build
         run: dotnet build FamilyTree.slnx --no-restore --configuration Release
-      - name: Domain assertions
-        run: dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj --no-restore --configuration Release
+      - name: Restore local tools
+        run: dotnet tool restore
+      - name: Domain assertions with coverage
+        run: dotnet dotnet-coverage collect "dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj --no-restore --configuration Release" --output coverage.cobertura.xml --output-format cobertura
+      - name: Upload coverage artifact
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report-csharp
+          path: coverage.cobertura.xml
+
+  upload-coverage-csharp:
+    needs: build-test
+    if: ${{ !cancelled() && needs.build-test.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      code-quality: write
+    steps:
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage-report-csharp
+      - uses: actions/upload-code-coverage@v1
+        with:
+          file: coverage.cobertura.xml
+          language: C#
+          label: code-coverage-agent
