@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FamilyTree.Domain/FamilyTree.Domain.csproj" />
+    <Project Path="src/FamilyTree.Api/FamilyTree.Api.csproj" />
+    <Project Path="src/FamilyTree.Web/FamilyTree.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FamilyTree.Tests/FamilyTree.Tests.csproj" />
+  </Folder>
+</Solution>
