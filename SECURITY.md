@@ -4,7 +4,7 @@
 FamilyTree is currently a pre-release prototype. No release is approved to handle real family data.
 
 ## Reporting vulnerabilities
-Do **not** post security vulnerabilities, family records, photographs, credentials or personal data in public issues. Use GitHub private vulnerability reporting if available under this repository's Security tab. If not enabled, ask the maintainers privately for a secure reporting channel before sharing details.
+Do **not** post security vulnerabilities, family records, photographs, credentials or personal data in public issues. Use **[GitHub's private vulnerability report form](https://github.com/Jamula/FamilyTree/security/advisories/new)** to submit a confidential report directly to repository maintainers. **Repository administrators must enable Private Vulnerability Reporting** in Settings → Security → Private vulnerability reporting before this can function; activation and end-to-end testing are a release gate. If the form is unavailable, do **not** disclose details in a public issue. Request that a maintainer enable the private reporting form, without including vulnerability details.
 
 ## Security guarantees required before launch
 - Enforce deny-by-default access on the API and database query boundary.
@@ -15,4 +15,4 @@ Do **not** post security vulnerabilities, family records, photographs, credentia
 - Perform threat modeling, backup/restore tests, privacy review and data subject-rights testing before real-data deployment.
 
 ## Patch and disclosure policy
-Until a maintained release exists, vulnerabilities will be triaged case by case. Future supported-version commitments and a security contact will be documented before public hosting.
+Until a maintained release exists, vulnerabilities will be triaged case by case. Future supported-version commitments and a tested confidential reporting path must be in place before public hosting.
