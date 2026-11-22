@@ -1,0 +1,21 @@
+name: .NET build and test
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore FamilyTree.slnx
+      - name: Build
+        run: dotnet build FamilyTree.slnx --no-restore --configuration Release
+      - name: Domain assertions
+        run: dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj --no-restore --configuration Release
