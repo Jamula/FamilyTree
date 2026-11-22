@@ -1,7 +1,26 @@
 using FamilyTree.Domain;
+using FamilyTree.ServiceDefaults;
+using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
+
+// Local, privacy-filtered diagnostics only. No exporter is configured.
+app.Use(async (context, next) =>
+{
+    var operation = FamilyTelemetry.ClassifyPath(context.Request.Path.Value);
+    var stopwatch = Stopwatch.StartNew();
+    using var activity = FamilyTelemetry.Start(operation);
+    try
+    {
+        await next(context);
+    }
+    finally
+    {
+        FamilyTelemetry.Record(operation, context.Response.StatusCode, stopwatch.Elapsed);
+    }
+});
+
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "FamilyTree.Api" }))
    .WithName("Health");
