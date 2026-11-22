@@ -11,13 +11,17 @@ app.Use(async (context, next) =>
     var operation = FamilyTelemetry.ClassifyPath(context.Request.Path.Value);
     var stopwatch = Stopwatch.StartNew();
     using var activity = FamilyTelemetry.Start(operation);
+    // Default to failure if downstream middleware throws before writing a status.
+    // We must not record a false success for an unhandled exception.
+    var statusCode = StatusCodes.Status500InternalServerError;
     try
     {
         await next(context);
+        statusCode = context.Response.StatusCode;
     }
     finally
     {
-        FamilyTelemetry.Record(operation, context.Response.StatusCode, stopwatch.Elapsed);
+        FamilyTelemetry.Record(operation, statusCode, stopwatch.Elapsed);
     }
 });
 
