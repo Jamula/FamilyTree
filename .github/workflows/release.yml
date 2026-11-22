@@ -1,0 +1,64 @@
+name: Publish GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Validate and publish tagged release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout tag and history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: '10.0.x'
+      - name: Verify tag, version and main ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "Invalid release tag"; exit 1; }
+          VERSION="${GITHUB_REF_NAME#v}"
+          test "$(tr -d '\r\n' < VERSION)" = "$VERSION" || { echo "Tag doesn't match VERSION"; exit 1; }
+          grep -Fq "<Version>$VERSION</Version>" Directory.Build.props || { echo "Version in Directory.Build.props differs"; exit 1; }
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main || { echo "Release tag must point to a commit merged into main"; exit 1; }
+      - name: Restore
+        run: dotnet restore FamilyTree.slnx
+      - name: Build
+        run: dotnet build FamilyTree.slnx --no-restore -c Release
+      - name: Run current domain assertions
+        run: dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj --no-restore -c Release
+      - name: Package published services
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish src/FamilyTree.Api/FamilyTree.Api.csproj --no-restore -c Release -o out/api
+          dotnet publish src/FamilyTree.Web/FamilyTree.Web.csproj --no-restore -c Release -o out/web
+          mkdir -p dist
+          tar -czf "dist/familytree-api-$GITHUB_REF_NAME-linux-independent.tar.gz" -C out/api .
+          tar -czf "dist/familytree-web-$GITHUB_REF_NAME-linux-independent.tar.gz" -C out/web .
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS.txt)
+      - name: Publish GitHub Release and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 0.x versions remain development releases until release-readiness is approved.
+          if [[ "$GITHUB_REF_NAME" == v0.* ]]; then
+            gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS.txt --verify-tag --generate-notes --prerelease --title "FamilyTree $GITHUB_REF_NAME"
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS.txt --verify-tag --generate-notes --title "FamilyTree $GITHUB_REF_NAME"
+          fi
