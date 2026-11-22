@@ -55,3 +55,26 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+
+# FamilyTree privacy safeguards: never track private genealogy information
+data/
+private/
+family-seed.json
+*.ged
+*.gedcom
+*.gdz
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+*.backup
+*.dump
+.env
+.env.*
+!.env.example
+secrets/
+*.pfx
+*.pem
+*.key
+appsettings.*.local.json
