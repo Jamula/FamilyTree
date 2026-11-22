@@ -1,0 +1,20 @@
+0 HEAD
+1 GEDC
+2 VERS 7.0
+1 SOUR FamilyTreeSyntheticFixtures
+0 @I1@ INDI
+1 NAME Alex /Example/
+1 SEX M
+1 FAMS @F1@
+0 @I2@ INDI
+1 NAME Jordan /Sample/
+1 SEX F
+1 FAMS @F1@
+0 @I3@ INDI
+1 NAME Taylor /Example/
+1 FAMC @F1@
+0 @F1@ FAM
+1 HUSB @I1@
+1 WIFE @I2@
+1 CHIL @I3@
+0 TRLR
