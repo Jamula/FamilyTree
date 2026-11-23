@@ -46,6 +46,17 @@ if __name__ == "__main__":
     assert "FamilyTree.Web: lines=NOT MEASURED" in output, output
     assert "branches=50.0% (2 conditions)" in output, output
     check(SAMPLE, 0, "--min-component", "Api=90")
+    components = ("Domain", "Api", "Web", "Mcp", "ServiceDefaults", "SyntheticDemo")
+    all_covered = '<coverage line-rate="1" branch-rate="1"><packages>' + "".join(
+        f'<package name="FamilyTree.{component}"><classes>'
+        f'<class filename="src/FamilyTree.{component}/Test.cs"><lines>'
+        '<line number="1" hits="1"/></lines></class></classes></package>'
+        for component in components
+    ) + '</packages></coverage>'
+    gates = [item for component in components
+             for item in ("--min-component", f"{component}=90")]
+    check(all_covered, 0, *gates)
+    check(SAMPLE, 1, *gates)
     check(SAMPLE, 1, "--min-component", "Domain=90")
     check(SAMPLE, 1, "--min-component", "Web=90")
     check(SAMPLE, 2, "--min-component", "Tests=90")
