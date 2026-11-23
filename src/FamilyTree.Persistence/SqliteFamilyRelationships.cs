@@ -11,7 +11,8 @@ namespace FamilyTree.Persistence;
 public sealed partial class SqliteFamilyStore
 {
     public sealed record PendingRelationshipReview(
-        Guid ProposalId, Relationship Relationship, Guid SubmittedBy);
+        Guid ProposalId, Relationship? Relationship, Guid SubmittedBy,
+        bool ContentUnreadable);
 
     public Guid ProposeRelationship(Guid familyId, Guid authorId, Relationship edge)
     {
@@ -78,11 +79,22 @@ public sealed partial class SqliteFamilyStore
         using (var reader = cmd.ExecuteReader())
             while (reader.Read())
             {
-                var edge = MaterializeRelationship(familyId,
-                    reader.GetString(1),reader.GetString(2),reader.GetString(3),
-                    reader.GetString(4),reader.GetFieldValue<byte[]>(5));
+                Relationship? edge = null;
+                var unreadable = false;
+                try
+                {
+                    edge = MaterializeRelationship(familyId,
+                        reader.GetString(1),reader.GetString(2),reader.GetString(3),
+                        reader.GetString(4),reader.GetFieldValue<byte[]>(5));
+                }
+                catch (InvalidDataException)
+                {
+                    // Keep a content-free proposal ID visible for an
+                    // independent moderator to reject corrupted submissions.
+                    unreadable = true;
+                }
                 results.Add(new(Guid.Parse(reader.GetString(0)),edge,
-                    Guid.Parse(reader.GetString(6))));
+                    Guid.Parse(reader.GetString(6)),unreadable));
             }
         tx.Commit();
         return results;
@@ -95,7 +107,7 @@ public sealed partial class SqliteFamilyStore
         using var con = Open();
         using var tx = con.BeginTransaction();
         RequireMember(con, tx, familyId, moderatorId, administrator: true);
-        Relationship edge;
+        string relationId, fromId, toId, kind;
         byte[] encrypted;
         using (var cmd = Cmd(con, tx, """
             SELECT relation_id,from_id,to_id,kind,encrypted_label,submitter
@@ -109,13 +121,18 @@ public sealed partial class SqliteFamilyStore
                 throw new InvalidOperationException("Pending relationship unavailable.");
             if (reader.GetString(5) == moderatorId.ToString("D"))
                 throw new UnauthorizedAccessException("Independent moderator required.");
+            relationId = reader.GetString(0);
+            fromId = reader.GetString(1);
+            toId = reader.GetString(2);
+            kind = reader.GetString(3);
             encrypted = reader.GetFieldValue<byte[]>(4);
-            edge = MaterializeRelationship(familyId,
-                reader.GetString(0),reader.GetString(1),reader.GetString(2),
-                reader.GetString(3),encrypted);
         }
         if (approve)
         {
+            // Authentication of encrypted payload is essential for approval;
+            // rejection must stay possible even for broken ciphertext.
+            var edge = MaterializeRelationship(
+                familyId, relationId, fromId, toId, kind, encrypted);
             var endpoints = Scalar<long>(con, tx, """
                 SELECT COUNT(*) FROM people WHERE family_id=$f
                 AND id IN ($from,$to);
