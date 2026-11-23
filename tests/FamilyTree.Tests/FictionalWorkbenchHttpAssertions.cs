@@ -92,17 +92,23 @@ internal static class FictionalWorkbenchHttpAssertions
 
         async Task<HttpResponseMessage> Send(string action,
             bool includeToken = true, bool includeCookie = true,
-            bool external = false)
+            bool external = false, string? versionOverride = null)
         {
             using var request = new HttpRequestMessage(HttpMethod.Post,
                 "/demo/workbench");
+            using var currentPage = await client.GetAsync("/demo/workbench");
+            var currentHtml = await currentPage.Content.ReadAsStringAsync();
+            var versionMatch = Regex.Match(currentHtml, "name='version' value='([0-9]+)'");
+            Check(versionMatch.Success, "view revision token rendered");
+            var version = versionOverride ?? versionMatch.Groups[1].Value;
             request.Content = new FormUrlEncodedContent(
                 includeToken
                 ? [
                     new KeyValuePair<string,string>("action",action),
+                    new KeyValuePair<string,string>("version",version),
                     new KeyValuePair<string,string>("__RequestVerificationToken",token)
                   ]
-                : [new KeyValuePair<string,string>("action",action)]);
+                : [new KeyValuePair<string,string>("action",action), new KeyValuePair<string,string>("version",version)]);
             if (includeCookie) request.Headers.Add("Cookie", cookie);
             if (external) request.Headers.Add("X-Test-Remote", "external");
             return await client.SendAsync(request);
@@ -154,6 +160,9 @@ internal static class FictionalWorkbenchHttpAssertions
 
         using (var response = await Send("propose-person"))
             Check((int)response.StatusCode == 303, "fictional proposal accepted");
+        using (var stale = await Send("reject", versionOverride: "0"))
+            Check(stale.StatusCode == HttpStatusCode.Conflict,
+                "stale tab cannot reject a newer pending proposal");
         using (var response = await Send("propose-person"))
             Check(response.StatusCode == HttpStatusCode.Conflict,
                 "second pending proposal rejected");
