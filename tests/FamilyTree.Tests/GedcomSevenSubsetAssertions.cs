@@ -53,13 +53,15 @@ internal static class GedcomSevenSubsetAssertions
             new ScopedFamilyGrant(viewer,family,MembershipState.Active,
                 new HashSet<Guid>{bad.Id},new HashSet<Guid>())
         ]);
+        var blockedUnsafeName=false;
         try
         {
             GedcomSevenSubset.ExportAuthorizedPreviewAsync(viewer,[bad],[],badAuth)
                 .GetAwaiter().GetResult();
-            throw new Exception("Unsafe name accepted");
         }
-        catch(InvalidOperationException ex) when (ex.Message=="A display name cannot be safely exported.") {}
+        catch(InvalidOperationException ex) when (ex.Message=="A display name cannot be safely exported.")
+        {blockedUnsafeName=true;}
+        Check(blockedUnsafeName,"unsafe name rejected");
         Console.WriteLine("PASS bounded GEDCOM preview, auth export, round trip and error tests");
     }
     static void Check(bool value,string why)
