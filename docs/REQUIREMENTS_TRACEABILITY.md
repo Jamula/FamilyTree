@@ -17,6 +17,19 @@ Every P0 requirement must become an executable test before release. The followin
 | Self-hosted and hosted freemium | [#16](https://github.com/Jamula/FamilyTree/issues/16) | U29–U30, tenant isolation | Planned |
 | PWA / mobile / sponsorship | [#17](https://github.com/Jamula/FamilyTree/issues/17) | U31–U32, installation tests | Planned |
 
+| Observability and safe instrumentation | [#22](https://github.com/Jamula/FamilyTree/issues/22) | T01–T04, no private tags or external export by default | In progress |
+| Aspire local developer stack | [#23](https://github.com/Jamula/FamilyTree/issues/23) | T05, AppHost build and local startup | In progress |
+| Zero-cost approval | [#25](https://github.com/Jamula/FamilyTree/issues/25) | C01, workflow guard without paid cloud resources | In progress |
+| Protected auto-merge | [#26](https://github.com/Jamula/FamilyTree/issues/26) | C02, required CI + squash + review resolution | In progress |
+
+## Executable M0 tests
+- T01: `TelemetryAssertions` ensures sanitized trace/meter vocabulary.
+- T02: `TreeProjectionAssertions` ensures hidden nodes/edges are removed.
+- T03: GEDCOM synthetic fixture smoke tests, not GEDCOM standards conformance.
+- T04: `scripts/smoke-http.sh` checks health, landing page and HTTP 501 fail-closed routes.
+- C01: `scripts/verify-zero-cost.py` enforces source-level action pinning and no configured deployments.
+- C02: GitHub `build-test` is the required branch rule check.
+
 ## Engineering acceptance
 - Each pull request references its issue and adds tests, or documents why automated coverage is not appropriate.
 - All read paths and graph traversal tests demonstrate *no existence leaks* for unauthorized people.
