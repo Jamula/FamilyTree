@@ -14,11 +14,18 @@ internal static class AiProviderContractsAssertions
         Check(SyntheticProviderGate.TrySuggestAsync(provider,input,true,true).GetAwaiter()
                 .GetResult()?.DraftText == "pending fictional suggestion" &&
                 provider.Calls == 1, "provider-neutral allowed draft");
-        try {
+        var disabledProviderRejected = false;
+        try
+        {
             new DisabledGenealogySuggestionProvider().SuggestSyntheticAsync(input)
                 .GetAwaiter().GetResult();
-            throw new Exception("default disabled provider unexpectedly called");
-        } catch (InvalidOperationException) { }
+        }
+        catch (InvalidOperationException ex)
+            when (ex.Message.Contains("AI is disabled", StringComparison.Ordinal))
+        {
+            disabledProviderRejected = true;
+        }
+        Check(disabledProviderRejected, "default provider must always reject model calls");
         Console.WriteLine("PASS provider-neutral opt-in safety checks");
     }
     static void Check(bool value, string reason) { if (!value) throw new Exception(reason); }
