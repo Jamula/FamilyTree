@@ -11,7 +11,7 @@ The existing console-based domain assertions test tree defaults, independent rel
 5. **Security and privacy tests:** hidden people not leaked through counts, search, nodes, edges, AI output, logs, export or cached pages.
 
 ## CI gates
-Build and domain assertions are configured; executable API integration and browser suites are not yet built. Add them on their feature branches and make them required before real-data deployments.
+Build, domain assertions, source-level cost rules and executable HTTP smoke checks for the public home, health and fail-closed 501 endpoints are configured. Browser gesture and authenticated API integration tests are not yet built. Add them on their feature branches and make them required before real-data deployments.
 
 ## Current architecture restriction
 Avoid treating the placeholder `501` API responses as authorized data implementations. Production data must remain private until P0 access policies are enforced.

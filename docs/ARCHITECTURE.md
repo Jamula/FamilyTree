@@ -16,3 +16,6 @@ Web: Blazor experience; API: authorized HTTP access and OpenAPI; Domain: genealo
 
 ## Compliance/feedback requirements
 GDPR lawful basis, rights request procedures, data minimization, access/export/erasure, incident response, retention schedules, minors and jurisdiction-specific regulations. In-app feedback must strip PII before any public GitHub issue is created. Global family discovery requires explicit mutual consent. Product release requires qualified legal/privacy review.
+
+## M0 concrete platform decisions
+See [M0 architecture decisions](ARCHITECTURE_DECISIONS_M0.md) for local SQLite, protected local media, provider-neutral OIDC/AI, local Aspire, and disabled-by-default OTLP exporters. Production database and managed hosting require separate privacy/security and $0 cost approval gates.

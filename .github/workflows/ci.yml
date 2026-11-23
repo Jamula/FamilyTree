@@ -22,6 +22,8 @@ jobs:
           dotnet --version
           test "$(dotnet --version | cut -d. -f1)" = "11"
           ! grep -R --include='*.csproj' '<TargetFramework>net10.0</TargetFramework>' src tests
+      - name: Check zero-cost GitHub workflow policy
+        run: python3 scripts/verify-zero-cost.py
       - name: Restore
         run: dotnet restore FamilyTree.slnx
       - name: Build
@@ -32,5 +34,7 @@ jobs:
         run: dotnet dotnet-coverage collect "dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj --no-restore --configuration Release" --output coverage.cobertura.xml --output-format cobertura
       - name: Check coverage was generated
         run: test -s coverage.cobertura.xml
+      - name: HTTP smoke with synthetic data and fail-closed APIs
+        run: bash scripts/smoke-http.sh
 # No paid Code Quality upload or persisted artifacts: $0 cost guardrail.
 # Keep any future action SHA-pinned, approved, and behind explicit spending approval.
