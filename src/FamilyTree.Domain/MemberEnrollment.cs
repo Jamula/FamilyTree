@@ -42,7 +42,8 @@ public sealed class MemberEnrollment
     public MemberEnrollment Approve(Guid administratorId, Guid administratorFamily,
         bool administratorAuthorized)
     {
-        if (State != MembershipState.PendingApproval ||
+        if ((State != MembershipState.PendingApproval &&
+                !(State == MembershipState.Paused && PausedByAdministrator)) ||
             administratorId == Guid.Empty || administratorId == PrincipalId ||
             administratorFamily != FamilyId || !administratorAuthorized)
             throw new UnauthorizedAccessException("Approval denied.");
@@ -73,7 +74,9 @@ public sealed class MemberEnrollment
 
     public MemberEnrollment Leave(Guid actorId, Guid actorFamily, bool administratorAuthorized)
     {
-        if ((State != MembershipState.Active && State != MembershipState.Paused) ||
+        if ((State != MembershipState.Active &&
+                State != MembershipState.Paused &&
+                State != MembershipState.PendingApproval) ||
             actorFamily != FamilyId || actorId == Guid.Empty ||
             (actorId != PrincipalId && !administratorAuthorized))
             throw new UnauthorizedAccessException("Revocation denied.");
