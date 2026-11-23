@@ -153,6 +153,13 @@ internal static class SqliteFamilyStoreAssertions
                 store.ReviewPerson(family, secondAdministrator, adminProposal, false);
                 Check(store.ReadPeople(family, admin).Count == 1,
                     "independent admin rejects original admin proposal");
+                store.RevokeMember(family, admin, secondAdministrator);
+                Expect<UnauthorizedAccessException>(() => store.ReadPeople(
+                    family, secondAdministrator),
+                    "promoted administrator revocation immediately denies access");
+                Expect<UnauthorizedAccessException>(() => store.ReviewPerson(
+                    family, secondAdministrator, Guid.NewGuid(), true),
+                    "revoked administrator cannot moderate");
                 Check(!Encoding.UTF8.GetString(File.ReadAllBytes(path)).Contains(
                     fictionalPerson.DisplayName, StringComparison.Ordinal),
                     "person names encrypted at rest");
@@ -172,7 +179,7 @@ internal static class SqliteFamilyStoreAssertions
                     family, admin, member), "revocation replay denied");
                 Expect<UnauthorizedAccessException>(() => reopened.RevokeMember(
                     family, admin, admin), "cannot revoke last bootstrap administrator");
-                Check(reopened.CountAudit(family, admin) == 7, "promotion, review and revocation audited");
+                Check(reopened.CountAudit(family, admin) == 8, "promotion, review and both revocations audited");
                 Check(reopened.ReadPeople(family, admin).Count == 1,
                     "administrator retains family scope");
             }
