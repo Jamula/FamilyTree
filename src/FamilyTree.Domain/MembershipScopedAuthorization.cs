@@ -21,6 +21,7 @@ public sealed record ScopedFamilyGrant(
 public sealed class MembershipScopedAuthorization(
     Guid familyId, IEnumerable<ScopedFamilyGrant> trustedGrants) : IFamilyAuthorization
 {
+    public Guid FamilyId { get; } = familyId;
     private readonly ScopedFamilyGrant[] _grants =
         (trustedGrants ?? throw new ArgumentNullException(nameof(trustedGrants))).ToArray();
 
