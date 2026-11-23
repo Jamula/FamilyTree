@@ -122,7 +122,7 @@ public static class FictionalSvgTree
                     .Append(' ').Append(toY).Append("' fill='none' stroke='")
                     .Append(color).Append("' stroke-width='2'");
                 if (dash.Length != 0)
-                    html.Append(" stroke-dasharray='").Append(dash).Append(''');
+                    html.Append(" stroke-dasharray='").Append(dash).Append("'");
                 html.Append("><title>")
                     .Append(WebUtility.HtmlEncode(edge.Inferred ? "inferred sibling"
                         : edge.Kind.ToString()))
