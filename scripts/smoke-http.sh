@@ -114,11 +114,15 @@ token="$(grep -o "name='__RequestVerificationToken' value='[^']*'" \
     "$TMP/workbench.html" | head -n 1 | sed "s/.*value='//;s/'$//")"
 [[ -n "$token" ]] || { echo "FAIL: anti-forgery form token missing"; exit 1; }
 submit_workbench() {
+  local version
+  version="$(curl --silent --max-time 5 -b "$TMP/workbench-cookies" "$WEB/demo/workbench" | grep -o "name='version' value='[0-9]*'" | head -n 1 | sed "s/.*value='//;s/'$//")"
+  [[ -n "$version" ]] || { echo "FAIL: missing revision token"; return 1; }
   curl --silent --max-time 5 -b "$TMP/workbench-cookies" \
     -X POST -o "$TMP/response.txt" -w '%{http_code}' \
     "$WEB/demo/workbench" \
     --data-urlencode "__RequestVerificationToken=$token" \
-    --data-urlencode "action=$1"
+    --data-urlencode "action=$1" \
+    --data-urlencode "version=$version"
 }
 [[ "$(submit_workbench approve)" == 409 ]] || { echo "FAIL: premature approval permitted"; exit 1; }
 [[ "$(submit_workbench propose-person)" == 303 ]] || { echo "FAIL: propose fictional person"; exit 1; }
