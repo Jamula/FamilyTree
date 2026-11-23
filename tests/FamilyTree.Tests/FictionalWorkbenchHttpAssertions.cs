@@ -65,6 +65,13 @@ internal static class FictionalWorkbenchHttpAssertions
             Check(denied.StatusCode == HttpStatusCode.NotFound,
                 "localhost proxy cannot expose the workbench under a public Host");
         }
+        using (var ipv6 = new HttpRequestMessage(HttpMethod.Get, "/demo/workbench"))
+        {
+            ipv6.Headers.Host = "[::1]:5182";
+            using var allowed = await client.SendAsync(ipv6);
+            Check(allowed.StatusCode == HttpStatusCode.OK,
+                "IPv6 loopback Host accepted even with square brackets");
+        }
         using var first = await client.GetAsync("/demo/workbench");
         Check(first.StatusCode == HttpStatusCode.OK, "local workbench GET works");
         var html = await first.Content.ReadAsStringAsync();
