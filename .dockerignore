@@ -1,0 +1,17 @@
+.git
+.github
+**/bin
+**/obj
+**/.env
+**/.env.*
+**/*.key
+**/*.pem
+**/*.pfx
+**/*.p12
+**/*.ged
+**/*.gedcom
+**/*.zip
+**/*secret*
+tests
+docs
+coverage*
