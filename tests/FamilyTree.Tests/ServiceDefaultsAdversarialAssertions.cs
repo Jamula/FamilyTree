@@ -155,6 +155,21 @@ internal static class ServiceDefaultsAdversarialAssertions
                 new CancellationToken(true)).GetAwaiter().GetResult(),
             "cancelled authorized projection propagates cancellation");
 
+        using var activityListener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == FamilyTelemetry.SourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> options) =>
+                ActivitySamplingResult.AllData
+        };
+        ActivitySource.AddActivityListener(activityListener);
+        using (var cleanParent = new Activity("clean-parent"))
+        {
+            cleanParent.SetIdFormat(ActivityIdFormat.W3C);
+            cleanParent.Start();
+            using var cleanChild = FamilyTelemetry.Start(FamilyOperation.Health);
+            Check(cleanChild is not null,
+                "clean parent must produce a sampled span or privacy test is meaningless");
+        }
         using (var parent = new Activity("untrusted-request"))
         {
             parent.SetIdFormat(ActivityIdFormat.W3C);
