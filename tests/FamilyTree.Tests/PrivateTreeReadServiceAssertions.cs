@@ -90,6 +90,11 @@ internal static class PrivateTreeReadServiceAssertions
             [new Relationship(Guid.Empty, center.Id, child.Id, RelationKind.Parent)] };
         Expect<InvalidOperationException>(() => Read(viewer, family, branch, center.Id),
             "malformed relationship rejected");
+        source.Snapshot = good with { Relationships = [
+            parentEdge, parentEdge with { ToPersonId = hidden.Id }
+        ] };
+        Expect<InvalidOperationException>(() => Read(viewer, family, branch, center.Id),
+            "duplicate relationship IDs must not alias independent grant checks");
         source.Snapshot = null;
         Check(Read(viewer, family, branch, center.Id) is null,
             "missing trusted snapshot denied");
