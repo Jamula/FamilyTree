@@ -142,6 +142,24 @@ internal static class FictionalWorkbenchHttpAssertions
             Check(denied.StatusCode == HttpStatusCode.BadRequest,
                 "unknown-length chunked body prohibited");
         }
+        // Unsupported content types must return 400, never an unhandled 500.
+        foreach (var invalidType in new[] {
+            "application/x-www-form-urlencoded-not-really",
+            "application/x-www-form-urlencoded; charset=unknown",
+            "text/plain"
+        })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/demo/workbench");
+            request.Headers.Add("Cookie", cookie);
+            request.Content = new StringContent(
+                "action=propose-person&version=0&__RequestVerificationToken=" +
+                Uri.EscapeDataString(token));
+            request.Content.Headers.ContentType =
+                System.Net.Http.Headers.MediaTypeHeaderValue.Parse(invalidType);
+            using var deniedType = await client.SendAsync(request);
+            Check(deniedType.StatusCode == HttpStatusCode.BadRequest,
+                "unsupported form content-type rejected without server exception");
+        }
         using (var denied = await Send("propose-person", includeToken: false))
             Check(denied.StatusCode == HttpStatusCode.BadRequest,
                 "CSRF request without token rejected");
