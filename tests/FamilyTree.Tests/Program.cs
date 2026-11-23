@@ -28,3 +28,7 @@ await TreeProjectionAssertions.RunAsync();
 SyntheticDemoAssertions.Run();
 
 await MembershipAuthorizationAssertions.RunAsync();
+
+// Run async HTTP integration checks outside module initializers to avoid
+// CLR type-initialization locks blocking the request continuations.
+await FictionalWorkbenchHttpAssertions.RunAsync();

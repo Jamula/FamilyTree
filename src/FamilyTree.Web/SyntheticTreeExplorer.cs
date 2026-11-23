@@ -101,6 +101,7 @@ public static class SyntheticTreeExplorer
         html.Append("</tbody></table><p><small>Visible relationship links: ");
         html.Append(tree?.Relationships.Count ?? 0).Append("; inferred sibling connections: ");
         html.Append(tree?.InferredSiblingConnections.Count ?? 0).Append(".</small></p>");
+        html.Append("<p><a href='/demo/workbench'>Try local fictional editing and review</a></p>");
         html.Append("<p><a href='/'>Return to landing page</a></p></main></body></html>");
         return html.ToString();
 
