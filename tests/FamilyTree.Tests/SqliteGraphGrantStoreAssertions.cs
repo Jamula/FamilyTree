@@ -80,6 +80,29 @@ internal static class SqliteGraphGrantStoreAssertions
                 family,branch,member),"revoked membership cannot see durable grants");
             Expect<UnauthorizedAccessException>(()=>reopened.GrantPerson(
                 family,branch,admin,member,person.Id),"revoked membership cannot receive grants");
+            using(var data=new SqliteFamilyStore(path,key))
+            {
+                var newInvitation=data.IssueInvitation(family,admin,member,
+                    DateTimeOffset.UtcNow.AddDays(1),DateTimeOffset.UtcNow);
+                data.AcceptInvitation(family,member,newInvitation,DateTimeOffset.UtcNow);
+                data.ApproveMember(family,admin,member);
+            }
+            Check(reopened.ReadVisiblePersonIds(family,branch,member).Count==0,
+                "rejoining must never restore old branch/person permissions");
+            reopened.GrantPerson(family,branch,admin,member,person.Id);
+            Check(reopened.ReadVisiblePersonIds(family,branch,member).SetEquals([person.Id]),
+                "fresh explicit grant after rejoin works");
+            using(var data=new SqliteFamilyStore(path,key))
+                data.RevokeMember(family,admin,member);
+            using(var verify=new SqliteFamilyStore(path,key))
+            {
+                var newInvitation=verify.IssueInvitation(family,admin,member,
+                    DateTimeOffset.UtcNow.AddDays(1),DateTimeOffset.UtcNow);
+                verify.AcceptInvitation(family,member,newInvitation,DateTimeOffset.UtcNow);
+                verify.ApproveMember(family,admin,member);
+            }
+            Check(reopened.ReadVisiblePersonIds(family,branch,member).Count==0,
+                "second rejoin still cannot inherit any revoked old grants");
             Expect<ArgumentException>(()=>reopened.ReadVisiblePersonIds(
                 Guid.Empty,branch,admin),"empty family refused");
             Console.WriteLine("PASS persisted branch/person grant isolation, no implicit rights and membership revocation");
