@@ -180,6 +180,12 @@ public sealed class SqliteFamilyStore : IDisposable
             """, ("$f", familyId.ToString("D")), ("$p", person.Id.ToString("D")));
         if (duplicates != 0)
             throw new InvalidOperationException("Duplicate person ID.");
+        var pendingDuplicate = Scalar<long>(con, tx, """
+            SELECT COUNT(*) FROM person_proposals
+            WHERE family_id=$f AND person_id=$p AND state='Pending';
+            """, ("$f", familyId.ToString("D")), ("$p", person.Id.ToString("D")));
+        if (pendingDuplicate != 0)
+            throw new InvalidOperationException("Duplicate pending person ID.");
         var id = Guid.NewGuid();
         var sealedName = Encrypt(familyId, person.Id, person.DisplayName);
         Exec(con, tx, """
