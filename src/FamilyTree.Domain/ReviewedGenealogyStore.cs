@@ -19,6 +19,8 @@ public sealed class ReviewedGenealogyStore
     private readonly Dictionary<Guid, Relationship> _relationships = new();
     private readonly Dictionary<Guid, (PendingEdit Request, Person? Person, Relationship? Link)> _pending = new();
     private readonly List<AuditEntry> _audit = new();
+    private readonly Dictionary<long, (PendingEdit Request, Person? Person, Relationship? Link)> _approved = new();
+    private readonly HashSet<long> _undone = new();
     private long _revision;
 
     public ReviewedGenealogyStore(Guid familyId)
@@ -107,6 +109,46 @@ public sealed class ReviewedGenealogyStore
             _pending.Remove(proposalId);
             var audit = new AuditEntry(++_revision, proposalId, moderatorId,
                 entry.Request.Kind, approve, false);
+            _audit.Add(audit);
+            if (approve) _approved.Add(audit.Revision, entry);
+            return audit;
+        }
+    }
+
+    /// <summary>
+    /// Undo a previously approved add through another audited moderator action.
+    /// Audit entries are append-only and never disclose names. Undoing a person
+    /// with linked relationships is intentionally blocked to avoid orphans:
+    /// reverse approved links first. Actors/roles must be trusted server-side.
+    /// </summary>
+    public AuditEntry Undo(long approvedRevision, Guid moderatorId,
+        Guid moderatorFamilyId, bool authorizedModerator)
+    {
+        lock (_gate)
+        {
+            if (!_approved.TryGetValue(approvedRevision, out var original) ||
+                _undone.Contains(approvedRevision))
+                throw new InvalidOperationException("Approved revision unavailable.");
+            if (moderatorId == Guid.Empty || moderatorId == original.Request.SubmitterId ||
+                moderatorFamilyId != _familyId || !authorizedModerator)
+                throw new UnauthorizedAccessException("Independent reviewer required.");
+            if (original.Person is not null)
+            {
+                if (_relationships.Values.Any(edge =>
+                    edge.FromPersonId == original.Person.Id ||
+                    edge.ToPersonId == original.Person.Id))
+                    throw new InvalidOperationException("Reverse dependent links first.");
+                if (!_people.Remove(original.Person.Id))
+                    throw new InvalidOperationException("Approved record unavailable.");
+            }
+            else if (original.Link is not null)
+            {
+                if (!_relationships.Remove(original.Link.Id))
+                    throw new InvalidOperationException("Approved record unavailable.");
+            }
+            _undone.Add(approvedRevision);
+            var audit = new AuditEntry(++_revision, original.Request.Id,
+                moderatorId, original.Request.Kind, Approved: false, Reverted: true);
             _audit.Add(audit);
             return audit;
         }
