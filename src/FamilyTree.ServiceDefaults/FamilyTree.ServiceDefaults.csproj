@@ -8,5 +8,5 @@
   <ItemGroup>
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.21.0" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.21.0" />
-  </ItemGroup>
+  <ProjectReference Include="../FamilyTree.Domain/FamilyTree.Domain.csproj" /></ItemGroup>
 </Project>
