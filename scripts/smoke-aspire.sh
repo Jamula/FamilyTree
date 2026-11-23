@@ -23,10 +23,15 @@ for i in $(seq 1 80); do
   fi
   if ! kill -0 "$PID" 2>/dev/null; then
     echo "FAIL: Aspire AppHost exited before services were ready"
+    grep -iE "error|exception|failed|could not|not found|ASPIRE[0-9]+" "$TMP/aspire.log" | sed -E "s/[[:alnum:]_-]{36,}/[redacted]/g" | tail -n 25 || true
     exit 1
   fi
   sleep 2
 done
-[[ "$ready" == 1 ]] || { echo "FAIL: Aspire API and Web did not start within the local limit"; exit 1; }
+if [[ "$ready" != 1 ]]; then
+  echo "FAIL: Aspire API and Web did not start within the local limit"
+  grep -iE "error|exception|failed|could not|not found|ASPIRE[0-9]+" "$TMP/aspire.log" | sed -E "s/[[:alnum:]_-]{36,}/[redacted]/g" | tail -n 25 || true
+  exit 1
+fi
 grep -q '"status":"ok"' "$TMP/api.json" || { echo "FAIL: AppHost API health endpoint"; exit 1; }
 echo "PASS: Aspire AppHost started API and Web on localhost, with synthetic-only health request"
