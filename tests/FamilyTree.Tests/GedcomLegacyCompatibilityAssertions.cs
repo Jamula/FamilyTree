@@ -102,6 +102,14 @@ internal static class GedcomLegacyCompatibilityAssertions
             StringComparison.Ordinal)).Valid,
             "interior trailer denied");
         Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "0 TRLR", "0 HEAD bogus\n0 TRLR",
+            StringComparison.Ordinal)).Valid,
+            "additional HEAD with metadata denied");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "0 TRLR", "0 TRLR bogus\n0 TRLR",
+            StringComparison.Ordinal)).Valid,
+            "interior TRAILER with extra text denied");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
             "1 FAMC @F1@", "1 FAMC @F1@ ",
             StringComparison.Ordinal)).Valid,
             "trailing whitespace in pointer denied");
