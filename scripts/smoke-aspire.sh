@@ -23,14 +23,18 @@ for i in $(seq 1 80); do
   fi
   if ! kill -0 "$PID" 2>/dev/null; then
     echo "FAIL: Aspire AppHost exited before services were ready"
-    grep -iE "error|exception|failed|could not|not found|ASPIRE[0-9]+" "$TMP/aspire.log" | sed -E "s/[[:alnum:]_-]{36,}/[redacted]/g" | tail -n 25 || true
+    awk 'BEGIN{n=0} /[Uu]nhandled exception|[Ff]ailed to start|[Ff]atal error/{n=22} n>0{print; n--}' "$TMP/aspire.log" |
+      sed -E 's/(token|password|secret)=([^[:space:]]+)/\1=[redacted]/g;s/[A-Za-z0-9_+=/-]{64,}/[redacted]/g' |
+      tail -n 35 || true
     exit 1
   fi
   sleep 2
 done
 if [[ "$ready" != 1 ]]; then
   echo "FAIL: Aspire API and Web did not start within the local limit"
-  grep -iE "error|exception|failed|could not|not found|ASPIRE[0-9]+" "$TMP/aspire.log" | sed -E "s/[[:alnum:]_-]{36,}/[redacted]/g" | tail -n 25 || true
+  awk 'BEGIN{n=0} /[Uu]nhandled exception|[Ff]ailed to start|[Ff]atal error/{n=22} n>0{print; n--}' "$TMP/aspire.log" |
+      sed -E 's/(token|password|secret)=([^[:space:]]+)/\1=[redacted]/g;s/[A-Za-z0-9_+=/-]{64,}/[redacted]/g' |
+      tail -n 35 || true
   exit 1
 fi
 grep -q '"status":"ok"' "$TMP/api.json" || { echo "FAIL: AppHost API health endpoint"; exit 1; }
