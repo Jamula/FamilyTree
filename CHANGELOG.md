@@ -12,4 +12,4 @@ Versioning policy: [docs/VERSIONING.md](docs/VERSIONING.md).
 - Opt-in privacy-safe OTel groundwork and optional local Aspire AppHost.
 - Security and contributing documentation.
 
-This heading is a release **plan**; publication is gated by M0 acceptance checks and the approved `v0.1.0` tag.
+This heading is a release **plan**, not a published version; publication is gated by verified M0 acceptance checks and the approved `v0.1.0` tag.
