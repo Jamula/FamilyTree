@@ -45,11 +45,11 @@ public static class GedcomLegacyCompatibility
                 return Reject("Malformed GEDCOM line");
             if (line.StartsWith("0 ", StringComparison.Ordinal))
             {
-                if (line == "0 HEAD" ||
-                    (line == "0 TRLR" && i != lines.Length - 1))
+                var record = line.Split(' ', 3);
+                if (record.Length > 1 &&
+                    (record[1] == "HEAD" || record[1] == "TRLR"))
                     return Reject("Repeated GEDCOM boundary record");
                 inHeader = false;
-                var record = line.Split(' ', 3);
                 if (record.Length == 3 && record[1].StartsWith('@'))
                 {
                     if (record[2] == "INDI") individualIds.Add(record[1]);
