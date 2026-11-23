@@ -44,7 +44,7 @@ public sealed class SqliteFamilyStore : IDisposable
             CREATE TABLE IF NOT EXISTS invitations (
                 id TEXT PRIMARY KEY, family_id TEXT NOT NULL, issuer TEXT NOT NULL,
                 intended TEXT NOT NULL, expires_unix INTEGER NOT NULL,
-                state TEXT NOT NULL CHECK (state IN ('Offered','Accepted')),
+                state TEXT NOT NULL CHECK (state IN ('Offered','Accepted','Revoked')),
                 FOREIGN KEY(family_id) REFERENCES families(id)
             );
             CREATE TABLE IF NOT EXISTS people (
@@ -123,6 +123,12 @@ public sealed class SqliteFamilyStore : IDisposable
         using var con = Open();
         using var tx = con.BeginTransaction();
         RequireMember(con, tx, familyId, administratorId, administrator: true);
+        if (Scalar<long>(con, tx, """
+            SELECT COUNT(*) FROM memberships WHERE family_id=$f AND principal_id=$p
+              AND state IN ('Active','Pending');
+            """, ("$f", familyId.ToString("D")),
+            ("$p", intendedPrincipalId.ToString("D"))) != 0)
+            throw new InvalidOperationException("Invitee already has active membership.");
         var id = Guid.NewGuid();
         Exec(con, tx, """
             INSERT INTO invitations(id,family_id,issuer,intended,expires_unix,state)
@@ -212,6 +218,13 @@ public sealed class SqliteFamilyStore : IDisposable
             AND principal_id=$p AND state IN ('Active','Pending');
             """, ("$f", familyId.ToString("D")), ("$p", memberId.ToString("D"))) != 1)
             throw new UnauthorizedAccessException("Membership unavailable.");
+        // Revocation invalidates all outstanding offers to the same principal.
+        // A rejoin requires an invitation issued AFTER revocation.
+        Exec(con, tx, """
+            UPDATE invitations SET state='Revoked' WHERE family_id=$f AND intended=$p
+              AND state='Offered';
+            """, ("$f", familyId.ToString("D")),
+            ("$p", memberId.ToString("D")));
         Audit(con, tx, familyId, memberId, administratorId, "member-revoked");
         tx.Commit();
     }
