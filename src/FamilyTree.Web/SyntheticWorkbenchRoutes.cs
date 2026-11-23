@@ -56,7 +56,8 @@ public static class SyntheticWorkbenchRoutes
 
     private static bool Local(HttpContext http) =>
         http.Connection.RemoteIpAddress is { } address &&
-        IPAddress.IsLoopback(address);
+        IPAddress.IsLoopback(address) &&
+        http.Request.Host.Host is "localhost" or "127.0.0.1" or "::1";
 
     private static string Render(SyntheticReviewWorkbench.View view, string? token)
     {
