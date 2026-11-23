@@ -40,7 +40,8 @@ public static class GedcomLegacyCompatibility
             var line = lines[i];
             // CRLF was normalized above. Any residual CR is malformed and
             // cannot be allowed into individual names or record pointers.
-            if (line.Length > 1024 || line.Any(char.IsControl))
+            if (line.Length > 1024 || line.Any(char.IsControl) ||
+                Regex.IsMatch(line, @"^0[0-9]+ "))
                 return Reject("Malformed GEDCOM line");
             if (line.StartsWith("0 ", StringComparison.Ordinal))
             {
