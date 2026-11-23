@@ -34,6 +34,14 @@ internal static class FictionalSvgTreeAssertions
         Check(html.Contains("stroke-dasharray='5 5'", StringComparison.Ordinal) &&
               html.Contains("#35745b", StringComparison.Ordinal),
             "social and parent edges have distinct visual semantics");
+        var inferredTree = tree with
+        {
+            Relationships = [],
+            InferredSiblingConnections = [new InferredSiblingConnection(center.Id, child.Id)]
+        };
+        Check(FictionalSvgTree.Render(inferredTree, new TreeOptions(0, 0))
+              .Contains("stroke-dasharray='3 4'", StringComparison.Ordinal),
+            "authorized inferred siblings are connected when parents are hidden by depth");
         Check(FictionalSvgTree.Render(null, options).Contains(
             "No fictional people available", StringComparison.Ordinal),
             "absent synthetic projection has safe empty state");
