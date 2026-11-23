@@ -208,8 +208,8 @@ public sealed class SqliteFamilyStore : IDisposable
         using var tx = con.BeginTransaction();
         RequireMember(con, tx, familyId, administratorId, administrator: true);
         if (Exec(con, tx, """
-            UPDATE memberships SET state='Left' WHERE family_id=$f
-            AND principal_id=$p AND state IN ('Active','Pending') AND administrator=0;
+            UPDATE memberships SET state='Left', administrator=0 WHERE family_id=$f
+            AND principal_id=$p AND state IN ('Active','Pending');
             """, ("$f", familyId.ToString("D")), ("$p", memberId.ToString("D"))) != 1)
             throw new UnauthorizedAccessException("Membership unavailable.");
         Audit(con, tx, familyId, memberId, administratorId, "member-revoked");
