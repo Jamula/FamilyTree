@@ -14,14 +14,16 @@ public static class AuthorizedFamilyQuery
         Guid principalId,
         IEnumerable<Person> people,
         string? text,
-        IFamilyAuthorization authorization,
+        MembershipScopedAuthorization authorization,
         FieldPrivacyPolicy fieldPolicy,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(people);
         ArgumentNullException.ThrowIfNull(authorization);
         ArgumentNullException.ThrowIfNull(fieldPolicy);
-        if (principalId == Guid.Empty || string.IsNullOrWhiteSpace(text) ||
+        if (principalId == Guid.Empty || authorization.FamilyId == Guid.Empty ||
+            authorization.FamilyId != fieldPolicy.FamilyId ||
+            string.IsNullOrWhiteSpace(text) ||
             text.Length > 80)
             return Array.Empty<AuthorizedPersonSummary>();
 
@@ -52,7 +54,7 @@ public static class AuthorizedFamilyQuery
         Guid principalId,
         Guid personId,
         IEnumerable<Person> people,
-        IFamilyAuthorization authorization,
+        MembershipScopedAuthorization authorization,
         FieldPrivacyPolicy fieldPolicy,
         CancellationToken cancellationToken = default)
     {
@@ -60,6 +62,8 @@ public static class AuthorizedFamilyQuery
         ArgumentNullException.ThrowIfNull(authorization);
         ArgumentNullException.ThrowIfNull(fieldPolicy);
         if (principalId == Guid.Empty || personId == Guid.Empty ||
+            authorization.FamilyId == Guid.Empty ||
+            authorization.FamilyId != fieldPolicy.FamilyId ||
             !await authorization.CanSeePersonAsync(
                 principalId, personId, cancellationToken) ||
             !fieldPolicy.CanRead(principalId, personId, ProfileField.DisplayName))
