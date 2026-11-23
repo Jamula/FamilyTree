@@ -26,9 +26,11 @@ internal static class ProfileClaimAssertions
         var withdrawn=claim.Withdraw(member);
         Check(withdrawn.State==ProfileClaimState.Withdrawn,"claim withdraw");
         Denied(()=>claim.Withdraw(moderator),"other member cannot withdraw");
-        try{withdrawn.Review(moderator,family,true,true);
-            throw new Exception("withdrawn claim approved");}
-        catch(InvalidOperationException ex) when(ex.Message=="Profile claim already decided."){}
+        var closedClaimRejected=false;
+        try{withdrawn.Review(moderator,family,true,true);}
+        catch(InvalidOperationException ex) when(ex.Message=="Profile claim already decided.")
+        {closedClaimRejected=true;}
+        Check(closedClaimRejected,"withdrawn claim cannot be approved");
         Check(typeof(ProfileClaim).GetConstructors().Length==0 &&
               typeof(ProfileClaim).GetProperty(nameof(ProfileClaim.State))?.SetMethod is null,
               "public callers cannot forge an approved claim");
