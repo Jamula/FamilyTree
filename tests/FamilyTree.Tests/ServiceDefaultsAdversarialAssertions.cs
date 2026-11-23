@@ -89,13 +89,13 @@ internal static class ServiceDefaultsAdversarialAssertions
                 if (instrument.Meter.Name == FamilyTelemetry.SourceName)
                     metricListener.EnableMeasurementEvents(instrument);
             };
-            listener.SetMeasurementEventCallback<long>((instrument, _, tags, _) =>
+            listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, state) =>
             {
                 var value = string.Join("|", tags.ToArray().Select(t => t.Key + ":" + t.Value));
                 if (instrument.Name == "familytree.http.requests") requestLabels.Add(value);
                 if (instrument.Name == "familytree.workflow.operations") workflowLabels.Add(value);
             });
-            listener.SetMeasurementEventCallback<double>((instrument, value, _, _) =>
+            listener.SetMeasurementEventCallback<double>((instrument, value, tags, state) =>
             {
                 if (instrument.Name is "familytree.http.duration" or "familytree.workflow.duration")
                     durations.Add(value);
