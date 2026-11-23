@@ -26,3 +26,5 @@ TelemetryAssertions.Run();
 await TreeProjectionAssertions.RunAsync();
 
 SyntheticDemoAssertions.Run();
+
+ChangeReviewAssertions.Run();
