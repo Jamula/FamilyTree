@@ -30,6 +30,10 @@ internal static class AiProposalAssertions
         Check(await AiProposalGate.TryStageAsync(
             safe with { CitedRelationships = new[] { leak } }, policy, aiEnabled: true) is null,
             "hidden cited relationship denied");
+        var deniedVisibleLink = Relationship.Create(a, b, RelationKind.Neighbor);
+        Check(await AiProposalGate.TryStageAsync(
+            safe with { CitedRelationships = new[] { deniedVisibleLink } }, policy,
+            aiEnabled: true) is null, "relationship denied despite visible endpoints");
         Check(await AiProposalGate.TryStageAsync(
             safe with { SuggestedText = new string('x', 2001) }, policy,
             aiEnabled: true) is null, "oversize suggestion denied");
