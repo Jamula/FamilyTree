@@ -57,6 +57,22 @@ internal static class GedcomLegacyCompatibilityAssertions
             StringComparison.Ordinal)).Valid,
             "incomplete Person records denied");
         Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 FAMC @F1@", "1 FAMC @F1",
+            StringComparison.Ordinal)).Valid,
+            "missing pointer closing delimiter denied");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 FAMC @F1@", "1 FAMC @I1@",
+            StringComparison.Ordinal)).Valid,
+            "individual pointer cannot impersonate a family");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 NAME Alex /Example/", "1 NAME Alex\rExample\r",
+            StringComparison.Ordinal)).Valid,
+            "stray CR control characters denied");
+        Check(GedcomLegacyCompatibility.Preview(
+            withExporterVersion.Replace("2 VERS 1.0", "2 VERS 5.5.1",
+            StringComparison.Ordinal)).Valid,
+            "source-version identical to GEDCOM version is not rewritten as format");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
             "1 NAME Alex /Example/", "1 NAME Alex\tExample",
             StringComparison.Ordinal)).Valid,
             "tab control characters denied");
