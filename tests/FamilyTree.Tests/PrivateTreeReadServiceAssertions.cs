@@ -91,6 +91,21 @@ internal static class PrivateTreeReadServiceAssertions
         Expect<InvalidOperationException>(() => Read(viewer, family, branch, center.Id),
             "malformed relationship rejected");
         source.Snapshot = good with { Relationships = [
+            parentEdge with { FromPersonId = center.Id, ToPersonId = center.Id }
+        ] };
+        Expect<InvalidOperationException>(() => Read(viewer, family, branch, center.Id),
+            "self-referential edge is not a valid genealogy relationship");
+        source.Snapshot = good with { Relationships = [
+            parentEdge with { Kind = (RelationKind)999 }
+        ] };
+        Expect<InvalidOperationException>(() => Read(viewer, family, branch, center.Id),
+            "undefined relation kind must not enter an authorized graph");
+        source.Snapshot = good with { Relationships = [
+            parentEdge with { FromPersonId = Guid.Empty }
+        ] };
+        Expect<InvalidOperationException>(() => Read(viewer, family, branch, center.Id),
+            "empty relationship endpoint must fail closed");
+        source.Snapshot = good with { Relationships = [
             parentEdge, parentEdge with { ToPersonId = hidden.Id }
         ] };
         Expect<InvalidOperationException>(() => Read(viewer, family, branch, center.Id),
