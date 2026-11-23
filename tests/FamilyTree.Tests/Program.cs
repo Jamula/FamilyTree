@@ -26,3 +26,5 @@ TelemetryAssertions.Run();
 await TreeProjectionAssertions.RunAsync();
 
 SyntheticDemoAssertions.Run();
+
+await MembershipAuthorizationAssertions.RunAsync();
