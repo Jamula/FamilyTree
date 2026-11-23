@@ -72,6 +72,20 @@ public static class FictionalSvgTree
             html.Append("/>");
         }
 
+        // Sibling branches may be inferred from two visible people sharing an
+        // authorized parent link, even when depth hides the parent nodes.
+        foreach (var sibling in tree.InferredSiblingConnections)
+        {
+            if (!positions.TryGetValue(sibling.FirstPersonId, out var first) ||
+                !positions.TryGetValue(sibling.SecondPersonId, out var second))
+                continue;
+            html.Append("<line x1='").Append(first.X + NodeWidth / 2)
+                .Append("' y1='").Append(first.Y + NodeHeight / 2)
+                .Append("' x2='").Append(second.X + NodeWidth / 2)
+                .Append("' y2='").Append(second.Y + NodeHeight / 2)
+                .Append("' stroke='#465c93' stroke-width='2' stroke-dasharray='3 4'/>");
+        }
+
         foreach (var level in levels)
         foreach (var node in level)
         {
