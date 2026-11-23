@@ -32,7 +32,12 @@ public static class SyntheticWorkbenchRoutes
             SyntheticReviewWorkbench state, IAntiforgery anti) =>
         {
             if (!Local(http)) return Results.NotFound();
-            if (http.Request.ContentLength is > 2048 || !http.Request.HasFormContentType)
+            // Reject chunked/unknown-length and multipart bodies before antiforgery
+            // or FormFeature can buffer content or spool uploaded files.
+            if (http.Request.ContentLength is null or > 2048 ||
+                http.Request.ContentType is null ||
+                !http.Request.ContentType.StartsWith(
+                    "application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase))
                 return Results.BadRequest();
             try
             {
@@ -43,7 +48,10 @@ public static class SyntheticWorkbenchRoutes
                 return Results.BadRequest();
             }
             var form = await http.Request.ReadFormAsync(http.RequestAborted);
-            if (form.Count != 2 || !form.TryGetValue("action", out var rawAction) ||
+            if (form.Files.Count != 0 || form.Count != 2 ||
+                !form.TryGetValue("__RequestVerificationToken", out var formToken) ||
+                formToken.Count != 1 || string.IsNullOrWhiteSpace(formToken.ToString()) ||
+                !form.TryGetValue("action", out var rawAction) ||
                 rawAction.Count != 1)
                 return Results.BadRequest();
             if (!state.Execute(rawAction.ToString()))
