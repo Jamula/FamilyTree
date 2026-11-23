@@ -15,6 +15,12 @@ internal static class GedcomLegacyCompatibilityAssertions
             "synthetic GEDCOM 5.5.1 subset preview retains people and family");
         Check(report.Warnings.Any(x => x.Contains("5.5.1", StringComparison.Ordinal)),
             "legacy file has explicit non-lossless warning");
+        var withExporterVersion = converted.Replace(
+            "1 GEDC\n2 VERS 5.5.1",
+            "1 SOUR ExampleExporter\n2 VERS 1.0\n1 GEDC\n2 VERS 5.5.1",
+            StringComparison.Ordinal);
+        Check(GedcomLegacyCompatibility.Preview(withExporterVersion).Valid,
+            "SOUR/VERS is exporter metadata, not a conflicting GEDCOM version");
         Check(converted.Contains("2 VERS 5.5.1", StringComparison.Ordinal),
             "compatibility preview never modifies original source");
         Check(GedcomLegacyCompatibility.Preview(fixture).Valid,
