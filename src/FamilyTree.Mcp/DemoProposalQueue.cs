@@ -12,6 +12,13 @@ public static class DemoProposalQueue
 
     public static DemoProposal Stage(string kind, string summary)
     {
+        // Only the known synthetic proposal types and bounded, printable
+        // summaries are accepted. No arbitrary payloads, private data or logs.
+        if ((kind != "person" && kind != "relationship") ||
+            string.IsNullOrWhiteSpace(summary) || summary.Length > 256 ||
+            summary.Any(char.IsControl))
+            throw new ArgumentException("Invalid fictional proposal.");
+
         lock (Gate)
         {
             if (Drafts.Count >= MaxDrafts)
