@@ -40,6 +40,13 @@ internal static class OidcConfigurationGuardAssertions
             new TrustedOidcIssuer("https://accounts.google.com?redirect=https://evil.invalid", "aud")
         }), "query string on issuer");
         Reject(() => new OidcConfigurationGuard(new[] {
+            new TrustedOidcIssuer("https://accounts.google.com/", "aud")
+        }), "noncanonical Google URL rejected at configuration");
+        Reject(() => new OidcConfigurationGuard(new[] {
+            new TrustedOidcIssuer(
+                $"https://login.microsoftonline.com/{microsoftTenant:D}/v2.0/", "aud")
+        }), "noncanonical Microsoft trailing slash rejected");
+        Reject(() => new OidcConfigurationGuard(new[] {
             new TrustedOidcIssuer("https://accounts.google.com", " ")
         }), "missing audience");
         Console.WriteLine("PASS trusted OIDC provider configuration negative tests");
