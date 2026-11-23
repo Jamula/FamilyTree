@@ -64,8 +64,37 @@ public sealed class SqliteFamilyStore : IDisposable
                 family_id TEXT NOT NULL, subject_id TEXT NOT NULL,
                 reviewer TEXT NOT NULL, action TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS key_verifier (
+                id INTEGER PRIMARY KEY CHECK(id=1),
+                envelope BLOB NOT NULL
+            );
             """;
         command.ExecuteNonQuery();
+        VerifyDatabaseKey(connection);
+    }
+
+    // Bind an on-disk family database to the verified key before any write.
+    // Populated legacy DBs without a marker require explicit migration.
+    private void VerifyDatabaseKey(SqliteConnection connection)
+    {
+        using var tx = connection.BeginTransaction();
+        byte[]? envelope;
+        using (var command = Cmd(connection, tx,
+            "SELECT envelope FROM key_verifier WHERE id=1;"))
+            envelope = command.ExecuteScalar() as byte[];
+        const string expected = "familytree-sqlite-db-key-v1";
+        if (envelope is null)
+        {
+            if (Scalar<long>(connection, tx, "SELECT COUNT(*) FROM families;") != 0)
+                throw new InvalidDataException("Unverified existing database key.");
+            Exec(connection, tx, "INSERT INTO key_verifier(id,envelope) VALUES(1,$value);",
+                ("$value", Encrypt(Guid.Empty, Guid.Empty, expected)));
+        }
+        else if (!string.Equals(
+            Decrypt(Guid.Empty, Guid.Empty, envelope), expected,
+            StringComparison.Ordinal))
+            throw new InvalidDataException("Invalid database encryption key.");
+        tx.Commit();
     }
 
     /// <summary>
@@ -145,6 +174,28 @@ public sealed class SqliteFamilyStore : IDisposable
             """, ("$f", familyId.ToString("D")), ("$p", memberId.ToString("D"))) != 1)
             throw new UnauthorizedAccessException("Pending membership unavailable.");
         Audit(con, tx, familyId, memberId, administratorId, "member-approved");
+        tx.Commit();
+    }
+
+    /// <summary>Only an active administrator may promote another active member.</summary>
+    public void PromoteAdministrator(Guid familyId, Guid administratorId,
+        Guid newAdministratorId)
+    {
+        RequireIds(familyId, administratorId, newAdministratorId);
+        if (administratorId == newAdministratorId)
+            throw new UnauthorizedAccessException("Self-promotion denied.");
+        using var con = Open();
+        using var tx = con.BeginTransaction();
+        RequireMember(con, tx, familyId, administratorId, administrator: true);
+        if (Exec(con, tx, """
+            UPDATE memberships SET administrator=1
+            WHERE family_id=$f AND principal_id=$p AND state='Active'
+              AND administrator=0;
+            """, ("$f", familyId.ToString("D")),
+            ("$p", newAdministratorId.ToString("D"))) != 1)
+            throw new UnauthorizedAccessException("Active member unavailable.");
+        Audit(con, tx, familyId, newAdministratorId, administratorId,
+            "administrator-promoted");
         tx.Commit();
     }
 
