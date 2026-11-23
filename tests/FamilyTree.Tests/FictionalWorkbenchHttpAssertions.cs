@@ -204,6 +204,26 @@ internal static class FictionalWorkbenchHttpAssertions
             Check(invalid.StatusCode == HttpStatusCode.BadRequest,
                 "unexpected form fields rejected");
         }
+        // Exhaust the bounded audit without adding approved links. The form
+        // must disable propose-link rather than offering an action that 409s.
+        while (app.Services.GetRequiredService<SyntheticReviewWorkbench>()
+            .Read().Audit.Count < 80)
+        {
+            using var propose = await Send("propose-link");
+            Check((int)propose.StatusCode == 303, "link proposal before audit cap");
+            using var reject = await Send("reject");
+            Check((int)reject.StatusCode == 303, "rejection before audit cap");
+        }
+        using (var exhausted = await client.GetAsync("/demo/workbench"))
+        {
+            var exhaustedHtml = await exhausted.Content.ReadAsStringAsync();
+            Check(Regex.IsMatch(exhaustedHtml,
+                "name='action' value='propose-link' disabled"),
+                "link button disabled at audit cap");
+        }
+        using (var denied = await Send("propose-link"))
+            Check(denied.StatusCode == HttpStatusCode.Conflict,
+                "server rejects action at audit cap even when submitted manually");
         await app.StopAsync();
         Console.WriteLine("PASS in-process fictional HTTP editor CSRF, loopback, review and undo");
     }
