@@ -21,6 +21,7 @@ public sealed record ScopedFamilyGrant(
 public sealed class MembershipScopedAuthorization(
     Guid familyId, IEnumerable<ScopedFamilyGrant> trustedGrants) : IFamilyAuthorization
 {
+    public Guid FamilyId { get; } = familyId;
     private readonly ScopedFamilyGrant[] _grants =
         (trustedGrants ?? throw new ArgumentNullException(nameof(trustedGrants))).ToArray();
 
@@ -46,6 +47,6 @@ public sealed class MembershipScopedAuthorization(
 
     private IEnumerable<ScopedFamilyGrant> Active(Guid viewerId) =>
         _grants.Where(g => g.PrincipalId == viewerId &&
-                           g.FamilyId == familyId &&
+                           g.FamilyId == FamilyId &&
                            g.State == MembershipState.Active);
 }
