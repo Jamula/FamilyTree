@@ -96,6 +96,64 @@ internal static class ApiLoopbackIntegrationAssertions
                 await response.Content.ReadAsStringAsync() == "",
                 "private write remains closed for all verbs");
 
+        // Complete reserved-route verb/security matrix. A forged Cookie or
+        // "administrator" header must not cause even a different response
+        // shape until the real membership/field permissions are integrated.
+        var privatePaths = new[]
+        {
+            "/api/v1/people/hidden-person", "/api/v1/people/unknown-person",
+            "/api/v1/tree/hidden", "/api/v1/families/fake",
+            "/api/v1/memberships/active", "/api/v1/me", "/api/v1/admin",
+            "/api/v1/invitations", "/api/v1/profile-claims",
+            "/api/v1/search?name=Fictional", "/api/v1/relationships/hidden",
+            "/api/v1/media/private", "/api/v1/stories/private",
+            "/api/v1/gratitude", "/api/v1/exports/gedcom",
+            "/api/v1/imports", "/api/v1/ai", "/api/v1/mcp",
+            "/api/v1/private/unknown"
+        };
+        var methods = new[] {
+            HttpMethod.Get, HttpMethod.Post, HttpMethod.Put, HttpMethod.Patch,
+            HttpMethod.Delete, HttpMethod.Options, HttpMethod.Head
+        };
+        foreach (var privatePath in privatePaths)
+        {
+            foreach (var method in methods)
+            {
+                using var attempt = new HttpRequestMessage(method, privatePath);
+                attempt.Headers.TryAddWithoutValidation("Authorization",
+                    "Bearer forged.signed.token");
+                attempt.Headers.TryAddWithoutValidation("Cookie",
+                    "__Host-FamilyTreeSession=forged-cookie");
+                attempt.Headers.TryAddWithoutValidation("X-Forwarded-User",
+                    "fictional-administrator");
+                attempt.Headers.TryAddWithoutValidation("X-Family-ID", Guid.NewGuid().ToString());
+                if (method is not null && (method == HttpMethod.Post ||
+                    method == HttpMethod.Put || method == HttpMethod.Patch))
+                    attempt.Content = new StringContent("{\"person\":\"Fictional\"}");
+                using var blocked = await client.SendAsync(attempt);
+                Check(blocked.StatusCode == HttpStatusCode.NotImplemented &&
+                    await blocked.Content.ReadAsStringAsync() == "" &&
+                    blocked.Headers.CacheControl?.NoStore == true &&
+                    blocked.Headers.TryGetValues("X-Content-Type-Options",
+                        out var contentTypeOptions) &&
+                    contentTypeOptions.Contains("nosniff", StringComparer.Ordinal),
+                    $"private {method} {privatePath} must fail closed with no response body");
+            }
+        }
+        // Prefix matching must respect complete path segments, otherwise
+        // a new public endpoint with a similar prefix is unintentionally masked.
+        foreach (var publicUnknown in new[]
+        {
+            "/api/v1/peopleExtra", "/api/v1/treehouse",
+            "/api/v1/familiesPublic"
+        })
+        {
+            using var response = await client.GetAsync(publicUnknown);
+            Check(response.StatusCode == HttpStatusCode.NotFound,
+                $"path segment comparison must not block unrelated route: {publicUnknown}");
+        }
+        Console.WriteLine("PASS HTTP private route matrix: 133 verb/path pairs and malicious cookie/headers");
+
         using (var unknown = await client.GetAsync("/nothing-public-here"))
             Check(unknown.StatusCode == HttpStatusCode.NotFound,
                 "unknown public routes remain not found");
