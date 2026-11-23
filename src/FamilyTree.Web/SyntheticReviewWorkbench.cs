@@ -19,6 +19,7 @@ public sealed class SyntheticReviewWorkbench
     private ReviewedGenealogyStore.PendingEdit? _pending;
     private readonly Stack<long> _reversible = new();
     private int _guestSequence;
+    private long _version;
 
     public sealed record View(
         IReadOnlyList<Person> People,
@@ -26,7 +27,8 @@ public sealed class SyntheticReviewWorkbench
         IReadOnlyList<ReviewedGenealogyStore.AuditEntry> Audit,
         string? PendingKind,
         int RemainingGuests,
-        bool HasUndo);
+        bool HasUndo,
+        long Version);
 
     public SyntheticReviewWorkbench()
     {
@@ -40,13 +42,22 @@ public sealed class SyntheticReviewWorkbench
     {
         lock (_gate)
             return new(_store.People, _store.Relationships, _store.Audit,
-                _pending?.Kind.ToString(), 6 - _guestSequence, _reversible.Count > 0);
+                _pending?.Kind.ToString(), 6 - _guestSequence, _reversible.Count > 0, _version);
     }
 
-    public bool Execute(string? action)
+    public bool Execute(string? action, long? expectedVersion = null)
     {
         lock (_gate)
         {
+            if (expectedVersion is not null && expectedVersion != _version) return false;
+            var changed = ExecuteLocked(action);
+            if (changed) _version++;
+            return changed;
+        }
+    }
+
+    private bool ExecuteLocked(string? action)
+    {
             switch (action)
             {
                 case "propose-person":
@@ -94,7 +105,6 @@ public sealed class SyntheticReviewWorkbench
                 default:
                     return false;
             }
-        }
     }
 
     private void Seed(Person person)
