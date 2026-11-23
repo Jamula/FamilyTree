@@ -83,6 +83,16 @@ internal static class VerifiedOidcSessionAssertions
         CheckCallback(options, provider, new ClaimsIdentity([
             new Claim("sub", "first"), new Claim("sub", "second")
         ], "OIDC"), provider.Authority, false, "duplicate raw subjects");
+        CheckCallback(options, provider, new ClaimsIdentity([
+            new Claim("sub", "same"), new Claim(ClaimTypes.NameIdentifier, "same")
+        ], "OIDC"), provider.Authority, true, "matching raw and mapped subjects");
+        CheckCallback(options, provider, new ClaimsIdentity([
+            new Claim("sub", "alice"), new Claim(ClaimTypes.NameIdentifier, "bob")
+        ], "OIDC"), provider.Authority, false, "conflicting raw and mapped identities");
+        CheckCallback(options, provider, new ClaimsIdentity([
+            new Claim(ClaimTypes.NameIdentifier, "first"),
+            new Claim(ClaimTypes.NameIdentifier, "second")
+        ], "OIDC"), provider.Authority, false, "duplicate mapped subjects");
         CheckCallback(options, provider, new ClaimsIdentity(), provider.Authority,
             false, "anonymous identity");
         CheckCallback(options, provider, new ClaimsIdentity([
