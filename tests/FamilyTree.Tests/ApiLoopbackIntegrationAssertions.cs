@@ -35,7 +35,7 @@ internal static class ApiLoopbackIntegrationAssertions
         var baseAddress = new Uri(addresses!.Single(x =>
             x.StartsWith("http://127.0.0.1:", StringComparison.Ordinal)));
 
-        using var client = new HttpClient(new HttpClientHandler { UseProxy = false })
+        using var client = new HttpClient(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false })
         { BaseAddress = baseAddress, Timeout = TimeSpan.FromSeconds(10) };
 
         using (var health = await client.GetAsync("/health"))
