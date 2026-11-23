@@ -62,6 +62,7 @@ jobs:
         run: >-
           python3 scripts/report-component-coverage.py coverage.cobertura.xml
           --min-component Domain=90
+          --min-component Persistence=90
           --min-component Api=90
           --min-component Web=90
           --min-component Mcp=90

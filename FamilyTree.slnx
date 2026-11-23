@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/FamilyTree.Domain/FamilyTree.Domain.csproj" />
+    <Project Path="src/FamilyTree.Persistence/FamilyTree.Persistence.csproj" />
     <Project Path="src/FamilyTree.SyntheticDemo/FamilyTree.SyntheticDemo.csproj" />
     <Project Path="src/FamilyTree.Mcp/FamilyTree.Mcp.csproj" />
     <Project Path="src/FamilyTree.ServiceDefaults/FamilyTree.ServiceDefaults.csproj" />
