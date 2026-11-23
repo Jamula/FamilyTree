@@ -26,17 +26,26 @@ public static class FamilyTelemetry
     private static readonly Histogram<double> Duration =
         Meter.CreateHistogram<double>("familytree.http.duration", unit: "ms");
 
-    public static FamilyOperation ClassifyPath(string? path) => path switch
+    public static FamilyOperation ClassifyPath(string? path)
     {
-        "/health" => FamilyOperation.Health,
-        "/api/v1/capabilities" => FamilyOperation.Capabilities,
-        "/api/v1/people" or "/api/v1/tree" => FamilyOperation.Genealogy,
-        _ => FamilyOperation.Other
-    };
+        var route = (path ?? string.Empty).TrimEnd('/').ToLowerInvariant();
+        return route switch
+        {
+            "/health" => FamilyOperation.Health,
+            "/api/v1/capabilities" => FamilyOperation.Capabilities,
+            "/api/v1/people" or "/api/v1/tree" => FamilyOperation.Genealogy,
+            _ => FamilyOperation.Other
+        };
+    }
 
     public static Activity? Start(FamilyOperation operation)
     {
         // Normalized operation labels only; path and user input are never attached.
+        // Fail closed for untrusted inbound baggage/tracestate: ActivitySource would
+        // inherit it and expose sensitive values before tags could be scrubbed.
+        var parent = Activity.Current;
+        if (parent is not null && (parent.Baggage.Any() || !string.IsNullOrEmpty(parent.TraceStateString)))
+            return null;
         var activity = ActivitySource.StartActivity("familytree.http", ActivityKind.Internal);
         activity?.SetTag("familytree.operation", ToLabel(operation));
         return activity;
