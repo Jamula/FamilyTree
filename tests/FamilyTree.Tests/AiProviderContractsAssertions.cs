@@ -11,6 +11,10 @@ internal static class AiProviderContractsAssertions
                 .GetResult() is null && provider.Calls == 0, "consent gate");
         Check(SyntheticProviderGate.TrySuggestAsync(provider,input,true,false).GetAwaiter()
                 .GetResult() is null && provider.Calls == 0, "permission gate");
+        Check(SyntheticProviderGate.TrySuggestAsync(provider,
+                new SyntheticSuggestionInput(null!, null!), true, true)
+                .GetAwaiter().GetResult() is null && provider.Calls == 0,
+                "null fields are denied without invoking provider");
         Check(SyntheticProviderGate.TrySuggestAsync(provider,input,true,true).GetAwaiter()
                 .GetResult()?.DraftText == "pending fictional suggestion" &&
                 provider.Calls == 1, "provider-neutral allowed draft");
