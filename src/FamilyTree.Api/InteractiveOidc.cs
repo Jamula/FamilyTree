@@ -20,54 +20,62 @@ public static class InteractiveOidc
     {
         var providers = ReadConfiguration(builder.Configuration);
         var auth = builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-            .AddCookie(options =>
-            {
-                options.Cookie.Name = "__Host-FamilyTreeSession";
-                options.Cookie.HttpOnly = true;
-                options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-                options.Cookie.SameSite = SameSiteMode.Lax;
-                options.Cookie.Path = "/";
-                options.SlidingExpiration = false;
-                options.ExpireTimeSpan = TimeSpan.FromHours(8);
-                options.Events.OnRedirectToLogin = context =>
-                {
-                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                    return Task.CompletedTask;
-                };
-                options.Events.OnRedirectToAccessDenied = context =>
-                {
-                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                    return Task.CompletedTask;
-                };
-            });
+            .AddCookie(ConfigureCookieOptions);
         builder.Services.AddAuthorization();
-
         foreach (var provider in providers)
         {
-            // Maintained ASP.NET Core auth middleware verifies OIDC discovery,
-            // signatures, issuer, audience, nonce, correlation and code+PKCE.
+            // Maintained ASP.NET Core OIDC middleware performs actual token validation.
             auth.AddOpenIdConnect(provider.Scheme, options =>
-            {
-                options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-                options.Authority = provider.Authority;
-                options.ClientId = provider.ClientId;
-                options.ClientSecret = provider.ClientSecret;
-                options.CallbackPath = provider.Callback;
-                options.ResponseType = "code";
-                options.UsePkce = true;
-                options.RequireHttpsMetadata = true;
-                options.SaveTokens = false;
-                options.TokenValidationParameters.ValidateIssuer = true;
-                options.TokenValidationParameters.ValidateAudience = true;
-                options.Events.OnRemoteFailure = context =>
-                {
-                    context.HandleResponse();
-                    context.Response.Redirect("/auth/error");
-                    return Task.CompletedTask;
-                };
-            });
+                ConfigureProviderOptions(options, provider));
         }
         return providers;
+    }
+
+    /// <summary>Pure configuration seam for negative-case unit tests.</summary>
+    public static void ConfigureCookieOptions(CookieAuthenticationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        options.Cookie.Name = "__Host-FamilyTreeSession";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.Path = "/";
+        options.SlidingExpiration = false;
+        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        options.Events.OnRedirectToLogin = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToAccessDenied = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        };
+    }
+
+    /// <summary>Provider config does not authenticate users on its own.</summary>
+    public static void ConfigureProviderOptions(OpenIdConnectOptions options, Provider provider)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(provider);
+        options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+        options.Authority = provider.Authority;
+        options.ClientId = provider.ClientId;
+        options.ClientSecret = provider.ClientSecret;
+        options.CallbackPath = provider.Callback;
+        options.ResponseType = "code";
+        options.UsePkce = true;
+        options.RequireHttpsMetadata = true;
+        options.SaveTokens = false;
+        options.TokenValidationParameters.ValidateIssuer = true;
+        options.TokenValidationParameters.ValidateAudience = true;
+        options.Events.OnRemoteFailure = context =>
+        {
+            context.HandleResponse();
+            context.Response.Redirect("/auth/error");
+            return Task.CompletedTask;
+        };
     }
 
     public static IReadOnlyList<Provider> ReadConfiguration(IConfiguration config)
