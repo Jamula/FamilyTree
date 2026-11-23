@@ -13,4 +13,4 @@ This is a pre-release foundation artifact. `0.1.0` cannot be published until eve
 - [ ] Published release links and SHA256 asset hashes are checked.
 - [ ] No real-data production deployment; authentication and server-side privacy gates are M1.
 
-Release milestones increase the **minor** field; material features/patches within the milestone advance **revision**. See [versioning](VERSIONING.md).
+Product version stays **0.1.0 until the M1 private-family MVP is accepted**. No milestone/feature/patch bump occurs beforehand. See [versioning](VERSIONING.md).
