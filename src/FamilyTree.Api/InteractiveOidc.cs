@@ -98,18 +98,25 @@ public static class InteractiveOidc
                 context.Fail("Verified OIDC identity required.");
                 return Task.CompletedTask;
             }
-            var subjectClaims = context.Principal.FindAll("sub").ToArray();
-            if (subjectClaims.Length == 0)
-                subjectClaims = context.Principal.FindAll(ClaimTypes.NameIdentifier).ToArray();
-            if (subjectClaims.Length != 1)
+            var rawSubjects = context.Principal.FindAll("sub").ToArray();
+            var mappedSubjects = context.Principal.FindAll(ClaimTypes.NameIdentifier).ToArray();
+            // Some handlers map sub into NameIdentifier. Never silently prefer
+            // one if both exist and disagree; that would bind another identity.
+            if (rawSubjects.Length > 1 || mappedSubjects.Length > 1 ||
+                (rawSubjects.Length == 0 && mappedSubjects.Length != 1) ||
+                (rawSubjects.Length == 1 && mappedSubjects.Length == 1 &&
+                 !string.Equals(rawSubjects[0].Value, mappedSubjects[0].Value,
+                     StringComparison.Ordinal)))
             {
                 context.Fail("Unique OIDC subject required.");
                 return Task.CompletedTask;
             }
+            var subject = rawSubjects.Length == 1
+                ? rawSubjects[0].Value : mappedSubjects[0].Value;
             try
             {
                 VerifiedOidcSession.Stamp(identity, provider,
-                    context.SecurityToken?.Issuer, subjectClaims[0].Value);
+                    context.SecurityToken?.Issuer, subject);
             }
             catch (SecurityException)
             {
