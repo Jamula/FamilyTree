@@ -56,6 +56,10 @@ def count(source):
                 if number < 1 or hits < 0:
                     raise ValueError("Invalid source line number or hit count")
                 key = (filename.replace("\\", "/"), number)
+                # Each C# class/lambda may have independent decision paths
+                # mapped to the same source line. Deduplicate line hits by
+                # file/line but branch counts by class/file/line.
+                branch_key = (cls.get("name", ""), *key)
                 observations[component][key] = (
                     observations[component].get(key, False) or hits > 0)
                 if line.get("branch", "false") == "true":
@@ -64,13 +68,13 @@ def count(source):
                         covered, total = map(int, match.groups())
                         if total < 1 or covered < 0 or covered > total:
                             raise ValueError("Invalid branch condition observation")
-                        previous = branch_counts[component].get(key)
+                        previous = branch_counts[component].get(branch_key)
                         if previous is None:
-                            branch_counts[component][key] = (covered, total)
+                            branch_counts[component][branch_key] = (covered, total)
                         elif previous[1] != total:
                             raise ValueError("Conflicting branch totals on source line")
                         else:
-                            branch_counts[component][key] = (max(covered, previous[0]), total)
+                            branch_counts[component][branch_key] = (max(covered, previous[0]), total)
     return observations, branch_counts
 
 
