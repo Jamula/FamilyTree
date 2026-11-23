@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail CI if a workflow introduces unapproved billable/cloud execution paths.
+"""Guard hosting at $0 and require review for new development-tool cost risks.
 
 This is a *source-control* guard, not a billing cap or a substitute for checking
 GitHub account invoices and third-party pricing. Does not access credentials.
@@ -24,7 +24,7 @@ for file in sorted(WORKFLOWS.glob("*.y*ml")):
             if not re.fullmatch(r"[^@\s]+@[0-9a-fA-F]{40}", reference):
                 errors.append(f"{file.relative_to(ROOT)}:{line_number}: action must use a verified full 40-character SHA")
             if re.search(r"/(?:upload-artifact|download-artifact|upload-code-coverage)@", reference, re.I):
-                errors.append(f"{file.relative_to(ROOT)}:{line_number}: cloud artifact/Code Quality upload requires cost approval")
+                errors.append(f"{file.relative_to(ROOT)}:{line_number}: new development artifact/Code Quality upload requires review of shared engineering budget")
         runner = re.search(r"^\s*runs-on:\s*(.*)", line)
         if runner and runner.group(1).strip(" '\"") != "ubuntu-latest":
             errors.append(f"{file.relative_to(ROOT)}:{line_number}: unsupported runner, must verify $0 first")
@@ -38,10 +38,10 @@ for file in sorted(WORKFLOWS.glob("*.y*ml")):
             errors.append(f"{file.relative_to(ROOT)}: deployment operation requires an explicit owner-approved plan")
 
 if errors:
-    print("COST GATE FAILED. New paid-service risk needs owner approval:")
+    print("WORKFLOW POLICY FAILED. Unapproved hosting or development-tool cost risk:")
     for error in errors:
         print(f" - {error}")
     sys.exit(1)
 
-print("PASS workflow source checks: SHA pins, standard free runners, no configured remote deployments.")
-print("NOTE: this does NOT prove an account has no current charges, overages or billable add-ons.")
+print("PASS workflow source checks: SHA pins, reviewed runners, no configured remote hosting deployments.")
+print("NOTE: development tool charges are shared engineering overhead, not FamilyTree hosting. This check does not read invoices or prove actual costs.")

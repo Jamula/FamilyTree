@@ -6,7 +6,7 @@ This is a pre-release foundation artifact. `0.1.0` cannot be published until eve
 - [ ] SHA-pinned required CI build/test, domain assertions and executable HTTP smoke checks pass on the release commit.
 - [ ] Dependency/security/license review is done; no known exposed secrets or actual genealogy records.
 - [ ] Verify SECURITY.md private vulnerability reporting is enabled/tested.
-- [ ] No external paid resources or uncontrolled cloud deployments; owner-approved $0 controls remain in effect.
+- [ ] **$0 incremental hosting costs**, no uncontrolled cloud deployments, and separate accounting for shared GitHub/development tooling. Shared engineering costs do not block M0 solely because they are nonzero.
 - [ ] Version and changelog match the tag, and release notes explicitly distinguish foundations from functional MVP.
 - [ ] Only synthetic test data is shipped; audit release archives.
 - [ ] Release tag is annotated, points to an authorized `main` commit and is pushed with owner approval.

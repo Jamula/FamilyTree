@@ -17,5 +17,5 @@ The codebase targets **.NET 11 GA**, selected in `global.json` and built by the 
 ## Private reporting
 The private security report entry point and enablement requirements are documented in SECURITY.md. An administrator must verify that GitHub Private Vulnerability Reporting is enabled before publicly hosting real family data.
 
-## No-cost operations
-Use standard public-repository CI runners only, no paid/large runners, no paid automated code-quality uploads, and no new cloud services without explicit project owner approval. Copilot review is allowed only under the owner's confirmed free arrangement.
+## Cost accounting
+**Hosting/production infrastructure must have $0 incremental charges** unless specifically authorized. GitHub Actions, Code Quality, Copilot and other engineering tools are development expenses shared across the projects using them, not hosting. Existing entitlements may be used; activate new paid licenses or AI-credit overages only after the owner approves the proposed incremental cost. See [Cost policy](COST_POLICY.md).
