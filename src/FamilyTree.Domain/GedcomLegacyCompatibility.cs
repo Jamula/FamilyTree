@@ -34,6 +34,7 @@ public static class GedcomLegacyCompatibility
         var individualIds = new HashSet<string>(StringComparer.Ordinal);
         var familyIds = new HashSet<string>(StringComparer.Ordinal);
         var links = new List<(string Tag, string Pointer)>();
+        var currentRecordKind = "";
 
         for (var i = 1; i < lines.Length; i++)
         {
@@ -51,6 +52,7 @@ public static class GedcomLegacyCompatibility
                      (record[1] == "TRLR" && i != lines.Length - 1)))
                     return Reject("Repeated GEDCOM boundary record");
                 inHeader = false;
+                currentRecordKind = record.Length == 3 ? record[2] : "";
                 if (record.Length == 3 && record[1].StartsWith('@'))
                 {
                     if (record[2] == "INDI") individualIds.Add(record[1]);
@@ -59,16 +61,18 @@ public static class GedcomLegacyCompatibility
             }
             if (!inHeader)
             {
-                if (line.StartsWith("1 ", StringComparison.Ordinal))
+                var entry = line.Split(' ', 3);
+                if (entry.Length > 1 &&
+                    entry[1] is ("FAMC" or "FAMS" or "HUSB" or "WIFE" or "CHIL"))
                 {
-                    var record = line.Split(' ', 3);
-                    if (record.Length > 1 &&
-                        record[1] is ("FAMC" or "FAMS" or "HUSB" or "WIFE" or "CHIL"))
-                    {
-                        if (record.Length != 3 || !Pointer.IsMatch(record[2]))
-                            return Reject("Malformed relationship pointer");
-                        links.Add((record[1], record[2]));
-                    }
+                    if (entry[0] != "1" || entry.Length != 3 ||
+                        !Pointer.IsMatch(entry[2]))
+                        return Reject("Malformed relationship pointer");
+                    var familyPointer = entry[1] is "FAMC" or "FAMS";
+                    if ((familyPointer && currentRecordKind != "INDI") ||
+                        (!familyPointer && currentRecordKind != "FAM"))
+                        return Reject("Relationship pointer in incorrect record");
+                    links.Add((entry[1], entry[2]));
                 }
                 continue;
             }
