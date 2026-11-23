@@ -44,3 +44,12 @@ Each case is evaluated under viewer, member, steward, administrator and unauthor
 - E2E: each gesture above with mouse, touch simulation, keyboard and screen reader checks.
 - Security: unauthorized IDs return indistinguishable errors; hidden graph nodes and links never cross boundaries.
 Current automated tests in this PR are *initial domain assertions*, not full coverage of this catalog.
+
+## M0 transport, security and gesture test additions
+- U34 (HTTP): anonymous GET `/health` responds 200 with status `ok`.
+- U35 (HTTP): unauthenticated GET `/api/v1/people` and `/api/v1/tree` return 501, not synthetic family records, while APIs are unimplemented.
+- U36 (Browser, keyboard): tab to every tree control, activate with Enter/Space, recenter without changing depth; no keyboard trap (planned M1).
+- U37 (Browser, mouse): click person and adjust two independent sliders; UI and authorized graph update (planned M1).
+- U38 (Browser, touch): tap node, pan and zoom without losing focus or branch privacy (planned M1).
+- U39 (Authorization): invisible relative remains absent in search, graph, counts, media links, export and telemetry (partially covered by domain-only tests).
+- U40 (Cost/CI): any mutable third-party action reference or remote deploy command fails workflow-source policy checks.
