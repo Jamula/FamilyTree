@@ -46,6 +46,29 @@ if __name__ == "__main__":
     assert "FamilyTree.Web: lines=NOT MEASURED" in output, output
     assert "branches=50.0% (2 conditions)" in output, output
     check(SAMPLE, 0, "--min-component", "Api=90")
+    components = ("Domain", "Api", "Web", "Mcp", "ServiceDefaults", "SyntheticDemo")
+    all_covered = '<coverage line-rate="1" branch-rate="1"><packages>' + "".join(
+        f'<package name="FamilyTree.{component}"><classes>'
+        f'<class filename="src/FamilyTree.{component}/Test.cs"><lines>'
+        '<line number="1" hits="1"/></lines></class></classes></package>'
+        for component in components
+    ) + '</packages></coverage>'
+    gates = [item for component in components
+             for item in ("--min-component", f"{component}=90")]
+    check(all_covered, 0, *gates)
+    # Each architecture gate must independently fail on missing coverage.
+    # A low Domain fixture alone cannot prove that the other gates work.
+    for missing in components:
+        package = (
+            f'<package name="FamilyTree.{missing}"><classes>'
+            f'<class filename="src/FamilyTree.{missing}/Test.cs"><lines>'
+            '<line number="1" hits="1"/></lines></class></classes></package>'
+        )
+        incomplete = all_covered.replace(package, "")
+        assert incomplete != all_covered, f"fixture missing {missing}"
+        output = check(incomplete, 1, *gates)
+        assert f"FamilyTree.{missing}" in output, output
+    check(SAMPLE, 1, *gates)
     check(SAMPLE, 1, "--min-component", "Domain=90")
     check(SAMPLE, 1, "--min-component", "Web=90")
     check(SAMPLE, 2, "--min-component", "Tests=90")
