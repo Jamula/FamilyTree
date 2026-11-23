@@ -17,6 +17,6 @@ public sealed class FieldPrivacyPolicy(Guid familyId, IEnumerable<FamilyFieldGra
     public bool CanRead(Guid principalId, Guid personId, ProfileField field) =>
         principalId != Guid.Empty && personId != Guid.Empty &&
         _grants.Any(g => g.PrincipalId == principalId &&
-            g.FamilyId == familyId && g.PersonId == personId &&
+            g.FamilyId == FamilyId && g.PersonId == personId &&
             g.State == MembershipState.Active && g.AllowedFields.Contains(field));
 }
