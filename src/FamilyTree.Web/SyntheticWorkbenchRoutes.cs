@@ -48,13 +48,18 @@ public static class SyntheticWorkbenchRoutes
                 return Results.BadRequest();
             }
             var form = await http.Request.ReadFormAsync(http.RequestAborted);
-            if (form.Files.Count != 0 || form.Count != 2 ||
+            if (form.Files.Count != 0 || form.Count != 3 ||
                 !form.TryGetValue("__RequestVerificationToken", out var formToken) ||
                 formToken.Count != 1 || string.IsNullOrWhiteSpace(formToken.ToString()) ||
                 !form.TryGetValue("action", out var rawAction) ||
                 rawAction.Count != 1)
                 return Results.BadRequest();
-            if (!state.Execute(rawAction.ToString()))
+            if (!form.TryGetValue("version", out var versionValue) ||
+                versionValue.Count != 1 ||
+                !long.TryParse(versionValue.ToString(), out var expectedVersion) ||
+                expectedVersion < 0)
+                return Results.BadRequest();
+            if (!state.Execute(rawAction.ToString(), expectedVersion))
                 return Results.Conflict();
             http.Response.Headers.CacheControl = "no-store";
             http.Response.Headers.Location = "/demo/workbench";
@@ -93,6 +98,8 @@ public static class SyntheticWorkbenchRoutes
         html.Append("<input type='hidden' name='__RequestVerificationToken' value='");
         html.Append(WebUtility.HtmlEncode(token ?? ""));
         html.Append("'>");
+        html.Append("<input type='hidden' name='version' value='");
+        html.Append(view.Version).Append("'>");
         FormAction("propose-person", "1. Propose invented person",
             view.PendingKind is not null || view.RemainingGuests == 0);
         FormAction("propose-link", "2. Propose friendship link",
