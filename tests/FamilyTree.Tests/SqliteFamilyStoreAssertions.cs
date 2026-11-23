@@ -24,6 +24,7 @@ internal static class SqliteFamilyStoreAssertions
         var unknown = Guid.NewGuid();
         var fictionalPerson = new Person(Guid.NewGuid(), "Fictional River Person");
         var pendingCipherProposal = Guid.Empty;
+        var unusedBeforeRevocation = Guid.Empty;
         try
         {
             Expect<ArgumentException>(() => new SqliteFamilyStore("relative.db", secret),
@@ -65,6 +66,8 @@ internal static class SqliteFamilyStoreAssertions
                 Expect<UnauthorizedAccessException>(() => store.AcceptInvitation(
                     family, unknown, invitation, DateTimeOffset.UtcNow),
                     "wrong invited principal");
+                unusedBeforeRevocation = store.IssueInvitation(family, admin, member,
+                    DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow);
                 store.AcceptInvitation(family, member, invitation, DateTimeOffset.UtcNow);
                 Expect<UnauthorizedAccessException>(() => store.AcceptInvitation(
                     family, member, invitation, DateTimeOffset.UtcNow),
@@ -78,6 +81,10 @@ internal static class SqliteFamilyStoreAssertions
                 Expect<UnauthorizedAccessException>(() => store.ApproveMember(
                     otherFamily, admin, member), "cross-family moderation denied");
                 store.ApproveMember(family, admin, member);
+                Expect<InvalidOperationException>(() => store.IssueInvitation(
+                    family, admin, member, DateTimeOffset.UtcNow.AddDays(1),
+                    DateTimeOffset.UtcNow),
+                    "active members cannot accumulate fresh invitation bypasses");
                 Expect<UnauthorizedAccessException>(() => store.ApproveMember(
                     family, admin, member), "membership approved only once");
                 var adminProposal = store.ProposePerson(family, admin,
@@ -173,6 +180,12 @@ internal static class SqliteFamilyStoreAssertions
                 Expect<UnauthorizedAccessException>(() => reopened.ReadPeople(
                     otherFamily, member), "persistent tenant isolation");
                 reopened.RevokeMember(family, admin, member);
+                Expect<UnauthorizedAccessException>(() => reopened.AcceptInvitation(
+                    family, member, unusedBeforeRevocation, DateTimeOffset.UtcNow),
+                    "offers issued before revocation cannot reactivate a former member");
+                Check(reopened.IssueInvitation(family, admin, member,
+                    DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow) != Guid.Empty,
+                    "fresh administrator invitation can begin a new opt-in cycle");
                 Expect<UnauthorizedAccessException>(() => reopened.ReadPeople(
                     family, member), "revocation immediately blocks records");
                 Expect<UnauthorizedAccessException>(() => reopened.RevokeMember(
