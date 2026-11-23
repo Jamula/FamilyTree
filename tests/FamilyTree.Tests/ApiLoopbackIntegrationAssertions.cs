@@ -1,5 +1,4 @@
 using System.Net;
-using System.Runtime.CompilerServices;
 using FamilyTree.Api;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -12,10 +11,7 @@ using Microsoft.Extensions.Hosting;
 
 internal static class ApiLoopbackIntegrationAssertions
 {
-    [ModuleInitializer]
-    internal static void Run() => RunAsync().GetAwaiter().GetResult();
-
-    private static async Task RunAsync()
+    internal static async Task RunAsync()
     {
         Expect<ArgumentNullException>(() => ApiApplication.Build(null!),
             "null API startup builder rejected");
