@@ -56,6 +56,18 @@ if __name__ == "__main__":
     gates = [item for component in components
              for item in ("--min-component", f"{component}=90")]
     check(all_covered, 0, *gates)
+    # Each architecture gate must independently fail on missing coverage.
+    # A low Domain fixture alone cannot prove that the other gates work.
+    for missing in components:
+        package = (
+            f'<package name="FamilyTree.{missing}"><classes>'
+            f'<class filename="src/FamilyTree.{missing}/Test.cs"><lines>'
+            '<line number="1" hits="1"/></lines></class></classes></package>'
+        )
+        incomplete = all_covered.replace(package, "")
+        assert incomplete != all_covered, f"fixture missing {missing}"
+        output = check(incomplete, 1, *gates)
+        assert f"FamilyTree.{missing}" in output, output
     check(SAMPLE, 1, *gates)
     check(SAMPLE, 1, "--min-component", "Domain=90")
     check(SAMPLE, 1, "--min-component", "Web=90")
