@@ -58,6 +58,13 @@ internal static class FictionalWorkbenchHttpAssertions
             Check(denied.StatusCode == HttpStatusCode.NotFound,
                 "non-loopback fictional workbench denied");
         }
+        using (var hosted = new HttpRequestMessage(HttpMethod.Get, "/demo/workbench"))
+        {
+            hosted.Headers.Host = "familytree.public.example";
+            using var denied = await client.SendAsync(hosted);
+            Check(denied.StatusCode == HttpStatusCode.NotFound,
+                "localhost proxy cannot expose the workbench under a public Host");
+        }
         using var first = await client.GetAsync("/demo/workbench");
         Check(first.StatusCode == HttpStatusCode.OK, "local workbench GET works");
         var html = await first.Content.ReadAsStringAsync();
