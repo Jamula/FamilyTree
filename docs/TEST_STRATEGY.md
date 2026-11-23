@@ -2,9 +2,10 @@
 
 ## Current measured source coverage
 
-CI instruments the real .NET 11 test process using Cobertura and reports
-both overall and **per-component line** coverage, excluding test files and
-compiler-generated source. The separate architectural gate requires at least
+CI instruments the real .NET 11 test process using Cobertura. The **overall**
+coverage is the instrumenter's root percentage and may include test code.
+The separately calculated **per-component** source-line coverage excludes
+test and generated files. The architectural gate requires at least
 **90% measured line coverage for each** of:
 `FamilyTree.Domain`, `FamilyTree.Api`, `FamilyTree.Web`,
 `FamilyTree.Mcp`, `FamilyTree.ServiceDefaults`, and
