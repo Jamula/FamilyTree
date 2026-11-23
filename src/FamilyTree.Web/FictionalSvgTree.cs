@@ -75,11 +75,12 @@ public static class FictionalSvgTree
 
         // Sibling branches may be inferred from two visible people sharing an
         // authorized parent link, even when depth hides the parent nodes.
-        foreach (var sibling in tree.InferredSiblingConnections)
+        foreach (var sibling in tree.InferredSiblingConnections.Where(sibling =>
+            positions.ContainsKey(sibling.FirstPersonId) &&
+            positions.ContainsKey(sibling.SecondPersonId)))
         {
-            if (!positions.TryGetValue(sibling.FirstPersonId, out var first) ||
-                !positions.TryGetValue(sibling.SecondPersonId, out var second))
-                continue;
+            var first = positions[sibling.FirstPersonId];
+            var second = positions[sibling.SecondPersonId];
             html.Append("<line x1='").Append(first.X + NodeWidth / 2)
                 .Append("' y1='").Append(first.Y + NodeHeight / 2)
                 .Append("' x2='").Append(second.X + NodeWidth / 2)
