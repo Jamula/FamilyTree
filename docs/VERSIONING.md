@@ -2,19 +2,13 @@
 
 The initial product version is **0.1.0**, independently of the .NET runtime version.
 
-The identifier uses `MAJOR.MINOR.REVISION`. This deliberately adapts SemVer's numeric form: **feature-level changes inside a milestone advance REVISION** rather than the conventional SemVer feature MINOR. Document this distinction when creating releases.
+The owner requires **the product version to remain exactly `0.1.0` until the Private Family MVP is accepted**. Every M0, M1 and early M2 feature, refactor, fix and test commit remains `0.1.0`; no `0.1.1` or `0.2.0` bump is authorized by merging an issue or PR.
 
-| Event | Example | Rule |
-|---|---|---|
-| M0 Foundation release approved | `0.1.0` | First release only after M0 gates |
-| Significant shippable functionality during M0 | `0.1.1`, `0.1.2` | Increment revision |
-| Bug or security correction | `0.1.3` | Increment revision |
-| M1 Private Family MVP complete | `0.2.0` | Increment minor, reset revision |
-| M2 Collaboration and AI complete | `0.3.0` | Increment minor, reset revision |
-| M3 Expansion complete | `0.4.0` | Increment minor, reset revision |
-| Stable 1.0 | `1.0.0` | Explicit future compatibility decision |
+After all M1 core issues #9–#13 pass their acceptance tests, the owner can make a separate, explicit version decision. That decision may choose `0.2.0` or another version; it is **not automatic**.
 
-Do not release a new minor for every PR. The version on `main` is the **next planned release version** until an approved tag is created.
+The `scripts/check-version-freeze.py` CI check enforces VERSION, Directory.Build.props Version, AssemblyVersion and FileVersion. To change the policy after MVP, amend that guard and the changelog in a reviewed PR. The .NET SDK framework version is independent of the product version.
+
+The version on `main` stays `0.1.0` until the owner approves a post-MVP change.
 
 ## Files and tags
 - `VERSION`: release version.

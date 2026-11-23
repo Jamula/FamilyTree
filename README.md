@@ -25,6 +25,6 @@ M0 engineering foundations are merged: .NET 11 API/web, SHA-pinned CI and smoke 
 
 ## Development baseline
 - **Framework:** .NET 11 GA (`net11.0`), SDK `11.0.100` or compatible .NET 11 servicing patch.
-- **Product version:** independent of framework; the intended initial product release is `0.1.0`.
+- **Product version:** independent of framework; the version is **fixed at `0.1.0` until the private-family MVP is accepted**. The next version requires an explicit decision.
 - **Cost policy:** $0 incremental **hosting/production infrastructure**. GitHub and other development tooling is shared engineering overhead allocated across active projects; new paid services/overages require specific owner approval. See [Cost policy](docs/COST_POLICY.md).
 - **Local setup:** [Development instructions](docs/DEVELOPMENT.md).
