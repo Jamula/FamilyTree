@@ -1,0 +1,94 @@
+using System.Security.Claims;
+using FamilyTree.Api;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+
+internal static class VerifiedCookieHandlerAssertions
+{
+    internal static async Task RunAsync()
+    {
+        var provider = new InteractiveOidc.Provider("google", "GoogleOidc",
+            "https://accounts.google.com", "synthetic-client", "synthetic-secret",
+            "/auth/callback/google");
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDataProtection();
+        services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+            .AddCookie(InteractiveOidc.ConfigureCookieOptions);
+        using var serviceProvider = services.BuildServiceProvider();
+
+        DefaultHttpContext Context(string? cookie = null)
+        {
+            var c = new DefaultHttpContext { RequestServices = serviceProvider };
+            c.Request.Scheme = "https";
+            c.Request.Host = new HostString("localhost");
+            c.Response.Body = new MemoryStream();
+            if (!string.IsNullOrEmpty(cookie))
+                c.Request.Headers.Cookie = cookie;
+            return c;
+        }
+
+        async Task<string> SignInAsync(bool expired)
+        {
+            var context = Context();
+            var identity = new ClaimsIdentity([
+                new Claim(ClaimTypes.NameIdentifier, "fictional-oidc-sub")
+            ], CookieAuthenticationDefaults.AuthenticationScheme);
+            VerifiedOidcSession.Stamp(identity, provider,
+                provider.Authority, "fictional-oidc-sub");
+            var properties = new AuthenticationProperties
+            {
+                IssuedUtc = expired
+                    ? DateTimeOffset.UtcNow.AddHours(-2)
+                    : DateTimeOffset.UtcNow,
+                ExpiresUtc = expired
+                    ? DateTimeOffset.UtcNow.AddHours(-1)
+                    : DateTimeOffset.UtcNow.AddHours(1)
+            };
+            await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+                new ClaimsPrincipal(identity), properties);
+            var header = context.Response.Headers.SetCookie.ToString();
+            var value = header.Split(';')[0];
+            Check(value.StartsWith("__Host-FamilyTreeSession=", StringComparison.Ordinal),
+                "protected __Host cookie set");
+            Check(header.Contains("secure", StringComparison.OrdinalIgnoreCase),
+                "cookie must have Secure attribute");
+            Check(header.Contains("httponly", StringComparison.OrdinalIgnoreCase),
+                "cookie must have HttpOnly attribute");
+            return value;
+        }
+
+        var goodCookie = await SignInAsync(expired: false);
+        Check(await VerifiedOidcSession.ReadAsync(Context(goodCookie), [provider]),
+            "real ASP.NET cookie handler accepts cryptographically protected ticket");
+        Check(!await VerifiedOidcSession.ReadAsync(Context(goodCookie), []),
+            "deconfigured provider invalidates even a still-valid cookie");
+        var modified = goodCookie[..(goodCookie.Length / 2)] + "INVALID" +
+            goodCookie[(goodCookie.Length / 2)..];
+        Check(!await VerifiedOidcSession.ReadAsync(Context(modified), [provider]),
+            "modified encrypted ticket fails authentication");
+        var expiredCookie = await SignInAsync(expired: true);
+        Check(!await VerifiedOidcSession.ReadAsync(Context(expiredCookie), [provider]),
+            "expired signed ticket denied");
+        var spoofed = Context();
+        spoofed.Request.Headers.Authorization = "Bearer synthetically-forged";
+        spoofed.Request.Headers["X-Family-Admin"] = "true";
+        var identityInjected = new ClaimsIdentity([
+            new Claim("familytree:trusted:validated", "true"),
+            new Claim("familytree:trusted:provider", "google"),
+            new Claim("familytree:trusted:issuer", provider.Authority),
+            new Claim("familytree:trusted:subject", "fake-principal")
+        ], "Synthetic");
+        spoofed.User = new ClaimsPrincipal(identityInjected);
+        Check(!await VerifiedOidcSession.ReadAsync(spoofed, [provider]),
+            "request headers or injected User cannot bypass a missing cookie");
+        Console.WriteLine("PASS real cookie handler: verified, expired, tampered, removed-provider, and forged identity");
+    }
+
+    private static void Check(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
+    }
+}
