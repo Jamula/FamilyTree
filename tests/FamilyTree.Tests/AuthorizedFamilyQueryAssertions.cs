@@ -26,7 +26,13 @@ internal static class AuthorizedFamilyQueryAssertions
             new FamilyFieldGrant(viewer, memberFamily, publicMember.Id,
                 MembershipState.Active, new HashSet<ProfileField> { ProfileField.DisplayName }),
             new FamilyFieldGrant(viewer, memberFamily, noFieldGrant.Id,
-                MembershipState.Active, new HashSet<ProfileField> { ProfileField.Contact })
+                MembershipState.Active, new HashSet<ProfileField> { ProfileField.Contact }),
+            // Explicit field grants must not rescue a person outside this family's
+            // membership scope: authorization and field checks are independent.
+            new FamilyFieldGrant(viewer, memberFamily, hiddenMember.Id,
+                MembershipState.Active, new HashSet<ProfileField> { ProfileField.DisplayName }),
+            new FamilyFieldGrant(viewer, memberFamily, otherTenant.Id,
+                MembershipState.Active, new HashSet<ProfileField> { ProfileField.DisplayName })
         });
         var auth = new MembershipScopedAuthorization(memberFamily, grants);
         var result = AuthorizedFamilyQuery.SearchAsync(viewer, people, "Ada", auth, fields)
@@ -36,6 +42,15 @@ internal static class AuthorizedFamilyQueryAssertions
         Check(typeof(AuthorizedPersonSummary).GetProperties().Select(p => p.Name)
             .ToHashSet().SetEquals(new[] { "PersonId", "DisplayName" }),
             "search output must exclude sensitive fields");
+        var splitFamilyFields = new FieldPrivacyPolicy(otherFamily, new[] {
+            new FamilyFieldGrant(viewer, otherFamily, otherTenant.Id,
+                MembershipState.Active, new HashSet<ProfileField> { ProfileField.DisplayName })
+        });
+        Check(AuthorizedFamilyQuery.SearchAsync(viewer, people, "Ada", auth,
+              splitFamilyFields).GetAwaiter().GetResult().Count == 0 &&
+              AuthorizedFamilyQuery.GetAsync(viewer, otherTenant.Id, people, auth,
+              splitFamilyFields).GetAwaiter().GetResult() is null,
+              "cannot combine membership and field grants from different families");
         Check(AuthorizedFamilyQuery.SearchAsync(Guid.NewGuid(), people, "Ada", auth, fields)
             .GetAwaiter().GetResult().Count == 0, "unknown principal denied");
         Check(AuthorizedFamilyQuery.GetAsync(viewer, hiddenMember.Id, people, auth, fields)
