@@ -17,7 +17,7 @@ public static class DemoProposalQueue
             if (Drafts.Count >= MaxDrafts)
                 throw new InvalidOperationException("Draft queue is full; restart to clear the demo.");
             var draft = new DemoProposal(Guid.NewGuid(), kind, summary, "pending",
-                persisted: false, approved: false);
+                Persisted: false, Approved: false);
             Drafts.Add(draft);
             return draft;
         }
