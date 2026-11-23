@@ -39,6 +39,18 @@ internal static class FictionalSvgTreeAssertions
             .Select(match => match.Groups[1].Value).Distinct().ToArray();
         Check(independentCurves.Length == 2,
             "parallel friend and parent relationships must not visually overlap");
+        var reversedLinks = tree with
+        {
+            Relationships = [
+                Relationship.Create(center.Id, child.Id, RelationKind.Friend),
+                Relationship.Create(child.Id, center.Id, RelationKind.Friend)
+            ]
+        };
+        var reversedHtml = FictionalSvgTree.Render(reversedLinks, options);
+        var reversedPaths = Regex.Matches(reversedHtml, @"<path d='([^']+)'")
+            .Select(match => match.Groups[1].Value).Distinct().ToArray();
+        Check(reversedPaths.Length == 2,
+            "oppositely directed connections must have distinct paths");
         Check(html.Contains("Parent connection", StringComparison.Ordinal) &&
               html.Contains("Friend connection", StringComparison.Ordinal),
             "relationship SVG paths have accessible typed descriptions");
