@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using FamilyTree.Domain;
 using FamilyTree.Persistence;
+using Microsoft.Data.Sqlite;
 
 internal static class SqliteRelationshipAssertions
 {
@@ -128,6 +129,32 @@ internal static class SqliteRelationshipAssertions
                     "undo removes only its own reviewed link");
                 Expect<InvalidOperationException>(() => store.UndoRelationship(
                     family, admin, undoProposal), "undo replay denied");
+                var damaged = Relationship.Create(personA.Id, personB.Id,
+                    RelationKind.Neighbor, "fictional-damaged-review");
+                var corruptProposal = store.ProposeRelationship(family, actor, damaged);
+                using (var conn = new SqliteConnection(
+                    new SqliteConnectionStringBuilder {
+                        DataSource = database, Pooling = false }.ToString()))
+                {
+                    conn.Open();
+                    using var update = conn.CreateCommand();
+                    update.CommandText = """
+                        UPDATE relationship_proposals SET encrypted_label=X'01'
+                        WHERE id=$id;
+                        """;
+                    update.Parameters.AddWithValue("$id", corruptProposal.ToString("D"));
+                    Check(update.ExecuteNonQuery() == 1, "pending ciphertext tampered");
+                }
+                Check(store.ListPendingRelationships(family, admin).Any(x =>
+                    x.ProposalId == corruptProposal && x.ContentUnreadable &&
+                    x.Relationship is null),
+                    "moderator sees safe unusable proposal ID without private content");
+                Expect<InvalidDataException>(() => store.ReviewRelationship(
+                    family, admin, corruptProposal, true),
+                    "corrupt ciphertext cannot become approved");
+                store.ReviewRelationship(family, admin, corruptProposal, false);
+                Check(store.ReadRelationships(family, admin).Count == 2,
+                    "rejecting bad proposal preserves healthy approved links");
                 Expect<UnauthorizedAccessException>(() => store.UndoRelationship(
                     family, actor, Guid.NewGuid()), "unauthorized undo denied");
                 store.RevokeMember(family, admin, actor);
