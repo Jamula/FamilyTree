@@ -24,6 +24,15 @@ internal static class MemberLifecycleAssertions
         Deny(() => pending.Approve(invited,family,true), "self approval");
         Deny(() => pending.Approve(admin,Guid.NewGuid(),true), "cross-family review");
         Deny(() => pending.Approve(admin,family,false), "unprivileged review");
+        var withdrawn = pending.Leave(invited,family,false);
+        var rejected = pending.Leave(admin,family,true);
+        Check(withdrawn.State == MembershipState.Left &&
+              rejected.State == MembershipState.Left,
+              "applicant withdrawal and administrator rejection are terminal");
+        Deny(() => withdrawn.Approve(admin,family,true),
+            "withdrawn request cannot subsequently be approved");
+        Deny(() => rejected.Approve(admin,family,true),
+            "rejected request cannot be re-approved");
         var active = pending.Approve(admin,family,true);
         Check(active.State == MembershipState.Active && pending.State == MembershipState.PendingApproval,
             "approval immutable");
@@ -35,6 +44,10 @@ internal static class MemberLifecycleAssertions
         Deny(() => escalated.Resume(invited), "administrative suspension cannot be evaded");
         var suspended = active.Pause(admin,family,true);
         Deny(() => suspended.Resume(invited), "admin suspension cannot self-resume");
+        Deny(() => suspended.Approve(invited,family,true),
+            "self re-approval forbidden");
+        Check(suspended.Approve(admin,family,true).State == MembershipState.Active,
+            "independent authorized admin may restore suspended member");
         var left = suspended.Leave(admin,family,true);
         Check(left.State == MembershipState.Left, "admin revocation");
         Deny(() => left.Approve(admin,family,true), "left membership cannot reactivate");
