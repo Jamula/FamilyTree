@@ -245,29 +245,62 @@ public sealed partial class SqliteFamilyStore
         using var con = Open();
         using var tx = con.BeginTransaction();
         RequireMember(con, tx, familyId, moderatorId, administrator: true);
-        string relationId;
+        string relationId, from, to, kind;
+        byte[] authenticatedEnvelope;
         using (var cmd = Cmd(con, tx, """
-            SELECT relation_id, submitter FROM relationship_proposals
-            WHERE family_id=$f AND id=$id AND state='Approved';
+            SELECT relation_id,from_id,to_id,kind,encrypted_label,submitter
+            FROM relationship_proposals WHERE family_id=$f AND id=$id
+                AND state='Approved';
             """, ("$f", familyId.ToString("D")),
             ("$id", proposalId.ToString("D"))))
         using (var reader = cmd.ExecuteReader())
         {
             if (!reader.Read())
                 throw new InvalidOperationException("Approved relationship unavailable.");
-            if (reader.GetString(1) == moderatorId.ToString("D"))
+            if (reader.GetString(5) == moderatorId.ToString("D"))
                 throw new UnauthorizedAccessException("Independent moderator required.");
             relationId = reader.GetString(0);
+            from = reader.GetString(1);
+            to = reader.GetString(2);
+            kind = reader.GetString(3);
+            authenticatedEnvelope = reader.GetFieldValue<byte[]>(4);
         }
+        // The proposal ID alone never authorizes deletion. Authenticate the
+        // encrypted proposal against its relation ID and endpoint/type AAD.
+        // Then validate the actual published row in this same transaction.
+        var proposed = MaterializeRelationship(
+            familyId, relationId, from, to, kind, authenticatedEnvelope);
+        Relationship published;
+        byte[] publishedEnvelope;
+        using (var cmd = Cmd(con, tx, """
+            SELECT from_id,to_id,kind,encrypted_label FROM relationships
+            WHERE family_id=$f AND id=$id;
+            """, ("$f", familyId.ToString("D")),
+            ("$id", relationId)))
+        using (var reader = cmd.ExecuteReader())
+        {
+            if (!reader.Read())
+                throw new InvalidOperationException("Approved link unavailable.");
+            publishedEnvelope = reader.GetFieldValue<byte[]>(3);
+            published = MaterializeRelationship(familyId,
+                relationId, reader.GetString(0), reader.GetString(1),
+                reader.GetString(2), publishedEnvelope);
+        }
+        if (published != proposed ||
+            !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                authenticatedEnvelope, publishedEnvelope))
+            throw new InvalidDataException("Approved relationship metadata was changed.");
+
         if (Exec(con, tx, """
             DELETE FROM relationships WHERE family_id=$f AND id=$id;
             """, ("$f", familyId.ToString("D")), ("$id", relationId)) != 1)
             throw new InvalidOperationException("Approved link unavailable.");
-        Exec(con, tx, """
+        if (Exec(con, tx, """
             UPDATE relationship_proposals SET state='Undone' WHERE family_id=$f
             AND id=$id AND state='Approved';
             """, ("$f", familyId.ToString("D")),
-            ("$id", proposalId.ToString("D")));
+            ("$id", proposalId.ToString("D"))) != 1)
+            throw new InvalidOperationException("Approved proposal unavailable.");
         Audit(con, tx, familyId, proposalId, moderatorId,
             "relationship-undone");
         tx.Commit();
