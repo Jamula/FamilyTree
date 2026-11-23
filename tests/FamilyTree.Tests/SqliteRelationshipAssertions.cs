@@ -25,6 +25,7 @@ internal static class SqliteRelationshipAssertions
             "synthetic-neighbor-private");
         var edgeB = Relationship.Create(personA.Id, personB.Id, RelationKind.Mentor,
             "synthetic-mentor-private");
+        var originalProposal = Guid.Empty;
         try
         {
             using (var store = new SqliteFamilyStore(database, key))
@@ -66,6 +67,7 @@ internal static class SqliteRelationshipAssertions
                     "missing approved endpoint denied");
 
                 var pA = store.ProposeRelationship(family, actor, edgeA);
+                originalProposal = pA;
                 var pB = store.ProposeRelationship(family, actor, edgeB);
                 Check(store.ReadRelationships(family, actor).Count == 0,
                     "pending relationships hidden");
@@ -114,6 +116,36 @@ internal static class SqliteRelationshipAssertions
             {
                 Check(store.ReadRelationships(family, actor).Count == 2,
                     "approved links survive restart");
+                var auditBeforeTamper = store.CountAudit(family, admin);
+                using (var tamperProposal = new SqliteConnection(
+                    new SqliteConnectionStringBuilder {
+                        DataSource = database, Pooling = false }.ToString()))
+                {
+                    tamperProposal.Open();
+                    using var change = tamperProposal.CreateCommand();
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET relation_id=$other
+                        WHERE family_id=$f AND id=$id;
+                        """;
+                    change.Parameters.AddWithValue("$other", edgeB.Id.ToString("D"));
+                    change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$id", originalProposal.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1,
+                        "tamper only the approved proposal's relation ID");
+                    Expect<InvalidDataException>(() => store.UndoRelationship(
+                        family, admin, originalProposal),
+                        "forged undo target cannot delete an unrelated approved link");
+                    Check(store.ReadRelationships(family, admin).Count == 2 &&
+                          store.CountAudit(family, admin) == auditBeforeTamper,
+                        "tampered undo neither alters graph nor appends audit");
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET relation_id=$original
+                        WHERE family_id=$f AND id=$id;
+                        """;
+                    change.Parameters.AddWithValue("$original", edgeA.Id.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1,
+                        "restore authenticated proposal mapping");
+                }
                 var undoInbox = store.ListApprovedRelationshipsForUndo(family, admin);
                 Check(undoInbox.Count == 2 &&
                     undoInbox.All(x => x.Relationship is not null &&
