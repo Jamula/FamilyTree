@@ -47,6 +47,6 @@ public sealed class MembershipScopedAuthorization(
 
     private IEnumerable<ScopedFamilyGrant> Active(Guid viewerId) =>
         _grants.Where(g => g.PrincipalId == viewerId &&
-                           g.FamilyId == familyId &&
+                           g.FamilyId == FamilyId &&
                            g.State == MembershipState.Active);
 }
