@@ -59,3 +59,9 @@ code="$(curl --silent --max-time 5 -X POST -o "$TMP/response.txt" -w '%{http_cod
 [[ "$code" == 501 ]] || { echo "FAIL: unauthorized private write"; exit 1; }
 [[ ! -s "$TMP/response.txt" ]] || { echo "FAIL: unauthorized write echoed body"; exit 1; }
 printf 'PASS HTTP smoke: fail-closed private routes, identity spoofing and empty responses\n'
+
+# OIDC is default-off without configured identity-provider secrets.
+[[ "$(status "$API/auth/providers")" == 200 ]] || { echo "FAIL: OIDC providers endpoint"; exit 1; }
+grep -q '"membershipAuthorization":false' "$TMP/response.txt" || { echo "FAIL: OIDC login cannot grant family access"; exit 1; }
+[[ "$(status "$API/auth/session")" == 401 ]] || { echo "FAIL: anonymous session"; exit 1; }
+[[ "$(status "$API/auth/login/google")" == 404 ]] || { echo "FAIL: unconfigured provider must not issue login challenge"; exit 1; }
