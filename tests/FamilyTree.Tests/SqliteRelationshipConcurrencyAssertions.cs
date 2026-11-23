@@ -132,7 +132,7 @@ internal static class SqliteRelationshipConcurrencyAssertions
         }
     }
 
-    private static bool ExpectedConflict(Exception error) =>
+    private static bool ExpectedConflict(Exception? error) =>
         error is InvalidOperationException ||
         error is SqliteException sql && sql.SqliteErrorCode is 5 or 6;
 
