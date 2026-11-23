@@ -57,7 +57,8 @@ public sealed partial class SqliteFamilyStore
             ("$from", edge.FromPersonId.ToString("D")),
             ("$to", edge.ToPersonId.ToString("D")),
             ("$kind", edge.Kind.ToString()),
-            ("$label", Encrypt(familyId, edge.Id, edge.Label ?? "")),
+            ("$label", Encrypt(familyId, edge.Id, edge.Label ?? "",
+                RelationshipContext(edge.FromPersonId, edge.ToPersonId, edge.Kind))),
             ("$submitter", authorId.ToString("D")));
         tx.Commit();
         return proposalId;
@@ -73,9 +74,11 @@ public sealed partial class SqliteFamilyStore
         var results = new List<PendingRelationshipReview>();
         using (var cmd = Cmd(con, tx, """
             SELECT id,relation_id,from_id,to_id,kind,encrypted_label,submitter
-            FROM relationship_proposals WHERE family_id=$f AND state='Pending'
+            FROM relationship_proposals
+            WHERE family_id=$f AND state='Pending' AND submitter<>$moderator
             ORDER BY id LIMIT 100;
-            """, ("$f", familyId.ToString("D"))))
+            """, ("$f", familyId.ToString("D")),
+            ("$moderator", moderatorId.ToString("D"))))
         using (var reader = cmd.ExecuteReader())
             while (reader.Read())
             {
@@ -223,6 +226,12 @@ public sealed partial class SqliteFamilyStore
         tx.Commit();
     }
 
+    private static byte[] RelationshipContext(Guid from, Guid to, RelationKind kind)
+        => [.."familytree.relationship.v1"u8.ToArray(),
+            ..from.ToByteArray(), ..to.ToByteArray(),
+            ..System.Text.Encoding.ASCII.GetBytes(
+                ((int)kind).ToString(System.Globalization.CultureInfo.InvariantCulture))];
+
     private Relationship MaterializeRelationship(Guid familyId, string idText,
         string fromText, string toText, string kind, byte[] envelope)
     {
@@ -234,7 +243,8 @@ public sealed partial class SqliteFamilyStore
             !Enum.TryParse<RelationKind>(kind, ignoreCase: false, out var relationKind) ||
             !Enum.IsDefined(relationKind))
             throw new InvalidDataException("Relationship record invalid.");
-        var label = Decrypt(familyId, id, envelope);
+        var label = Decrypt(familyId, id, envelope,
+            RelationshipContext(from, to, relationKind));
         if (label.Length > 200 || label.Any(char.IsControl) ||
             (relationKind == RelationKind.Other && string.IsNullOrWhiteSpace(label)))
             throw new InvalidDataException("Relationship record invalid.");
