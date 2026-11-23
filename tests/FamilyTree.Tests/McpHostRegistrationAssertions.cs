@@ -33,9 +33,9 @@ internal static class McpHostRegistrationAssertions
             "exactly one stdio transport factory, not HTTP/stream, must be registered");
         var hosted = builder.Services.Where(item =>
             item.ServiceType == typeof(IHostedService)).ToArray();
-        Check(hosted.Any(item => item.ImplementationType?.Name ==
-              "SingleSessionMcpServerHostedService"),
-            "MCP must use the SDK single-session stdio hosted service");
+        Check(hosted.Length == 1 && hosted[0].ImplementationType?.Name ==
+              "SingleSessionMcpServerHostedService",
+            "stdio MCP must register exactly one approved hosted service");
         Check(!hosted.Any(item =>
                 item.ImplementationType?.FullName?.Contains("WebHost",
                     StringComparison.OrdinalIgnoreCase) == true) &&
