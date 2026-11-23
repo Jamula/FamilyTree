@@ -223,11 +223,16 @@ public sealed class SqliteFamilyStore : IDisposable
             living = reader.GetInt64(3);
         }
         if (approve)
+        {
+            // The review boundary must authenticate ciphertext before it can
+            // enter the approved graph. A wrong-key or tampered proposal stays pending.
+            _ = Decrypt(familyId, personId, sealedName);
             Exec(con, tx, """
                 INSERT INTO people(family_id,id,encrypted_name,living)
                 VALUES($f,$p,$name,$living);
                 """, ("$f", familyId.ToString("D")), ("$p", personId.ToString("D")),
                 ("$name", sealedName), ("$living", living));
+        }
         if (Exec(con, tx, """
             UPDATE person_proposals SET state=$stage,reviewer=$reviewer
             WHERE id=$id AND family_id=$f AND state='Pending';
