@@ -59,6 +59,40 @@ internal static class TelemetryAssertions
         {
             // Remote telemetry is rejected before a provider can be configured.
         }
+        // Verify every emitted workflow label is a safe, bounded enum value.
+        var workflowLabels = new List<string>();
+        using (var metricListener = new System.Diagnostics.Metrics.MeterListener())
+        {
+            metricListener.InstrumentPublished = (instrument, receiver) =>
+            {
+                if (instrument.Meter.Name == FamilyTelemetry.SourceName)
+                    receiver.EnableMeasurementEvents(instrument);
+            };
+            metricListener.SetMeasurementEventCallback<long>((instrument, measurement, tags, state) =>
+            {
+                if (instrument.Name == "familytree.workflow.operations")
+                    workflowLabels.Add(string.Join("|", tags.ToArray()
+                        .Select(tag => tag.Key + ":" + tag.Value)));
+            });
+            metricListener.Start();
+            FamilyTelemetry.RecordWorkflow(FamilyWorkload.GedcomImport, FamilyOutcome.Denied,
+                TimeSpan.FromMilliseconds(3));
+            FamilyTelemetry.RecordAiTokens(17);
+        }
+        Ensure(workflowLabels.Count == 1 &&
+               workflowLabels[0].Contains("familytree.workload:gedcom_import", StringComparison.Ordinal) &&
+               workflowLabels[0].Contains("familytree.outcome:denied", StringComparison.Ordinal),
+            "workflow labels must be the approved bounded vocabulary");
+        Ensure(workflowLabels.All(label => !label.Contains("@", StringComparison.Ordinal)
+            && !label.Contains("Sample Person", StringComparison.Ordinal)),
+            "workflow metrics cannot expose identities or personal text");
+        try
+        {
+            FamilyTelemetry.RecordAiTokens(-1);
+            throw new InvalidOperationException("negative token usage accepted");
+        }
+        catch (ArgumentOutOfRangeException) { }
+
         Console.WriteLine("PASS telemetry privacy, default-off and remote-export guard assertions");
     }
 
