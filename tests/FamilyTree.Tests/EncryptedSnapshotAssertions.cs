@@ -7,7 +7,7 @@ internal static class EncryptedSnapshotAssertions
     [ModuleInitializer]
     internal static void Run()
     {
-        var path=Path.Combine(Path.GetTempPath(),"ft-synthetic-"+Guid.NewGuid().ToString("N"),
+        var path=Path.Join(Path.GetTempPath(),"ft-synthetic-"+Guid.NewGuid().ToString("N"),
             "local.snapshot");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         try
@@ -19,9 +19,10 @@ internal static class EncryptedSnapshotAssertions
             var data=new LocalFamilySnapshot(Guid.NewGuid(),7,[parent,child],[relation]);
             using(var store=new EncryptedLocalSnapshotStore(path,key))
             {
-                try { store.LoadAsync().GetAwaiter().GetResult();
-                    throw new Exception("missing file accepted"); }
-                catch(FileNotFoundException) { }
+                var missingFileRejected = false;
+                try { store.LoadAsync().GetAwaiter().GetResult(); }
+                catch(FileNotFoundException) { missingFileRejected = true; }
+                Check(missingFileRejected, "missing local snapshot rejected");
                 store.SaveAsync(data).GetAwaiter().GetResult();
                 var ciphertext=File.ReadAllBytes(path);
                 Check(!System.Text.Encoding.UTF8.GetString(ciphertext)
