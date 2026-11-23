@@ -50,6 +50,14 @@ internal static class EncryptedSnapshotAssertions
                     data with { Relationships=[Relationship.Create(parent.Id,Guid.NewGuid(),
                         RelationKind.Parent)] }).GetAwaiter().GetResult(),
                     "orphan link rejected");
+                Expect<InvalidDataException>(()=>store.SaveAsync(
+                    data with { Relationships=[new Relationship(Guid.NewGuid(),
+                        parent.Id,child.Id,RelationKind.Other)] }).GetAwaiter().GetResult(),
+                    "unlabeled custom relationship rejected");
+                Expect<InvalidDataException>(()=>store.SaveAsync(
+                    data with { Relationships=[new Relationship(Guid.NewGuid(),
+                        parent.Id,child.Id,(RelationKind)999)] }).GetAwaiter().GetResult(),
+                    "undefined relationship kind rejected");
                 Expect<OperationCanceledException>(()=>store.SaveAsync(data,
                     new CancellationToken(true)).GetAwaiter().GetResult(),
                     "cancellation propagates");
