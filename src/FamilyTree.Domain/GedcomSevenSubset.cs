@@ -149,11 +149,12 @@ public static class GedcomSevenSubset
         foreach (var person in visible)
         {
             var name = person.DisplayName;
-            if (string.IsNullOrWhiteSpace(name) || name.Length > 180 ||
-                name.IndexOfAny(['\r','\n','@']) >= 0)
+            var canonicalName = name?.Replace("/", "", StringComparison.Ordinal).Trim();
+            if (string.IsNullOrWhiteSpace(canonicalName) || canonicalName.Length > 180 ||
+                canonicalName.IndexOfAny(['\r','\n','\t','@']) >= 0)
                 throw new InvalidOperationException("A display name cannot be safely exported.");
             output.Append("0 ").Append(ids[person.Id]).Append(" INDI\n1 NAME ")
-                .Append(name.Replace("/", "", StringComparison.Ordinal)).Append('\n');
+                .Append(canonicalName).Append('\n');
         }
         // Each distinct parent-child edge has a minimal family record.
         // This is deliberately not a faithful multi-parent/blended family
