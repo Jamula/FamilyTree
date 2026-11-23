@@ -96,7 +96,7 @@ public static class SyntheticWorkbenchRoutes
         FormAction("propose-person", "1. Propose invented person",
             view.PendingKind is not null || view.RemainingGuests == 0);
         FormAction("propose-link", "2. Propose friendship link",
-            view.PendingKind is not null || view.Relationships.Count >= 10);
+            view.PendingKind is not null || view.Relationships.Count >= 10 || view.Audit.Count >= 80);
         FormAction("approve", "3. Approve pending change", view.PendingKind is null);
         FormAction("reject", "Reject pending change", view.PendingKind is null);
         FormAction("undo", "4. Undo last approval",
