@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Report measured Cobertura coverage; never infer coverage from test counts.
 
-Optional CI thresholds are intentionally zero until the measured baseline,
-meaningful tests and exclusions are reviewed under issue #67.
+The optional command-line thresholds support enforcing a measured 90% line
+coverage gate. Branch coverage is reported separately.
 """
 import argparse
 import os
@@ -45,6 +45,8 @@ def summarize(path):
                     found = re.search(r"\((\d+)/(\d+)\)", line.attrib.get("condition-coverage", ""))
                     if found:
                         hit, total = int(found.group(1)), int(found.group(2))
+                        if total <= 0 or not 0 <= hit <= total:
+                            raise ValueError("Invalid branch coverage counts")
                         domain_branches.extend([True] * hit + [False] * (total - hit))
     domain_ratio = sum(domain_lines) / len(domain_lines) if domain_lines else None
     branch_ratio = sum(domain_branches) / len(domain_branches) if domain_branches else None
@@ -77,7 +79,7 @@ def main():
             for title, value in rows:
                 value_text = f"{value * 100:.1f}%" if value is not None else "Not measured"
                 stream.write(f"| {title} | {value_text} |\n")
-            stream.write("\nThresholds remain opt-in until issue #67 establishes a baseline.\n")
+            stream.write("\n90% line coverage floor is enabled on CI; branch coverage remains a separate target.\n")
     if overall * 100 < args.min_overall:
         print(f"ERROR: overall line coverage below {args.min_overall:.1f}% floor", file=sys.stderr)
         return 1
