@@ -43,6 +43,19 @@ internal static class GedcomSevenSubsetAssertions
         Check(roundtrip.Valid && roundtrip.People.Count==2 &&
               roundtrip.Families.Count==1,
               "authorized synthetic subset round-trip");
+        // The independent relationship gate must deny a family edge even if
+        // both people have an explicit person-visibility grant.
+        var noEdgeAuthorization = new MembershipScopedAuthorization(family,[
+            new ScopedFamilyGrant(viewer,family,MembershipState.Active,
+                new HashSet<Guid>{parent.Id,child.Id},
+                new HashSet<Guid>())
+        ]);
+        var onlyPeople = GedcomSevenSubset.ExportAuthorizedPreviewAsync(viewer,
+            [parent,child],[edge],noEdgeAuthorization).GetAwaiter().GetResult();
+        var onlyPeoplePreview=GedcomSevenSubset.Preview(onlyPeople);
+        Check(onlyPeoplePreview.Valid && onlyPeoplePreview.People.Count==2 &&
+              onlyPeoplePreview.Families.Count==0,
+              "relationship denied independently of visible endpoints");
         var denied=GedcomSevenSubset.ExportAuthorizedPreviewAsync(Guid.NewGuid(),
             [parent,child,hidden],[edge,secretEdge],auth).GetAwaiter().GetResult();
         Check(GedcomSevenSubset.Preview(denied).Valid &&
@@ -62,6 +75,23 @@ internal static class GedcomSevenSubsetAssertions
         catch(InvalidOperationException ex) when (ex.Message=="A display name cannot be safely exported.")
         {blockedUnsafeName=true;}
         Check(blockedUnsafeName,"unsafe name rejected");
+        foreach (var invalidName in new[] {"///", "Fictional\tPerson"})
+        {
+            var invalid = new Person(Guid.NewGuid(),invalidName);
+            var scope = new MembershipScopedAuthorization(family,[
+                new ScopedFamilyGrant(viewer,family,MembershipState.Active,
+                    new HashSet<Guid>{invalid.Id},new HashSet<Guid>())
+            ]);
+            var rejected=false;
+            try
+            {
+                GedcomSevenSubset.ExportAuthorizedPreviewAsync(viewer,[invalid],[],scope)
+                    .GetAwaiter().GetResult();
+            }
+            catch(InvalidOperationException ex) when (ex.Message=="A display name cannot be safely exported.")
+            {rejected=true;}
+            Check(rejected,"invalid canonical GEDCOM name rejected");
+        }
         Console.WriteLine("PASS bounded GEDCOM preview, auth export, round trip and error tests");
     }
     static void Check(bool value,string why)
