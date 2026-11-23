@@ -37,8 +37,11 @@ internal static class ReviewedGenealogyStoreAssertions
         Check(typeof(ReviewedGenealogyStore.AuditEntry).GetProperties().All(x=>
             !x.Name.Contains("Name",StringComparison.OrdinalIgnoreCase)),
             "audit stores no names");
-        try { store.Review(e1.Id,mod,family,true,true);throw new Exception("review replay"); }
-        catch(InvalidOperationException ex) when(ex.Message=="Proposal unavailable.") { }
+        bool replayRejected = false;
+        try { store.Review(e1.Id,mod,family,true,true); }
+        catch(InvalidOperationException ex) when(ex.Message=="Proposal unavailable.")
+        { replayRejected = true; }
+        Check(replayRejected, "reviewed proposal cannot be replayed");
         Deny(()=>store.ProposePerson(Guid.NewGuid(),author,new Person(Guid.NewGuid(),"Other")),
             "wrong family submission");
         Console.WriteLine("PASS in-memory approved genealogy ledger and no-self-approval");
