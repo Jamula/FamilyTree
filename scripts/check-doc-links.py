@@ -63,8 +63,11 @@ def destinations(content: str):
             continue
         if content[index] == "<":
             close = content.find(">", index + 1)
-            if close != -1 and close + 1 < len(content) and content[close + 1] == ")":
-                yield content[index + 1:close]
+            if close != -1:
+                remainder = content[close + 1:]
+                if remainder.startswith(")") or re.match(
+                    r'''^\s+(?:"[^"]*"|'[^']*')\)''', remainder):
+                    yield content[index + 1:close]
             continue
         begin, depth = index, 0
         while index < len(content):
@@ -78,8 +81,12 @@ def destinations(content: str):
                 if depth == 0:
                     target = content[begin:index].strip()
                     # Optional title follows whitespace after the URL.
-                    if target and not any(x.isspace() for x in target):
-                        yield target
+                    if target:
+                        # Optional Markdown link title is not part of the path.
+                        parts = re.split(r"(?<!\\)\s+", target, maxsplit=1)
+                        if len(parts) == 1 or re.fullmatch(
+                            r'''(?:"[^"]*"|'[^']*'|\([^)]*\))''', parts[1]):
+                            yield parts[0]
                     break
                 depth -= 1
             index += 1
