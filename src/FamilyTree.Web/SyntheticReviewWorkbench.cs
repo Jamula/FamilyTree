@@ -56,7 +56,10 @@ public sealed class SyntheticReviewWorkbench
                     return true;
 
                 case "propose-link":
-                    if (_pending is not null || _store.Relationships.Count >= 10) return false;
+                    // Cap even repeated propose/approve/undo cycles; this playground
+                    // is intentionally bounded and process-local.
+                    if (_pending is not null || _store.Relationships.Count >= 10 ||
+                        _store.Audit.Count >= 80) return false;
                     var targets = _store.People.Where(p => p.Id != _founder.Id).ToArray();
                     if (targets.Length == 0) return false;
                     var target = targets[^1];
