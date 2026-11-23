@@ -34,8 +34,54 @@ public sealed class SqlitePrincipalRegistry : IDisposable
               subject_digest TEXT NOT NULL PRIMARY KEY,
               principal_id TEXT NOT NULL UNIQUE
             );
+            CREATE TABLE IF NOT EXISTS identity_key_verifier (
+              id INTEGER NOT NULL PRIMARY KEY CHECK(id=1),
+              digest TEXT NOT NULL
+            );
             """;
-        sql.ExecuteNonQuery();
+        try
+        {
+            sql.ExecuteNonQuery();
+            VerifyKey(db);
+        }
+        catch
+        {
+            // Never retain a copied key after failed store initialization.
+            CryptographicOperations.ZeroMemory(_key);
+            _disposed = true;
+            throw;
+        }
+    }
+
+    private void VerifyKey(SqliteConnection db)
+    {
+        var expected = Convert.ToHexString(HMACSHA256.HashData(
+            _key, "familytree-principal-key-v1"u8));
+        using var transaction = db.BeginTransaction();
+        using var query = db.CreateCommand();
+        query.Transaction = transaction;
+        query.CommandText = "SELECT digest FROM identity_key_verifier WHERE id=1;";
+        var stored = query.ExecuteScalar() as string;
+        if (stored is null)
+        {
+            using var count = db.CreateCommand();
+            count.Transaction = transaction;
+            count.CommandText = "SELECT COUNT(*) FROM external_principals;";
+            if (Convert.ToInt64(count.ExecuteScalar()) != 0)
+                throw new InvalidDataException("Existing identities lack verified key metadata.");
+            using var create = db.CreateCommand();
+            create.Transaction = transaction;
+            create.CommandText =
+                "INSERT INTO identity_key_verifier(id,digest) VALUES(1,$digest);";
+            create.Parameters.AddWithValue("$digest", expected);
+            create.ExecuteNonQuery();
+        }
+        else if (!CryptographicOperations.FixedTimeEquals(
+            Encoding.ASCII.GetBytes(expected), Encoding.ASCII.GetBytes(stored)))
+        {
+            throw new InvalidDataException("Identity database HMAC key does not match.");
+        }
+        transaction.Commit();
     }
 
     // A logged-in principal does not imply active FamilyMembership.
