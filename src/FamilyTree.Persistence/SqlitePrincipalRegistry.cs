@@ -26,27 +26,28 @@ public sealed class SqlitePrincipalRegistry : IDisposable
             throw new ArgumentException("256-bit identity HMAC key required.", nameof(hmacKey));
         _path = Path.GetFullPath(absolutePath);
         _key = (byte[])hmacKey.Clone();
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        using var db = Open();
-        using var sql = db.CreateCommand();
-        sql.CommandText = """
-            CREATE TABLE IF NOT EXISTS external_principals (
-              subject_digest TEXT NOT NULL PRIMARY KEY,
-              principal_id TEXT NOT NULL UNIQUE
-            );
-            CREATE TABLE IF NOT EXISTS identity_key_verifier (
-              id INTEGER NOT NULL PRIMARY KEY CHECK(id=1),
-              digest TEXT NOT NULL
-            );
-            """;
         try
         {
+            // Include filesystem and connection opening in the cleanup
+            // boundary: a constructor throwing never leaves a live key copy.
+            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+            using var db = Open();
+            using var sql = db.CreateCommand();
+            sql.CommandText = """
+                CREATE TABLE IF NOT EXISTS external_principals (
+                  subject_digest TEXT NOT NULL PRIMARY KEY,
+                  principal_id TEXT NOT NULL UNIQUE
+                );
+                CREATE TABLE IF NOT EXISTS identity_key_verifier (
+                  id INTEGER NOT NULL PRIMARY KEY CHECK(id=1),
+                  digest TEXT NOT NULL
+                );
+                """;
             sql.ExecuteNonQuery();
             VerifyKey(db);
         }
         catch
         {
-            // Never retain a copied key after failed store initialization.
             CryptographicOperations.ZeroMemory(_key);
             _disposed = true;
             throw;
