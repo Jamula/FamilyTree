@@ -136,6 +136,23 @@ internal static class SqliteFamilyStoreAssertions
                     "membership approval and review decisions audited");
                 Expect<UnauthorizedAccessException>(() => store.CountAudit(
                     family, member), "non-admin cannot query audit metadata");
+                var secondAdministrator = Guid.NewGuid();
+                var secondInvitation = store.IssueInvitation(family, admin,
+                    secondAdministrator, DateTimeOffset.UtcNow.AddDays(1),
+                    DateTimeOffset.UtcNow);
+                store.AcceptInvitation(family, secondAdministrator, secondInvitation,
+                    DateTimeOffset.UtcNow);
+                store.ApproveMember(family, admin, secondAdministrator);
+                Expect<UnauthorizedAccessException>(() => store.PromoteAdministrator(
+                    family, secondAdministrator, secondAdministrator),
+                    "self-promotion denied");
+                store.PromoteAdministrator(family, admin, secondAdministrator);
+                Expect<UnauthorizedAccessException>(() => store.PromoteAdministrator(
+                    family, admin, secondAdministrator),
+                    "repeated promotion denied");
+                store.ReviewPerson(family, secondAdministrator, adminProposal, false);
+                Check(store.ReadPeople(family, admin).Count == 1,
+                    "independent admin rejects original admin proposal");
                 Check(!Encoding.UTF8.GetString(File.ReadAllBytes(path)).Contains(
                     fictionalPerson.DisplayName, StringComparison.Ordinal),
                     "person names encrypted at rest");
@@ -155,29 +172,36 @@ internal static class SqliteFamilyStoreAssertions
                     family, admin, member), "revocation replay denied");
                 Expect<UnauthorizedAccessException>(() => reopened.RevokeMember(
                     family, admin, admin), "cannot revoke last bootstrap administrator");
-                Check(reopened.CountAudit(family, admin) == 4, "revocation audited");
+                Check(reopened.CountAudit(family, admin) == 7, "promotion, review and revocation audited");
                 Check(reopened.ReadPeople(family, admin).Count == 1,
                     "administrator retains family scope");
             }
             using (var reopened = new SqliteFamilyStore(path, secret))
                 Expect<UnauthorizedAccessException>(() => reopened.ReadPeople(
                     family, member), "revocation persists across restart");
-            using (var wrong = new SqliteFamilyStore(path, wrongSecret))
+            Expect<InvalidDataException>(() =>
             {
-                Expect<InvalidDataException>(() => wrong.ReadPeople(family, admin),
-                    "wrong encryption key cannot reveal private names");
-                Expect<InvalidDataException>(() => wrong.ReviewPerson(
-                    family, admin, pendingCipherProposal, true),
-                    "wrong-key ciphertext cannot be approved into authoritative graph");
-                Expect<InvalidDataException>(() => wrong.ListPendingPeople(
-                    family, admin),
-                    "wrong-key administrator cannot render pending private names");
-            }
+                using var wrong = new SqliteFamilyStore(path, wrongSecret);
+            }, "wrong key cannot open or write to an existing family database");
+            using (var reopened = new SqliteFamilyStore(path, secret))
+                Check(reopened.ReadPeople(family, admin).Single() == fictionalPerson,
+                    "wrong-key open attempt cannot poison valid family records");
             using (var direct = new SqliteConnection(
-                new SqliteConnectionStringBuilder { DataSource = path }.ToString()))
+                new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString()))
             {
                 direct.Open();
                 using var change = direct.CreateCommand();
+                change.CommandText = "UPDATE person_proposals SET encrypted_name=X'01' WHERE id=$id;";
+                change.Parameters.AddWithValue("$id", pendingCipherProposal.ToString("D"));
+                Check(change.ExecuteNonQuery() == 1, "pending proposal tampered");
+                using (var stillReadable = new SqliteFamilyStore(path, secret))
+                {
+                    Expect<InvalidDataException>(() => stillReadable.ReviewPerson(
+                        family, admin, pendingCipherProposal, true),
+                        "tampered pending proposal cannot be promoted into approved data");
+                    Check(stillReadable.ReadPeople(family, admin).Single() == fictionalPerson,
+                        "malformed pending data cannot poison valid family records");
+                }
                 change.CommandText = "UPDATE people SET encrypted_name=X'01' WHERE family_id=$f;";
                 change.Parameters.AddWithValue("$f", family.ToString("D"));
                 Check(change.ExecuteNonQuery() == 1, "tampering test modified only one person");
