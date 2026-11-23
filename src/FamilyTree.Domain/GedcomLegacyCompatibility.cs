@@ -18,7 +18,6 @@ public static class GedcomLegacyCompatibility
             lines[^1] != "0 TRLR")
             return Reject("Malformed GEDCOM container");
 
-        var legacy = false;
         var version = "";
         var hasUtf8 = false;
         var inHeader = true;
@@ -52,7 +51,6 @@ public static class GedcomLegacyCompatibility
 
         // The original 5.5.1 file is never overwritten. All records are
         // passed through strict GEDCOM7 structural preflight and review.
-        legacy = true;
         var upgraded = normalized.Replace("\n2 VERS 5.5.1\n",
             "\n2 VERS 7.0\n", StringComparison.Ordinal);
         var preview = GedcomSevenSubset.Preview(upgraded);
