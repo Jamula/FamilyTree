@@ -37,7 +37,7 @@ public static class VerifiedOidcSession
         // Never preserve custom claims provided by the identity provider:
         // their names are not reserved on the external OIDC token.
         foreach (var old in identity.Claims.Where(c => c.Type.StartsWith(Prefix,
-            StringComparison.Ordinal)).ToArray())
+            StringComparison.OrdinalIgnoreCase)).ToArray())
             identity.RemoveClaim(old);
         identity.AddClaim(new Claim(Marker, "true"));
         identity.AddClaim(new Claim(ProviderClaim, provider.Name));
