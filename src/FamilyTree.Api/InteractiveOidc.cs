@@ -75,7 +75,7 @@ public static class InteractiveOidc
         // Defense-in-depth: require provider-specific exact trusted issuer and
         // audience even when callers bypass ReadConfiguration in tests.
         _ = new OidcConfigurationGuard(
-            [new TrustedOidcIssuer(provider.Authority, provider.ClientId)]);
+            [new TrustedOidcIssuer(provider.Authority!, provider.ClientId)]);
         options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
         options.Authority = provider.Authority;
         options.ClientId = provider.ClientId;
