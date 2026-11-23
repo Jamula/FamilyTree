@@ -75,9 +75,9 @@ internal static class GedcomSevenSubsetAssertions
         catch(InvalidOperationException ex) when (ex.Message=="A display name cannot be safely exported.")
         {blockedUnsafeName=true;}
         Check(blockedUnsafeName,"unsafe name rejected");
-        foreach (var invalidName in new[] {"///", "Fictional\tPerson"})
+        foreach (var invalid in new[] {"///", "Fictional\tPerson"}
+            .Select(name => new Person(Guid.NewGuid(), name)))
         {
-            var invalid = new Person(Guid.NewGuid(),invalidName);
             var scope = new MembershipScopedAuthorization(family,[
                 new ScopedFamilyGrant(viewer,family,MembershipState.Active,
                     new HashSet<Guid>{invalid.Id},new HashSet<Guid>())
