@@ -68,6 +68,34 @@ internal static class GedcomLegacyCompatibilityAssertions
             "1 NAME Alex /Example/", "1 NAME Alex\rExample\r",
             StringComparison.Ordinal)).Valid,
             "stray CR control characters denied");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 NAME Alex /Example/", "1 NAME Alex\u0001Example",
+            StringComparison.Ordinal)).Valid,
+            "ASCII control character in names rejected");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 CHAR UTF-8", "1 CHAR",
+            StringComparison.Ordinal)).Valid,
+            "bare CHAR declaration denied");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 CHAR UTF-8", "1 CHAR UTF-8\n1 CHAR UTF-8",
+            StringComparison.Ordinal)).Valid,
+            "repeated charset declarations denied");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "2 VERS 5.5.1", "2 VERS 5.5.1\n2 VERS",
+            StringComparison.Ordinal)).Valid,
+            "bare duplicate GEDC version denied");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "0 TRLR", "0 HEAD\n0 TRLR",
+            StringComparison.Ordinal)).Valid,
+            "repeated HEAD denied");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "0 TRLR", "0 TRLR\n0 TRLR",
+            StringComparison.Ordinal)).Valid,
+            "interior trailer denied");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 FAMC @F1@", "1 FAMC @F1@ ",
+            StringComparison.Ordinal)).Valid,
+            "trailing whitespace in pointer denied");
         Check(GedcomLegacyCompatibility.Preview(
             withExporterVersion.Replace("2 VERS 1.0", "2 VERS 5.5.1",
             StringComparison.Ordinal)).Valid,
