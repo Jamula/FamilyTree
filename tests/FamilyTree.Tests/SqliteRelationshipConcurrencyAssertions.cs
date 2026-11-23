@@ -106,22 +106,53 @@ internal static class SqliteRelationshipConcurrencyAssertions
                     "revoked moderator cannot replay racing approval");
             }
 
-            // An independent moderator can still undo after another reviewer
-            // loses access, but a revoked actor cannot undo anything.
+            // Race undo against revocation of a second independent moderator.
+            // Either transaction may win, but both the graph and the audit
+            // must reproduce that exact order after a fresh database reopen.
+            var undoModerator = Guid.NewGuid();
+            var undoInvite = store1.IssueInvitation(family, admin, undoModerator,
+                DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow);
+            store1.AcceptInvitation(family, undoModerator, undoInvite, DateTimeOffset.UtcNow);
+            store1.ApproveMember(family, admin, undoModerator);
+            store1.PromoteAdministrator(family, admin, undoModerator);
+            var auditBeforeUndoRace = store1.CountAudit(family, admin);
+            var undoRace = await Race(
+                () => {store2.UndoRelationship(family, undoModerator, winner);
+                    return true;},
+                () => {store1.RevokeMember(family, admin, undoModerator);
+                    return true;});
+            Check(undoRace[1].Error is null,
+                "administrator revocation commits during undo race");
+            Check(undoRace[0].Error is null ||
+                  undoRace[0].Error is UnauthorizedAccessException ||
+                  ExpectedConflict(undoRace[0].Error),
+                "undo cannot succeed after administrator revocation wins");
+            var undoWon = undoRace[0].Error is null;
             using (var reopened = new SqliteFamilyStore(path, key))
             {
-                reopened.UndoRelationship(family, admin, winner);
+                Check(reopened.ReadRelationships(family, actor)
+                    .Any(x => x.Id == duplicate.Id) != undoWon,
+                    "reopened relation state matches the actual undo race winner");
                 Check(reopened.CountAudit(family, admin) ==
-                      auditPreRevoke + 2 + (approvedRace ? 1 : 0),
-                    "independent undo writes exactly one additional durable audit");
+                    auditBeforeUndoRace + 1 + (undoWon ? 1 : 0),
+                    "undo-vs-revocation audit has exactly committed transitions");
+                Expect<UnauthorizedAccessException>(
+                    () => reopened.UndoRelationship(family, undoModerator, winner),
+                    "revoked independent moderator can never replay undo");
+                if (!undoWon)
+                    reopened.UndoRelationship(family, admin, winner);
                 Expect<InvalidOperationException>(
                     () => reopened.UndoRelationship(family, admin, winner),
-                    "undo cannot replay");
+                    "once reversed, a proposal can never be undone twice");
             }
             using (var afterRestart = new SqliteFamilyStore(path, key))
+            {
                 Check(!afterRestart.ReadRelationships(family, actor)
                     .Any(x => x.Id == duplicate.Id),
-                    "undo survives reopen and does not resurrect duplicate link");
+                    "undo survives second restart without resurrecting the relationship");
+                Check(afterRestart.CountAudit(family, admin) == auditBeforeUndoRace + 2,
+                    "durable audit has one moderator revoke and one successful undo");
+            }
             Console.WriteLine(
                 "PASS competing SQLite submissions/reviews, moderator revocation and durable undo");
         }
@@ -146,7 +177,14 @@ internal static class SqliteRelationshipConcurrencyAssertions
             if (!signal.SignalAndWait(TimeSpan.FromSeconds(10)))
                 return new Outcome<T>(default!, new TimeoutException("Race synchronization"));
             try { return new Outcome<T>(action(), null); }
-            catch (Exception error) { return new Outcome<T>(default!, error); }
+            // Unexpected errors must FAIL the test rather than being
+            // misclassified as an ordinary concurrent transaction conflict.
+            catch (InvalidOperationException error)
+            { return new Outcome<T>(default!, error); }
+            catch (UnauthorizedAccessException error)
+            { return new Outcome<T>(default!, error); }
+            catch (SqliteException error)
+            { return new Outcome<T>(default!, error); }
         });
         return await Task.WhenAll(Run(left), Run(right));
     }
