@@ -51,11 +51,16 @@ public sealed class MemberEnrollment
 
     public MemberEnrollment Pause(Guid actorId, Guid actorFamily, bool administratorAuthorized)
     {
-        if (State != MembershipState.Active || actorFamily != FamilyId ||
-            actorId == Guid.Empty || (actorId != PrincipalId && !administratorAuthorized))
+        if ((State != MembershipState.Active && State != MembershipState.Paused) ||
+            actorFamily != FamilyId || actorId == Guid.Empty ||
+            (actorId != PrincipalId && !administratorAuthorized) ||
+            (State == MembershipState.Paused &&
+                (actorId == PrincipalId || !administratorAuthorized)))
             throw new UnauthorizedAccessException("Pause denied.");
+        // An administrator may upgrade a self-pause to suspension; an active
+        // member cannot neutralize an existing administrative suspension.
         return Change(MembershipState.Paused, ApprovedBy,
-            actorId != PrincipalId && administratorAuthorized);
+            PausedByAdministrator || (actorId != PrincipalId && administratorAuthorized));
     }
 
     public MemberEnrollment Resume(Guid actorId)
