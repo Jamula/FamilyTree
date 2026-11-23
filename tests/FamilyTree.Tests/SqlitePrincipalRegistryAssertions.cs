@@ -42,6 +42,15 @@ internal static class SqlitePrincipalRegistryAssertions
                 var msId = registry.EnrollVerifiedSubject("microsoft", microsoft, subject);
                 Check(msId != bound && msId != Guid.Empty,
                     "same subject under different issuer/provider is distinct");
+                var otherMicrosoft = "https://login.microsoftonline.com/" +
+                    Guid.NewGuid().ToString("D") + "/v2.0";
+                var secondTenantId = registry.EnrollVerifiedSubject(
+                    "microsoft", otherMicrosoft, subject);
+                Check(secondTenantId != msId && secondTenantId != bound &&
+                    registry.FindVerifiedSubject("microsoft", microsoft, subject) == msId &&
+                    registry.FindVerifiedSubject(
+                        "microsoft", otherMicrosoft, subject) == secondTenantId,
+                    "two valid Microsoft tenant issuers must never share a principal");
                 Expect<ArgumentException>(() => registry.EnrollVerifiedSubject(
                     "google", "http://accounts.google.com", subject), "reject HTTP issuer");
                 Expect<ArgumentException>(() => registry.FindVerifiedSubject(
@@ -66,9 +75,12 @@ internal static class SqlitePrincipalRegistryAssertions
             using (var reopened = new SqlitePrincipalRegistry(dbPath, key))
                 Check(reopened.FindVerifiedSubject("google", google, subject) == bound,
                     "mapping survives restart");
-            using (var wrong = new SqlitePrincipalRegistry(dbPath, wrongKey))
-                Check(wrong.FindVerifiedSubject("google", google, subject) is null,
-                    "wrong HMAC key cannot correlate identities");
+            Expect<InvalidDataException>(() =>
+                new SqlitePrincipalRegistry(dbPath, wrongKey),
+                "wrong HMAC key fails closed rather than silently splitting identities");
+            using (var verifyAgain = new SqlitePrincipalRegistry(dbPath, key))
+                Check(verifyAgain.FindVerifiedSubject("google", google, subject) == bound,
+                    "correct key still resolves after rejected wrong-key attempt");
             using (var disposed = new SqlitePrincipalRegistry(dbPath, key))
             {
                 disposed.Dispose();
