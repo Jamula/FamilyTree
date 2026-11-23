@@ -7,7 +7,8 @@ internal static class GedcomLegacyCompatibilityAssertions
     internal static void Run()
     {
         var fixture = File.ReadAllText(Path.Join(AppContext.BaseDirectory,
-            "fixtures", "synthetic-family.ged.txt"));
+            "fixtures", "synthetic-family.ged.txt"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
         var converted = fixture.Replace("2 VERS 7.0",
             "2 VERS 5.5.1\n1 CHAR UTF-8", StringComparison.Ordinal);
         var report = GedcomLegacyCompatibility.Preview(converted);
@@ -64,6 +65,14 @@ internal static class GedcomLegacyCompatibilityAssertions
             "1 FAMC @F1@", "1 FAMC @I1@",
             StringComparison.Ordinal)).Valid,
             "individual pointer cannot impersonate a family");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 FAMC @F1@", "01 FAMC @I1@",
+            StringComparison.Ordinal)).Valid,
+            "zero-padded level cannot bypass pointer-type validation");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 FAMC @F1@", "01 FAMC @F1",
+            StringComparison.Ordinal)).Valid,
+            "zero-padded level cannot bypass missing pointer terminator");
         Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
             "1 NAME Alex /Example/", "1 NAME Alex\rExample\r",
             StringComparison.Ordinal)).Valid,
