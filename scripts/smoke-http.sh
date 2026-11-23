@@ -97,3 +97,37 @@ grep -q '"providers":\["google"\]' "$TMP/response.txt" || { echo "FAIL: only exp
 [[ "$(status "$PROVIDER_API/auth/session")" == 401 ]] || { echo "FAIL: configured provider cannot grant anonymous session"; exit 1; }
 [[ "$(status "$PROVIDER_API/api/v1/people")" == 501 ]] || { echo "FAIL: provider registration cannot unlock private family APIs"; exit 1; }
 printf 'PASS HTTP smoke: configured synthetic OIDC provider and privacy boundary\n'
+
+# Local-only fictional edit -> moderator review -> link -> undo E2E.
+# Never submit actual family names, user input, or credentials here.
+[[ "$(status "$WEB/demo/workbench")" == 200 ]] || { echo "FAIL: fictional local workbench"; exit 1; }
+grep -q 'Invented records only' "$TMP/response.txt" || { echo "FAIL: fictional-only marker"; exit 1; }
+bad="$(curl --silent --max-time 5 -X POST -o "$TMP/response.txt" -w '%{http_code}' \
+    "$WEB/demo/workbench" -d 'action=propose-person')"
+[[ "$bad" == 400 ]] || { echo "FAIL: missing anti-forgery token accepted"; exit 1; }
+curl --silent --max-time 5 -c "$TMP/workbench-cookies" \
+    -o "$TMP/workbench.html" "$WEB/demo/workbench"
+token="$(grep -o "name='__RequestVerificationToken' value='[^']*'" \
+    "$TMP/workbench.html" | head -n 1 | sed "s/.*value='//;s/'$//")"
+[[ -n "$token" ]] || { echo "FAIL: anti-forgery form token missing"; exit 1; }
+submit_workbench() {
+  curl --silent --max-time 5 -b "$TMP/workbench-cookies" \
+    -X POST -o "$TMP/response.txt" -w '%{http_code}' \
+    "$WEB/demo/workbench" \
+    --data-urlencode "__RequestVerificationToken=$token" \
+    --data-urlencode "action=$1"
+}
+[[ "$(submit_workbench approve)" == 409 ]] || { echo "FAIL: premature approval permitted"; exit 1; }
+[[ "$(submit_workbench propose-person)" == 303 ]] || { echo "FAIL: propose fictional person"; exit 1; }
+[[ "$(submit_workbench propose-person)" == 409 ]] || { echo "FAIL: second pending proposal allowed"; exit 1; }
+[[ "$(submit_workbench approve)" == 303 ]] || { echo "FAIL: moderator approval"; exit 1; }
+[[ "$(status "$WEB/demo/workbench")" == 200 ]] || { echo "FAIL: workbench view"; exit 1; }
+grep -q 'Fictional Guest 1' "$TMP/response.txt" || { echo "FAIL: approved guest invisible"; exit 1; }
+[[ "$(submit_workbench propose-link)" == 303 ]] || { echo "FAIL: propose synthetic relationship"; exit 1; }
+[[ "$(submit_workbench approve)" == 303 ]] || { echo "FAIL: approve synthetic relationship"; exit 1; }
+[[ "$(status "$WEB/demo/workbench")" == 200 ]] || { echo "FAIL: reviewed links"; exit 1; }
+grep -q '1 links have passed' "$TMP/response.txt" || { echo "FAIL: approved relationship invisible"; exit 1; }
+[[ "$(submit_workbench undo)" == 303 ]] || { echo "FAIL: reversible audit"; exit 1; }
+[[ "$(status "$WEB/demo/workbench")" == 200 ]] || { echo "FAIL: post-undo view"; exit 1; }
+grep -q '0 links have passed' "$TMP/response.txt" || { echo "FAIL: undo did not restore graph"; exit 1; }
+printf 'PASS HTTP smoke: fictional workbench CSRF, errors, edit, approve, link and undo\n'
