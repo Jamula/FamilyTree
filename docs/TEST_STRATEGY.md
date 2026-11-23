@@ -1,17 +1,55 @@
-# Test Strategy
+# Test strategy and release quality gates
 
-## Current coverage
-The existing console-based domain assertions test tree defaults, independent relationships, invalid self-links and private-default gratitude. They are a starting point; they do not satisfy the PRD's full acceptance matrix.
+## Current measured source coverage
 
-## Next executable suites
-1. **Domain unit tests:** relationship semantics, date uncertainty, graph constraints, export semantics.
-2. **API integration tests:** anonymous access denied, branch/tenant isolation, nonenumeration, authenticated exports and media.
-3. **Browser gesture tests:** pointer and keyboard recentering; 0–8 sliders; spouse/sibling/social toggles; invitation and contribution workflows.
-4. **GEDCOM corpus tests:** valid 7.0 roundtrip, 5.5.1 import, ambiguous dates, associations, duplicates and loss reporting.
-5. **Security and privacy tests:** hidden people not leaked through counts, search, nodes, edges, AI output, logs, export or cached pages.
+CI instruments the real .NET 11 test process using Cobertura and reports
+both overall and **per-component line** coverage, excluding test files and
+compiler-generated source. The separate architectural gate requires at least
+**90% measured line coverage for each** of:
+`FamilyTree.Domain`, `FamilyTree.Api`, `FamilyTree.Web`,
+`FamilyTree.Mcp`, `FamilyTree.ServiceDefaults`, and
+`FamilyTree.SyntheticDemo`. Missing or unmeasured components fail this
+gate rather than counting as covered. The overall line-coverage floor
+remains 90%.
 
-## CI gates
-Build, domain assertions, source-level cost rules and executable HTTP smoke checks for the public home, health and fail-closed 501 endpoints are configured. Browser gesture and authenticated API integration tests are not yet built. Add them on their feature branches and make them required before real-data deployments.
+The current baseline before enabling the six-area gate measured Domain
+95.2%, Api 95.9%, Web 95.1%, Mcp 97.7% (from its tested feature branch),
+ServiceDefaults 95.1%, and SyntheticDemo 100.0%.
+Every new PR and `main` push must rerun the coverage check. **These are
+measured test observations, not a claim that all user features work.**
 
-## Current architecture restriction
-Avoid treating the placeholder `501` API responses as authorized data implementations. Production data must remain private until P0 access policies are enforced.
+Branch coverage is reported separately: the latest combined main build
+reported 81.1% overall branch coverage. The instrumenter does not provide
+reliable per-component branch conditions; the component reporter labels
+these **Not measured**, rather than inventing estimates. We should continue
+raising branch coverage with adversarial input, cancellation, concurrency,
+authentication and error tests.
+
+## Existing executable test categories
+
+- Domain and workflow unit assertions: relationship semantics, family and
+  branch filtering, field/edge privacy, GEDCOM subset limitations, duplicate
+  and malformed inputs, review state transitions, undo and safe audit.
+- API loopback integration: actual Kestrel application composition, anonymous
+  session 401, default-off providers, forged identity headers, private
+  read/write 501 and response body equality for denied/unknown IDs.
+- Web integration: fictional workbench GET/POST/antiforgery, malformed forms,
+  approved/rejected transitions, stale versions, undo and localhost-only access.
+- MCP: official stdio handshake, synthetic tool validation, bounded draft
+  queue concurrency/overflow and host transport registration without starting
+  a listener during unit tests.
+- Telemetry: default-off exporter, invalid endpoint/config/enum handling,
+  metric label privacy and failure/cancellation outcomes.
+- Coverage reporter parser: missing or corrupted XML, duplicate source
+  lines, independent branches, missing assemblies and hard-fail thresholds.
+
+## Not yet complete (cannot claim M1 release readiness)
+
+Real Google/Microsoft sign-in against registered providers, persistent
+membership-to-principal mapping and revocation, fully authenticated
+tenant/branch/person/field/media endpoints, durable reviewed genealogy
+mutations, actual family tree, complete GEDCOM 7 and 5.5.1 interoperability,
+mobile gestures and private data migration remain missing or incomplete.
+Tests above are mostly synthetic and cannot substitute for those end-to-end
+acceptance tests. Private family APIs stay fail-closed until the independent
+security gates have passed. Product version remains 0.1.0.
