@@ -58,7 +58,11 @@ public sealed class PrivateTreeReadService
             snapshot.Relationships.Count > MaxRelationships ||
             snapshot.People.Any(person => person is null || person.Id == Guid.Empty) ||
             snapshot.People.Select(person => person.Id).Distinct().Count() != snapshot.People.Count ||
-            snapshot.Relationships.Any(edge => edge is null || edge.Id == Guid.Empty) ||
+            snapshot.Relationships.Any(edge => edge is null ||
+                edge.Id == Guid.Empty || edge.FromPersonId == Guid.Empty ||
+                edge.ToPersonId == Guid.Empty ||
+                edge.FromPersonId == edge.ToPersonId ||
+                !Enum.IsDefined(edge.Kind)) ||
             snapshot.Relationships.Select(edge => edge.Id).Distinct().Count() != snapshot.Relationships.Count)
             throw new InvalidOperationException("Trusted tree snapshot is invalid.");
 
