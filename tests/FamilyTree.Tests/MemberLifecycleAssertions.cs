@@ -30,6 +30,9 @@ internal static class MemberLifecycleAssertions
         var paused = active.Pause(invited,family,false);
         Check(paused.State == MembershipState.Paused &&
               paused.Resume(invited).State == MembershipState.Active, "member pause/resume");
+        var escalated = paused.Pause(admin,family,true);
+        Check(escalated.PausedByAdministrator, "administrator may escalate self-pause");
+        Deny(() => escalated.Resume(invited), "administrative suspension cannot be evaded");
         var suspended = active.Pause(admin,family,true);
         Deny(() => suspended.Resume(invited), "admin suspension cannot self-resume");
         var left = suspended.Leave(admin,family,true);
