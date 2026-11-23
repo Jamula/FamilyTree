@@ -57,7 +57,8 @@ public sealed partial class SqliteFamilyStore
             ("$from", edge.FromPersonId.ToString("D")),
             ("$to", edge.ToPersonId.ToString("D")),
             ("$kind", edge.Kind.ToString()),
-            ("$label", Encrypt(familyId, edge.Id, edge.Label ?? "",
+            ("$label", Encrypt(familyId, edge.Id,
+                edge.Label is null ? "\u0000" : "\u0001" + edge.Label,
                 RelationshipContext(edge.FromPersonId, edge.ToPersonId, edge.Kind))),
             ("$submitter", authorId.ToString("D")));
         tx.Commit();
@@ -168,6 +169,52 @@ public sealed partial class SqliteFamilyStore
         tx.Commit();
     }
 
+    /// <summary>
+    /// Authenticated administrator's durable undo inbox. No relationship names
+    /// are logged. Does not include a moderator's own proposals to prevent
+    /// self-approval or self-undo through discovery.
+    /// </summary>
+    public sealed record ApprovedRelationshipUndo(
+        Guid ProposalId, Relationship? Relationship, Guid SubmittedBy,
+        bool ContentUnreadable);
+
+    public IReadOnlyList<ApprovedRelationshipUndo> ListApprovedRelationshipsForUndo(
+        Guid familyId, Guid moderatorId)
+    {
+        RequireIds(familyId, moderatorId);
+        using var con = Open();
+        using var tx = con.BeginTransaction();
+        RequireMember(con, tx, familyId, moderatorId, administrator: true);
+        var result = new List<ApprovedRelationshipUndo>();
+        using (var cmd = Cmd(con, tx, """
+            SELECT id,relation_id,from_id,to_id,kind,encrypted_label,submitter
+            FROM relationship_proposals WHERE family_id=$f AND state='Approved'
+                AND submitter<>$moderator ORDER BY id LIMIT 100;
+            """, ("$f", familyId.ToString("D")),
+            ("$moderator", moderatorId.ToString("D"))))
+        using (var reader = cmd.ExecuteReader())
+            while (reader.Read())
+            {
+                Relationship? edge = null;
+                var unreadable = false;
+                try
+                {
+                    edge = MaterializeRelationship(familyId,
+                        reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                        reader.GetString(4), reader.GetFieldValue<byte[]>(5));
+                }
+                catch (InvalidDataException)
+                {
+                    unreadable = true;
+                }
+                result.Add(new ApprovedRelationshipUndo(
+                    Guid.Parse(reader.GetString(0)), edge,
+                    Guid.Parse(reader.GetString(6)), unreadable));
+            }
+        tx.Commit();
+        return result;
+    }
+
     public IReadOnlyList<Relationship> ReadRelationships(Guid familyId, Guid viewerId)
     {
         RequireIds(familyId, viewerId);
@@ -243,11 +290,21 @@ public sealed partial class SqliteFamilyStore
             !Enum.TryParse<RelationKind>(kind, ignoreCase: false, out var relationKind) ||
             !Enum.IsDefined(relationKind))
             throw new InvalidDataException("Relationship record invalid.");
-        var label = Decrypt(familyId, id, envelope,
+        var encoded = Decrypt(familyId, id, envelope,
             RelationshipContext(from, to, relationKind));
-        if (label.Length > 200 || label.Any(char.IsControl) ||
+        // Versioned encrypted payload distinguishes null from explicitly empty.
+        // Old pre-MVP synthetic records without a prefix remain readable:
+        // previously ambiguous empty values preserve their legacy null mapping.
+        string? label = encoded switch
+        {
+            "\u0000" => null,
+            _ when encoded.StartsWith("\u0001", StringComparison.Ordinal) => encoded[1..],
+            _ => encoded.Length == 0 ? null : encoded
+        };
+        if (label is { Length: > 200 } ||
+            (label is not null && label.Any(char.IsControl)) ||
             (relationKind == RelationKind.Other && string.IsNullOrWhiteSpace(label)))
             throw new InvalidDataException("Relationship record invalid.");
-        return new(id, from, to, relationKind, label.Length == 0 ? null : label);
+        return new(id, from, to, relationKind, label);
     }
 }
