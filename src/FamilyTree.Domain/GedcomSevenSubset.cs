@@ -148,6 +148,7 @@ public static class GedcomSevenSubset
         var ids = visible.Select((person,index) => (person.Id,Pointer:$"@I{index+1}@"))
             .ToDictionary(x=>x.Id,x=>x.Pointer);
         var accepted = new List<Relationship>();
+        var relationIds = new HashSet<Guid>();
         var inputRelations = 0;
         foreach (var relation in relations)
         {
@@ -155,6 +156,7 @@ public static class GedcomSevenSubset
             if (++inputRelations > MaxInputRelations)
                 throw new InvalidOperationException("Preview input exceeds safe bounds.");
             if (relation is null || relation.Id == Guid.Empty ||
+                !relationIds.Add(relation.Id) ||
                 relation.FromPersonId == Guid.Empty || relation.ToPersonId == Guid.Empty)
                 throw new InvalidOperationException("Preview contains a malformed relationship.");
             if (relation.Kind == RelationKind.Parent &&
