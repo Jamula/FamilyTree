@@ -3,6 +3,7 @@ using FamilyTree.ServiceDefaults;
 using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddFamilyTreeObservability(builder.Configuration);
 var app = builder.Build();
 
 // Local, privacy-filtered diagnostics only. No exporter is configured.
