@@ -179,9 +179,12 @@ public sealed partial class SqliteFamilyStore
         bool ContentUnreadable);
 
     public IReadOnlyList<ApprovedRelationshipUndo> ListApprovedRelationshipsForUndo(
-        Guid familyId, Guid moderatorId)
+        Guid familyId, Guid moderatorId, Guid? afterProposalId = null)
     {
         RequireIds(familyId, moderatorId);
+        if (afterProposalId == Guid.Empty)
+            throw new ArgumentException("Pagination cursor cannot be empty.",
+                nameof(afterProposalId));
         using var con = Open();
         using var tx = con.BeginTransaction();
         RequireMember(con, tx, familyId, moderatorId, administrator: true);
@@ -189,9 +192,11 @@ public sealed partial class SqliteFamilyStore
         using (var cmd = Cmd(con, tx, """
             SELECT id,relation_id,from_id,to_id,kind,encrypted_label,submitter
             FROM relationship_proposals WHERE family_id=$f AND state='Approved'
-                AND submitter<>$moderator ORDER BY id LIMIT 100;
+                AND submitter<>$moderator AND id>$after
+            ORDER BY id LIMIT 100;
             """, ("$f", familyId.ToString("D")),
-            ("$moderator", moderatorId.ToString("D"))))
+            ("$moderator", moderatorId.ToString("D")),
+            ("$after", afterProposalId?.ToString("D") ?? "")))
         using (var reader = cmd.ExecuteReader())
             while (reader.Read())
             {
