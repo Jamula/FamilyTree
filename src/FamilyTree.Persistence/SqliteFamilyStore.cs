@@ -245,6 +245,40 @@ public sealed class SqliteFamilyStore : IDisposable
         tx.Commit();
     }
 
+    /// <summary>
+    /// Administrator-only pending proposal inbox. Only a trusted OIDC-bound
+    /// active administrator may invoke this; never bind to anonymous routes.
+    /// No names or original content go into audit/telemetry.
+    /// </summary>
+    public sealed record PendingPersonReview(Guid ProposalId, Person Person, Guid SubmittedBy);
+
+    public IReadOnlyList<PendingPersonReview> ListPendingPeople(Guid familyId, Guid administratorId)
+    {
+        RequireIds(familyId, administratorId);
+        using var con = Open();
+        using var tx = con.BeginTransaction();
+        RequireMember(con, tx, familyId, administratorId, administrator: true);
+        var pending = new List<PendingPersonReview>();
+        using (var q = Cmd(con, tx, """
+            SELECT id,person_id,submitter,encrypted_name,living
+            FROM person_proposals WHERE family_id=$f AND state='Pending' ORDER BY id
+            LIMIT 100;
+            """, ("$f", familyId.ToString("D"))))
+        using (var reader = q.ExecuteReader())
+            while (reader.Read())
+            {
+                var personId = Guid.Parse(reader.GetString(1));
+                pending.Add(new PendingPersonReview(
+                    Guid.Parse(reader.GetString(0)),
+                    new Person(personId,
+                        Decrypt(familyId, personId, reader.GetFieldValue<byte[]>(3)),
+                        reader.GetInt64(4) != 0),
+                    Guid.Parse(reader.GetString(2))));
+            }
+        tx.Commit();
+        return pending;
+    }
+
     public IReadOnlyList<Person> ReadPeople(Guid familyId, Guid viewerId)
     {
         RequireIds(familyId, viewerId);
