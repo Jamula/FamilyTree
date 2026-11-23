@@ -40,4 +40,7 @@ grep -q '"publicFamilyRecords":false' "$TMP/response.txt" || { echo "FAIL: priva
 [[ "$(status "$API/api/v1/people")" == 501 ]] || { echo "FAIL: people API must fail closed"; exit 1; }
 [[ "$(status "$API/api/v1/tree")" == 501 ]] || { echo "FAIL: tree API must fail closed"; exit 1; }
 [[ "$(status "$WEB/")" == 200 ]] || { echo "FAIL: home page"; exit 1; }
+[[ "$(status "$WEB/demo")" == 200 ]] || { echo "FAIL: fictional explorer"; exit 1; }
+grep -q 'Fictional family explorer' "$TMP/response.txt" || { echo "FAIL: demo fixture marker"; exit 1; }
+[[ "$(status "$WEB/demo?above=9&below=-1&social=yes")" == 200 ]] || { echo "FAIL: bounded tree options"; exit 1; }
 printf 'PASS HTTP smoke: health, capabilities, fail-closed people/tree, web home\n'
