@@ -26,6 +26,7 @@ public static class GedcomLegacyCompatibility
 
         var version = "";
         var hasUtf8 = false;
+        var encodingCount = 0;
         var inHeader = true;
         var versionCount = 0;
         var versionLine = -1;
@@ -39,10 +40,13 @@ public static class GedcomLegacyCompatibility
             var line = lines[i];
             // CRLF was normalized above. Any residual CR is malformed and
             // cannot be allowed into individual names or record pointers.
-            if (line.Length > 1024 || line.Contains('\t') || line.Contains('\r'))
+            if (line.Length > 1024 || line.Any(char.IsControl))
                 return Reject("Malformed GEDCOM line");
             if (line.StartsWith("0 ", StringComparison.Ordinal))
             {
+                if (line == "0 HEAD" ||
+                    (line == "0 TRLR" && i != lines.Length - 1))
+                    return Reject("Repeated GEDCOM boundary record");
                 inHeader = false;
                 var record = line.Split(' ', 3);
                 if (record.Length == 3 && record[1].StartsWith('@'))
@@ -71,15 +75,22 @@ public static class GedcomLegacyCompatibility
             // SOUR/VERS describes the exporter. Only GEDC/VERS declares
             // the standard version, so versions are counted by parent tag.
             if (headerSection == "GEDC" &&
-                line.StartsWith("2 VERS ", StringComparison.Ordinal))
+                (line == "2 VERS" || line.StartsWith("2 VERS ", StringComparison.Ordinal)))
             {
                 versionCount++;
+                if (line == "2 VERS")
+                    return Reject("Empty GEDCOM format version");
                 versionLine = i;
                 version = line["2 VERS ".Length..];
+                if (string.IsNullOrWhiteSpace(version))
+                    return Reject("Empty GEDCOM format version");
             }
-            if (line == "1 CHAR UTF-8") hasUtf8 = true;
-            else if (line.StartsWith("1 CHAR ", StringComparison.Ordinal))
-                return Reject("Unsupported GEDCOM character encoding");
+            if (line == "1 CHAR" || line.StartsWith("1 CHAR ", StringComparison.Ordinal))
+            {
+                if (++encodingCount != 1 || line != "1 CHAR UTF-8")
+                    return Reject("Unsupported or duplicate GEDCOM character encoding");
+                hasUtf8 = true;
+            }
         }
         if (versionCount != 1)
             return Reject("Missing or conflicting GEDCOM version");
