@@ -51,6 +51,20 @@ def response(request_id: int, timeout: float = 30.0) -> dict:
     raise TimeoutError(f"MCP response {request_id} timed out")
 
 
+def tool_json(reply: dict):
+    """Decode the MCP text block instead of searching escaped JSON output."""
+    for block in reply.get("content", []):
+        if block.get("type") == "text" and isinstance(block.get("text"), str):
+            try:
+                return json.loads(block["text"])
+            except json.JSONDecodeError:
+                continue
+    structured = reply.get("structuredContent")
+    if isinstance(structured, (dict, list)):
+        return structured
+    raise AssertionError("Tool did not return structured demo JSON")
+
+
 try:
     send({
         "jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -78,21 +92,20 @@ try:
     overview_name = by_normalized["familyoverview"]
     send({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
           "params": {"name": overview_name, "arguments": {}}})
-    result = response(3)
-    rendered = json.dumps(result)
-    if "syntheticOnly" not in rendered or "true" not in rendered:
+    result = tool_json(response(3))
+    if not isinstance(result, dict) or result.get("syntheticOnly") is not True:
         raise AssertionError("MCP overview did not confirm synthetic-only scope")
     # Demonstrate the proposal workflow, without approving or persisting data.
     send({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
           "params": {"name": by_normalized["proposedemoperson"],
                      "arguments": {"displayName": "Fictional Proposal"}}})
-    staged = response(4)
-    if "pending" not in json.dumps(staged):
-        raise AssertionError("MCP proposal was not staged as pending")
+    staged = tool_json(response(4))
+    if staged.get("Status") != "pending" or staged.get("Persisted") is not False or staged.get("Approved") is not False:
+        raise AssertionError("MCP proposal must remain unapproved, pending and in memory")
     send({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
           "params": {"name": by_normalized["listdemodrafts"], "arguments": {}}})
-    listed = response(5)
-    if "Fictional Proposal" not in json.dumps(listed):
+    listed = tool_json(response(5))
+    if not isinstance(listed, list) or not any(draft.get("Summary") == "Fictional Proposal" for draft in listed):
         raise AssertionError("In-memory staged proposal was not discoverable")
     print("PASS MCP stdio handshake, fictional discovery and in-memory proposal call")
 finally:
