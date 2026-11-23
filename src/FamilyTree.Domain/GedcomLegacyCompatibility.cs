@@ -1,12 +1,18 @@
+using System.Text.RegularExpressions;
+
 namespace FamilyTree.Domain;
 
 /// <summary>
-/// Bounded non-persistent 5.5.1 UTF-8 compatibility PREVIEW only.
-/// This is not a full GEDCOM parser, data migrator, or permission to import.
-/// It refuses unknown encodings and unsupported versions without guessing.
+/// Bounded, nonpersistent 5.5.1 UTF-8 compatibility PREVIEW only.
+/// Rejects malformed links and unknown encodings rather than guessing. This
+/// adapter does not authorize any live import or claim GEDCOM conformance.
 /// </summary>
 public static class GedcomLegacyCompatibility
 {
+    private static readonly Regex Pointer = new(
+        @"^@[A-Za-z0-9_-]{1,40}@$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     public static GedcomPreviewReport Preview(string? input)
     {
         if (input is null || input.Length > 256_000 || input.Contains('\0'))
@@ -22,24 +28,53 @@ public static class GedcomLegacyCompatibility
         var hasUtf8 = false;
         var inHeader = true;
         var versionCount = 0;
+        var versionLine = -1;
         var headerSection = "";
+        var individualIds = new HashSet<string>(StringComparer.Ordinal);
+        var familyIds = new HashSet<string>(StringComparer.Ordinal);
+        var links = new List<(string Tag, string Pointer)>();
+
         for (var i = 1; i < lines.Length; i++)
         {
             var line = lines[i];
-            if (line.Length > 1024 || line.Contains('\t') ||
-                (line.Contains('\r') && !line.EndsWith("\r", StringComparison.Ordinal)))
+            // CRLF was normalized above. Any residual CR is malformed and
+            // cannot be allowed into individual names or record pointers.
+            if (line.Length > 1024 || line.Contains('\t') || line.Contains('\r'))
                 return Reject("Malformed GEDCOM line");
             if (line.StartsWith("0 ", StringComparison.Ordinal))
+            {
                 inHeader = false;
-            if (!inHeader) continue;
+                var record = line.Split(' ', 3);
+                if (record.Length == 3 && record[1].StartsWith('@'))
+                {
+                    if (record[2] == "INDI") individualIds.Add(record[1]);
+                    if (record[2] == "FAM") familyIds.Add(record[1]);
+                }
+            }
+            if (!inHeader)
+            {
+                if (line.StartsWith("1 ", StringComparison.Ordinal))
+                {
+                    var record = line.Split(' ', 3);
+                    if (record.Length > 1 &&
+                        record[1] is ("FAMC" or "FAMS" or "HUSB" or "WIFE" or "CHIL"))
+                    {
+                        if (record.Length != 3 || !Pointer.IsMatch(record[2]))
+                            return Reject("Malformed relationship pointer");
+                        links.Add((record[1], record[2]));
+                    }
+                }
+                continue;
+            }
             if (line.StartsWith("1 ", StringComparison.Ordinal))
                 headerSection = line.Split(' ', 3)[1];
-            // 2 VERS also occurs under SOUR for the exporting application's
-            // version. Only GEDC/VERS declares the GEDCOM format version.
+            // SOUR/VERS describes the exporter. Only GEDC/VERS declares
+            // the standard version, so versions are counted by parent tag.
             if (headerSection == "GEDC" &&
                 line.StartsWith("2 VERS ", StringComparison.Ordinal))
             {
                 versionCount++;
+                versionLine = i;
                 version = line["2 VERS ".Length..];
             }
             if (line == "1 CHAR UTF-8") hasUtf8 = true;
@@ -48,6 +83,15 @@ public static class GedcomLegacyCompatibility
         }
         if (versionCount != 1)
             return Reject("Missing or conflicting GEDCOM version");
+
+        // Validate both syntactic completeness and target record type before
+        // running the subset parser. The older parser only checked complete
+        // pointers, allowing some dangling malformed references through.
+        if (links.Any(link => link.Tag is "FAMC" or "FAMS"
+                ? !familyIds.Contains(link.Pointer)
+                : !individualIds.Contains(link.Pointer)))
+            return Reject("Unresolved relationship pointer");
+
         if (version == "7.0")
             return GedcomSevenSubset.Preview(normalized);
         if (version != "5.5.1")
@@ -55,17 +99,18 @@ public static class GedcomLegacyCompatibility
         if (!hasUtf8)
             return Reject("Legacy GEDCOM encoding must explicitly be UTF-8");
 
-        // The original 5.5.1 file is never overwritten. All records are
-        // passed through strict GEDCOM7 structural preflight and review.
-        var upgraded = normalized.Replace("\n2 VERS 5.5.1\n",
-            "\n2 VERS 7.0\n", StringComparison.Ordinal);
-        var preview = GedcomSevenSubset.Preview(upgraded);
+        // Rewrite only GEDC/VERS in a private copy, never SOURCE/VERS or the
+        // caller's original text. This is an inspection, not an import.
+        lines[versionLine] = "2 VERS 7.0";
+        var preview = GedcomSevenSubset.Preview(string.Join('\n', lines));
         if (!preview.Valid)
             return preview;
-        return preview with { Warnings =
-            preview.Warnings.Append(
+        return preview with
+        {
+            Warnings = preview.Warnings.Append(
                 "5.5.1 UTF-8 converted for inspection only; full import requires review")
-            .ToArray() };
+                .ToArray()
+        };
     }
 
     private static GedcomPreviewReport Reject(string text)
