@@ -26,6 +26,8 @@ internal static class FictionalWorkbenchHttpAssertions
             context.Connection.RemoteIpAddress =
                 context.Request.Headers["X-Test-Remote"] == "external"
                 ? IPAddress.Parse("203.0.113.10") : IPAddress.Loopback;
+            if (context.Request.Headers["X-Test-Chunked"] == "yes")
+                context.Request.ContentLength = null;
             await next();
         });
         SyntheticWorkbenchRoutes.Map(app);
@@ -106,6 +108,34 @@ internal static class FictionalWorkbenchHttpAssertions
             return await client.SendAsync(request);
         }
 
+        using (var oversize = await Send(new string('x', 3000)))
+            Check(oversize.StatusCode == HttpStatusCode.BadRequest,
+                "oversized form rejected before parsing");
+        using (var multipart = new HttpRequestMessage(HttpMethod.Post, "/demo/workbench"))
+        {
+            multipart.Headers.Add("Cookie", cookie);
+            var content = new MultipartFormDataContent();
+            content.Add(new StringContent("propose-person"), "action");
+            content.Add(new StringContent(token), "__RequestVerificationToken");
+            content.Add(new ByteArrayContent([1,2,3]), "private-file", "secret.png");
+            multipart.Content = content;
+            using var denied = await client.SendAsync(multipart);
+            Check(denied.StatusCode == HttpStatusCode.BadRequest,
+                "multipart file upload prohibited");
+        }
+        using (var chunked = new HttpRequestMessage(HttpMethod.Post, "/demo/workbench"))
+        {
+            chunked.Headers.Add("Cookie",cookie);
+            chunked.Headers.Add("X-Test-Chunked","yes");
+            chunked.Content = new FormUrlEncodedContent(
+            [
+                new("action", "propose-person"),
+                new("__RequestVerificationToken", token)
+            ]);
+            using var denied = await client.SendAsync(chunked);
+            Check(denied.StatusCode == HttpStatusCode.BadRequest,
+                "unknown-length chunked body prohibited");
+        }
         using (var denied = await Send("propose-person", includeToken: false))
             Check(denied.StatusCode == HttpStatusCode.BadRequest,
                 "CSRF request without token rejected");
