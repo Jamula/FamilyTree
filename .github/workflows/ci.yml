@@ -43,13 +43,13 @@ jobs:
         run: test -s coverage.cobertura.xml
       - name: Coverage reporter parser regression tests
         run: python3 scripts/test-report-coverage.py
-      - name: Publish measured coverage baseline
-        run: python3 scripts/report-coverage.py coverage.cobertura.xml --min-overall 90 --min-domain 90
       - name: HTTP smoke with synthetic data and fail-closed APIs
         run: bash scripts/smoke-http.sh
       - name: One-command Aspire AppHost smoke
         run: bash scripts/smoke-aspire.sh
       - name: Local fictional MCP protocol handshake
         run: python3 scripts/smoke-mcp.py
+      - name: Measure and enforce M1 line coverage floor
+        run: python3 scripts/report-coverage.py coverage.cobertura.xml --min-overall 90 --min-domain 90
 # No paid Code Quality upload or persisted artifacts: $0 cost guardrail.
 # Keep any future action SHA-pinned, approved, and behind explicit spending approval.
