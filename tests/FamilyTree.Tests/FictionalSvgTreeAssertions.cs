@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using FamilyTree.Domain;
 using FamilyTree.Web;
 
@@ -31,9 +32,16 @@ internal static class FictionalSvgTreeAssertions
               html.Contains("&amp;siblings=no", StringComparison.Ordinal) &&
               html.Contains("&amp;social=yes", StringComparison.Ordinal),
             "SVG recentering preserves independent tree controls");
-        Check(html.Contains("stroke-dasharray='5 5'", StringComparison.Ordinal) &&
+        Check(html.Contains("stroke-dasharray='2 6'", StringComparison.Ordinal) &&
               html.Contains("#35745b", StringComparison.Ordinal),
-            "social and parent edges have distinct visual semantics");
+            "social and parent edges have distinct dash and color semantics");
+        var independentCurves = Regex.Matches(html, @"<path d='([^']+)'")
+            .Select(match => match.Groups[1].Value).Distinct().ToArray();
+        Check(independentCurves.Length == 2,
+            "parallel friend and parent relationships must not visually overlap");
+        Check(html.Contains("Parent connection", StringComparison.Ordinal) &&
+              html.Contains("Friend connection", StringComparison.Ordinal),
+            "relationship SVG paths have accessible typed descriptions");
         var inferredTree = tree with
         {
             Relationships = [],
