@@ -41,6 +41,10 @@ jobs:
         run: dotnet dotnet-coverage collect "dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj --no-restore --configuration Release" --output coverage.cobertura.xml --output-format cobertura
       - name: Check coverage was generated
         run: test -s coverage.cobertura.xml
+      - name: Coverage reporter parser regression tests
+        run: python3 scripts/test-report-coverage.py
+      - name: Publish measured coverage baseline
+        run: python3 scripts/report-coverage.py coverage.cobertura.xml
       - name: HTTP smoke with synthetic data and fail-closed APIs
         run: bash scripts/smoke-http.sh
       - name: One-command Aspire AppHost smoke
