@@ -54,11 +54,12 @@ public static class FictionalSvgTree
         html.Append("<desc id='tree-svg-description'>Links between invented people; ");
         html.Append("select any person to recenter. The following table is an alternative.</desc>");
 
-        foreach (var edge in tree.Relationships)
+        foreach (var edge in tree.Relationships.Where(edge =>
+            positions.ContainsKey(edge.FromPersonId) &&
+            positions.ContainsKey(edge.ToPersonId)))
         {
-            if (!positions.TryGetValue(edge.FromPersonId, out var first) ||
-                !positions.TryGetValue(edge.ToPersonId, out var second))
-                continue;
+            var first = positions[edge.FromPersonId];
+            var second = positions[edge.ToPersonId];
             var social = edge.Kind is RelationKind.Friend or RelationKind.Neighbor
                 or RelationKind.Mentor or RelationKind.Other;
             var parent = edge.Kind == RelationKind.Parent;
