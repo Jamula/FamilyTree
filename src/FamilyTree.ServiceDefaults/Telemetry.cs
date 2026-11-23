@@ -15,6 +15,11 @@ public enum FamilyOperation
     Other
 }
 
+
+/// <summary>Bounded non-identifying future workflow categories.</summary>
+public enum FamilyWorkload { Authorization, GraphTraversal, GedcomImport, GedcomExport, Moderation, AiRequest }
+public enum FamilyOutcome { Allowed, Denied, Failed }
+
 public static class FamilyTelemetry
 {
     public const string SourceName = "FamilyTree.Api";
@@ -25,6 +30,13 @@ public static class FamilyTelemetry
         Meter.CreateCounter<long>("familytree.http.requests");
     private static readonly Histogram<double> Duration =
         Meter.CreateHistogram<double>("familytree.http.duration", unit: "ms");
+
+    private static readonly Counter<long> WorkCounter =
+        Meter.CreateCounter<long>("familytree.workflow.operations");
+    private static readonly Histogram<double> WorkDuration =
+        Meter.CreateHistogram<double>("familytree.workflow.duration", unit: "ms");
+    private static readonly Counter<long> AiTokens =
+        Meter.CreateCounter<long>("familytree.ai.tokens");
 
     public static FamilyOperation ClassifyPath(string? path)
     {
@@ -63,6 +75,39 @@ public static class FamilyTelemetry
         };
         RequestCounter.Add(1, tags);
         Duration.Record(elapsed.TotalMilliseconds, tags);
+    }
+
+    public static void RecordWorkflow(FamilyWorkload workload, FamilyOutcome outcome, TimeSpan elapsed)
+    {
+        var tags = new TagList
+        {
+            { "familytree.workload", workload switch
+                {
+                    FamilyWorkload.Authorization => "authorization",
+                    FamilyWorkload.GraphTraversal => "graph",
+                    FamilyWorkload.GedcomImport => "gedcom_import",
+                    FamilyWorkload.GedcomExport => "gedcom_export",
+                    FamilyWorkload.Moderation => "moderation",
+                    _ => "ai"
+                }
+            },
+            { "familytree.outcome", outcome switch
+                {
+                    FamilyOutcome.Allowed => "allowed",
+                    FamilyOutcome.Denied => "denied",
+                    _ => "failed"
+                }
+            }
+        };
+        WorkCounter.Add(1, tags);
+        WorkDuration.Record(elapsed.TotalMilliseconds, tags);
+    }
+
+    /// <summary>Record only the numeric token count, never the prompt or response.</summary>
+    public static void RecordAiTokens(long tokens)
+    {
+        if (tokens < 0) throw new ArgumentOutOfRangeException(nameof(tokens));
+        AiTokens.Add(tokens);
     }
 
     private static string ToLabel(FamilyOperation operation) => operation switch
