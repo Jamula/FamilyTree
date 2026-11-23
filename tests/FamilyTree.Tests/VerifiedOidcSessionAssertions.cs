@@ -68,5 +68,5 @@ internal static class VerifiedOidcSessionAssertions
     private static void Check(bool ok,string message)
     {if(!ok)throw new InvalidOperationException(message);}
     private static void Expect<T>(Action action,string message) where T:Exception
-    {try{action();return;}catch(T){return;}throw new InvalidOperationException(message);}
+    {var caught=false;try{action();}catch(T){caught=true;}if(!caught)throw new InvalidOperationException(message);}
 }
