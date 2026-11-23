@@ -26,6 +26,8 @@ public static class VerifiedOidcSession
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(provider);
         if (!identity.IsAuthenticated ||
+            string.IsNullOrWhiteSpace(verifiedIssuer) ||
+            string.IsNullOrWhiteSpace(provider.Authority) ||
             !string.Equals(verifiedIssuer, provider.Authority, StringComparison.Ordinal) ||
             string.IsNullOrWhiteSpace(verifiedSubject) ||
             verifiedSubject.Length > 256 || verifiedSubject.Any(char.IsControl) ||
@@ -39,7 +41,7 @@ public static class VerifiedOidcSession
             identity.RemoveClaim(old);
         identity.AddClaim(new Claim(Marker, "true"));
         identity.AddClaim(new Claim(ProviderClaim, provider.Name));
-        identity.AddClaim(new Claim(IssuerClaim, verifiedIssuer));
+        identity.AddClaim(new Claim(IssuerClaim, verifiedIssuer!));
         identity.AddClaim(new Claim(SubjectClaim, verifiedSubject));
     }
 
