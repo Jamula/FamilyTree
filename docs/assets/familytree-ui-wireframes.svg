@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 1010" role="img" aria-labelledby="wireTitle wireDesc">
+  <title id="wireTitle">FamilyTree concept wireframes</title>
+  <desc id="wireDesc">Two gray-scale, fictional-data-only desktop wireframes: a person-centered family tree with filters and a details sidebar, and a separate moderation workflow for proposed edits.</desc>
+  <rect width="1440" height="1010" fill="#edf1f5"/>
+  <text x="42" y="42" fill="#334155" font-size="24" font-weight="700" font-family="Arial,Helvetica,sans-serif">FAMILYTREE · CONCEPT WIREFRAMES</text>
+  <text x="42" y="72" fill="#64748b" font-size="17" font-family="Arial,Helvetica,sans-serif">All people are fictional. This is a design preview, not a working screenshot or a promise of finished features.</text>
+
+  <!-- Concept A: tree explorer -->
+  <rect x="36" y="99" width="1368" height="525" rx="18" fill="white" stroke="#94a3b8" stroke-width="2"/>
+  <rect x="37" y="100" width="1366" height="68" rx="18" fill="#f8fafc"/>
+  <rect x="37" y="151" width="1366" height="17" fill="#f8fafc"/>
+  <path d="M37 168 H1403" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="66" y="143" fill="#0f172a" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="700">FamilyTree</text>
+  <rect x="268" y="116" width="460" height="37" rx="9" fill="white" stroke="#94a3b8"/>
+  <text x="291" y="141" font-family="Arial,Helvetica,sans-serif" fill="#94a3b8" font-size="17">Search people or relationships…</text>
+  <text x="1085" y="141" font-family="Arial,Helvetica,sans-serif" fill="#334155" font-size="16">Vale family (fictional)</text>
+  <rect x="1294" y="113" width="92" height="38" rx="18" fill="#e2e8f0"/>
+  <text x="1310" y="137" font-family="Arial,Helvetica,sans-serif" fill="#475569" font-size="14" font-weight="700">MOCK UI</text>
+
+  <rect x="37" y="169" width="225" height="453" fill="#f8fafc"/>
+  <path d="M262 169 V624" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="66" y="205" font-family="Arial,Helvetica,sans-serif" fill="#64748b" font-size="13" font-weight="700">NAVIGATION</text>
+  <rect x="50" y="227" width="198" height="41" rx="8" fill="#e2e8f0"/>
+  <text x="69" y="254" font-family="Arial,Helvetica,sans-serif" fill="#0f172a" font-size="17" font-weight="700">Tree Explorer</text>
+  <text x="69" y="302" font-family="Arial,Helvetica,sans-serif" fill="#475569" font-size="17">People</text>
+  <text x="69" y="344" font-family="Arial,Helvetica,sans-serif" fill="#475569" font-size="17">Review Queue</text>
+  <text x="69" y="386" font-family="Arial,Helvetica,sans-serif" fill="#475569" font-size="17">GEDCOM Exchange</text>
+  <text x="69" y="428" font-family="Arial,Helvetica,sans-serif" fill="#475569" font-size="17">Privacy Settings</text>
+  <rect x="50" y="561" width="198" height="45" rx="8" fill="#fff7ed" stroke="#cbd5e1"/>
+  <text x="62" y="581" fill="#9a3412" font-family="Arial,Helvetica,sans-serif" font-size="13" font-weight="700">PRIVATE ACCESS</text>
+  <text x="62" y="597" fill="#475569" font-family="Arial,Helvetica,sans-serif" font-size="12">Not yet enabled</text>
+
+  <text x="292" y="214" fill="#0f172a" font-family="Arial,Helvetica,sans-serif" font-size="22" font-weight="700">A · Person-centered family tree</text>
+  <rect x="288" y="231" width="112" height="34" rx="8" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="300" y="253" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="15">Above: 4</text>
+  <rect x="411" y="231" width="106" height="34" rx="8" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="425" y="253" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="15">Below: 4</text>
+  <rect x="529" y="231" width="131" height="34" rx="8" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="543" y="253" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="15">Spouses: On</text>
+  <rect x="671" y="231" width="119" height="34" rx="8" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="684" y="253" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="15">Social: Off</text>
+
+  <!-- Connections are part of the fictional catalog: Iris Vale and Anya Noor are parents of Mira and Kian Vale -->
+  <path d="M456 346 V369 H749 V346 M602 369 V411 M749 369 V411" fill="none" stroke="#94a3b8" stroke-width="3" stroke-linecap="round"/>
+  <rect x="353" y="294" width="206" height="51" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+  <text x="386" y="324" fill="#1e293b" font-family="Arial,Helvetica,sans-serif" font-size="20" font-weight="700">Iris Vale</text>
+  <rect x="646" y="294" width="206" height="51" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+  <text x="681" y="324" fill="#1e293b" font-family="Arial,Helvetica,sans-serif" font-size="20" font-weight="700">Anya Noor</text>
+  <rect x="504" y="411" width="197" height="58" rx="10" fill="#e2e8f0" stroke="#334155" stroke-width="3"/>
+  <text x="544" y="437" fill="#0f172a" font-family="Arial,Helvetica,sans-serif" font-size="20" font-weight="700">Mira Vale</text>
+  <text x="553" y="457" fill="#475569" font-family="Arial,Helvetica,sans-serif" font-size="13">Selected person</text>
+  <rect x="711" y="411" width="177" height="58" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+  <text x="744" y="444" fill="#1e293b" font-family="Arial,Helvetica,sans-serif" font-size="20" font-weight="700">Kian Vale</text>
+  <text x="310" y="535" fill="#64748b" font-family="Arial,Helvetica,sans-serif" font-size="15">Recenter by selecting any authorized person · Keyboard accessible alternative</text>
+  <text x="310" y="571" fill="#94a3b8" font-family="Arial,Helvetica,sans-serif" font-size="13">Tree layout illustrated. Actual M1 private tree still needs authentication and persistence.</text>
+
+  <!-- detail -->
+  <path d="M1005 169 V624" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="1031" y="215" fill="#0f172a" font-family="Arial,Helvetica,sans-serif" font-size="20" font-weight="700">Person details</text>
+  <circle cx="1064" cy="276" r="27" fill="#e2e8f0" stroke="#94a3b8"/>
+  <text x="1050" y="283" fill="#64748b" font-family="Arial,Helvetica,sans-serif" font-size="20" font-weight="700">MV</text>
+  <text x="1102" y="273" fill="#0f172a" font-family="Arial,Helvetica,sans-serif" font-size="22" font-weight="700">Mira Vale</text>
+  <text x="1102" y="297" fill="#64748b" font-family="Arial,Helvetica,sans-serif" font-size="15">Living · Fictional</text>
+  <path d="M1030 323 H1374" stroke="#e2e8f0" stroke-width="2"/>
+  <text x="1032" y="356" fill="#475569" font-family="Arial,Helvetica,sans-serif" font-size="16">Parents</text>
+  <text x="1150" y="356" fill="#0f172a" font-family="Arial,Helvetica,sans-serif" font-size="16">2 visible</text>
+  <text x="1032" y="394" fill="#475569" font-family="Arial,Helvetica,sans-serif" font-size="16">Dates</text>
+  <text x="1150" y="394" fill="#64748b" font-family="Arial,Helvetica,sans-serif" font-size="16">Restricted</text>
+  <text x="1032" y="432" fill="#475569" font-family="Arial,Helvetica,sans-serif" font-size="16">Media</text>
+  <text x="1150" y="432" fill="#64748b" font-family="Arial,Helvetica,sans-serif" font-size="16">Restricted</text>
+  <rect x="1032" y="464" width="340" height="43" rx="9" fill="#e2e8f0" stroke="#94a3b8"/>
+  <text x="1137" y="492" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="700">Propose edit</text>
+  <rect x="1032" y="517" width="340" height="43" rx="9" fill="#fff" stroke="#94a3b8"/>
+  <text x="1123" y="545" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="17">View relationships</text>
+
+  <!-- Concept B: Review -->
+  <rect x="36" y="651" width="1368" height="331" rx="18" fill="white" stroke="#94a3b8" stroke-width="2"/>
+  <text x="64" y="696" fill="#0f172a" font-family="Arial,Helvetica,sans-serif" font-size="25" font-weight="700">B · Propose, review, approve or reject</text>
+  <text x="64" y="725" fill="#64748b" font-family="Arial,Helvetica,sans-serif" font-size="16">A future private-family review workflow. Only simulated fictional review is runnable today.</text>
+
+  <rect x="64" y="749" width="383" height="195" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="84" y="783" fill="#0f172a" font-family="Arial,Helvetica,sans-serif" font-size="19" font-weight="700">1 · Draft an update</text>
+  <text x="84" y="814" fill="#475569" font-family="Arial,Helvetica,sans-serif" font-size="16">Person: Fictional Guest 1</text>
+  <text x="84" y="842" fill="#475569" font-family="Arial,Helvetica,sans-serif" font-size="16">Change: Add friendship link</text>
+  <rect x="85" y="870" width="220" height="48" rx="9" fill="#e2e8f0" stroke="#94a3b8"/>
+  <text x="115" y="900" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="700">Submit proposal</text>
+  <path d="M460 845 H506" stroke="#94a3b8" stroke-width="3" fill="none"/>
+  <path d="M497 836 L510 845 L497 854" stroke="#94a3b8" stroke-width="3" fill="none"/>
+
+  <rect x="524" y="749" width="389" height="195" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="545" y="783" fill="#0f172a" font-family="Arial,Helvetica,sans-serif" font-size="19" font-weight="700">2 · Independent review</text>
+  <text x="545" y="814" fill="#475569" font-family="Arial,Helvetica,sans-serif" font-size="16">Pending: friendship proposal</text>
+  <text x="545" y="842" fill="#64748b" font-family="Arial,Helvetica,sans-serif" font-size="15">Reviewer cannot approve own edits</text>
+  <rect x="545" y="870" width="165" height="48" rx="9" fill="#e2e8f0" stroke="#94a3b8"/>
+  <text x="584" y="900" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="700">Approve</text>
+  <rect x="723" y="870" width="165" height="48" rx="9" fill="white" stroke="#94a3b8"/>
+  <text x="779" y="900" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="700">Reject</text>
+  <path d="M927 845 H970" stroke="#94a3b8" stroke-width="3" fill="none"/>
+  <path d="M961 836 L974 845 L961 854" stroke="#94a3b8" stroke-width="3" fill="none"/>
+
+  <rect x="988" y="749" width="384" height="195" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="1009" y="783" fill="#0f172a" font-family="Arial,Helvetica,sans-serif" font-size="19" font-weight="700">3 · Verified audit trail</text>
+  <text x="1009" y="815" fill="#475569" font-family="Arial,Helvetica,sans-serif" font-size="16">Decision: Approved</text>
+  <text x="1009" y="842" fill="#64748b" font-family="Arial,Helvetica,sans-serif" font-size="15">Private audit without names/content</text>
+  <rect x="1009" y="870" width="230" height="48" rx="9" fill="white" stroke="#94a3b8"/>
+  <text x="1045" y="900" fill="#334155" font-family="Arial,Helvetica,sans-serif" font-size="17" font-weight="700">Undo approval</text>
+</svg>
