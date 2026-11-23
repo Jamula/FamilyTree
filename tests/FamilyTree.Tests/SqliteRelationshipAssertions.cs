@@ -17,6 +17,9 @@ internal static class SqliteRelationshipAssertions
         var key = RandomNumberGenerator.GetBytes(32);
         var family = Guid.NewGuid();
         var admin = Guid.NewGuid();
+        var otherFamily = Guid.NewGuid();
+        var otherAdmin = Guid.NewGuid();
+        var otherActor = Guid.NewGuid();
         var actor = Guid.NewGuid();
         var other = Guid.NewGuid();
         var personA = new Person(Guid.NewGuid(), "Fictional Silver");
@@ -31,6 +34,12 @@ internal static class SqliteRelationshipAssertions
             using (var store = new SqliteFamilyStore(database, key))
             {
                 store.CreateFictionalFamily(family, admin);
+                store.CreateFictionalFamily(otherFamily, otherAdmin);
+                var otherInvitation = store.IssueInvitation(otherFamily, otherAdmin,
+                    otherActor, DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow);
+                store.AcceptInvitation(otherFamily, otherActor, otherInvitation,
+                    DateTimeOffset.UtcNow);
+                store.ApproveMember(otherFamily, otherAdmin, otherActor);
                 var invite = store.IssueInvitation(family, admin, actor,
                     DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow);
                 store.AcceptInvitation(family, actor, invite, DateTimeOffset.UtcNow);
@@ -87,6 +96,19 @@ internal static class SqliteRelationshipAssertions
                     Guid.NewGuid(), admin, pA, true), "cross-family proposal denied");
                 store.ReviewRelationship(family, admin, pA, true);
                 store.ReviewRelationship(family, admin, pB, true);
+                var foreignAuditBefore = store.CountAudit(otherFamily, otherAdmin);
+                Expect<InvalidOperationException>(() => store.ProposeRelationship(
+                    otherFamily, otherActor, edgeA),
+                    "active other-family member cannot propose links to foreign people");
+                Expect<InvalidOperationException>(() => store.ReviewRelationship(
+                    otherFamily, otherAdmin, pA, true),
+                    "active other-family administrator cannot review foreign proposal");
+                Expect<InvalidOperationException>(() => store.UndoRelationship(
+                    otherFamily, otherAdmin, pA),
+                    "active other-family administrator cannot undo foreign proposal");
+                Check(store.ReadRelationships(otherFamily, otherActor).Count == 0 &&
+                    store.CountAudit(otherFamily, otherAdmin) == foreignAuditBefore,
+                    "foreign graph and audit unchanged after cross-family attacks");
                 Check(store.ReadRelationships(family, actor).Select(x=>x.Id).ToHashSet()
                     .SetEquals(new[] {edgeA.Id, edgeB.Id}),
                     "multiple independent social links retained");
