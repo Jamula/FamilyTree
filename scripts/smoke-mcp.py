@@ -67,12 +67,17 @@ try:
     send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
     tools = response(2)["tools"]
     names = {tool["name"] for tool in tools}
-    required = {"FamilyOverview", "ListDemoPeople", "InspectDemoPerson",
-                "ProposeDemoPerson", "ListDemoDrafts"}
-    if not required.issubset(names):
-        raise AssertionError("Expected fictional MCP tools are missing")
+    # SDK tool-name conventions can differ (PascalCase vs snake_case).
+    # Match actual discovered names rather than assuming a convention.
+    normalize = lambda value: "".join(ch for ch in value.lower() if ch.isalnum())
+    by_normalized = {normalize(name): name for name in names}
+    required = {"familyoverview", "listdemopeople", "inspectdemoperson",
+                "proposedemoperson", "listdemodrafts"}
+    if not required.issubset(by_normalized):
+        raise AssertionError(f"Expected fictional MCP tools missing; found: {sorted(names)}")
+    overview_name = by_normalized["familyoverview"]
     send({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-          "params": {"name": "FamilyOverview", "arguments": {}}})
+          "params": {"name": overview_name, "arguments": {}}})
     result = response(3)
     rendered = json.dumps(result)
     if '"syntheticOnly"' not in rendered or 'true' not in rendered:
