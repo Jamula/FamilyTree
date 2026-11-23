@@ -61,7 +61,7 @@ public static class GedcomSevenSubset
                 Complete();
                 recordPointer = null;
                 recordType = tokens[0];
-                if (tokens[0].StartsWith('@', StringComparison.Ordinal))
+                if (tokens[0].StartsWith('@'))
                 {
                     if (tokens.Length < 2) return Reject("Malformed record");
                     recordPointer = tokens[0];
