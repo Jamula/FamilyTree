@@ -40,6 +40,7 @@ def count(source):
     # Distinct source lines, not classes: C# nested/partial classes overlap.
     observations = defaultdict(dict)
     branch_counts = defaultdict(dict)
+    missing_branch_counts = defaultdict(int)
     for package in root.findall("./packages/package"):
         package_name = package.get("name", "")
         for cls in package.findall("./classes/class"):
@@ -75,6 +76,14 @@ def count(source):
                             raise ValueError("Conflicting branch totals on source line")
                         else:
                             branch_counts[component][branch_key] = (max(covered, previous[0]), total)
+                    else:
+                        missing_branch_counts[component] += 1
+    # Some Cobertura producers supply only a global branch-rate, not per-line
+    # condition counts. Mark an entire component NOT MEASURED in that case,
+    # but never publish an inflated partial rate from a damaged mixed report.
+    for component, missing in missing_branch_counts.items():
+        if missing and branch_counts.get(component):
+            raise ValueError("Incomplete branch conditions for component")
     return observations, branch_counts
 
 
