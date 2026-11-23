@@ -74,6 +74,14 @@ internal static class GedcomLegacyCompatibilityAssertions
             StringComparison.Ordinal)).Valid,
             "zero-padded level cannot bypass missing pointer terminator");
         Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 FAMC @F1@", "2 FAMC @F1@",
+            StringComparison.Ordinal)).Valid,
+            "nested person-to-family pointer at wrong level denied");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 FAMC @F1@", "1 CHIL @I1@",
+            StringComparison.Ordinal)).Valid,
+            "family CHIL pointer cannot appear within an individual record");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
             "1 NAME Alex /Example/", "1 NAME Alex\rExample\r",
             StringComparison.Ordinal)).Valid,
             "stray CR control characters denied");
