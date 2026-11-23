@@ -20,7 +20,7 @@ For the development API, use `dotnet run --project src/FamilyTree.Api/FamilyTree
 **Important:** The web page is only a landing page, not an authenticated genealogy app. The API deliberately returns 501 for people/tree endpoints until access control is implemented. Do not run the prototype with private family data.
 
 ## CI and cost
-PR checks use GitHub's standard hosted runners for this public repository; GitHub documents those runners as free for public repositories. The workflow generates coverage without uploading artifact storage or enabling usage-billed AI Code Quality. Do not enable paid services or deployments without explicit owner approval. See [COST_POLICY.md](COST_POLICY.md).
+PR checks use GitHub's standard hosted runners for this public repository; GitHub documents those runners as free for public repositories. The workflow generates coverage without uploading artifact storage or enabling usage-billed AI Code Quality. Do not enable paid services or deployments without explicit owner approval. See [cost_policy.md](cost_policy.md).
 
 ## Local orchestration
 Aspire/AppHost and OpenTelemetry service defaults are tracked separately in #23 and #22 and must preserve optional, no-cost local operation.
