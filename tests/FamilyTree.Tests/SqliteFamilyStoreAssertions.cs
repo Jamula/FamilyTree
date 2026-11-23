@@ -23,6 +23,7 @@ internal static class SqliteFamilyStoreAssertions
         var member = Guid.NewGuid();
         var unknown = Guid.NewGuid();
         var fictionalPerson = new Person(Guid.NewGuid(), "Fictional River Person");
+        var pendingCipherProposal = Guid.Empty;
         try
         {
             Expect<ArgumentException>(() => new SqliteFamilyStore("relative.db", secret),
@@ -121,6 +122,8 @@ internal static class SqliteFamilyStoreAssertions
                 Check(!Encoding.UTF8.GetString(File.ReadAllBytes(path)).Contains(
                     fictionalPerson.DisplayName, StringComparison.Ordinal),
                     "person names encrypted at rest");
+                pendingCipherProposal = store.ProposePerson(family, admin,
+                    new Person(Guid.NewGuid(), "Fictional Unapproved Cipher"));
             }
             using (var reopened = new SqliteFamilyStore(path, secret))
             {
@@ -143,8 +146,13 @@ internal static class SqliteFamilyStoreAssertions
                 Expect<UnauthorizedAccessException>(() => reopened.ReadPeople(
                     family, member), "revocation persists across restart");
             using (var wrong = new SqliteFamilyStore(path, wrongSecret))
+            {
                 Expect<InvalidDataException>(() => wrong.ReadPeople(family, admin),
                     "wrong encryption key cannot reveal private names");
+                Expect<InvalidDataException>(() => wrong.ReviewPerson(
+                    family, admin, pendingCipherProposal, true),
+                    "wrong-key ciphertext cannot be approved into authoritative graph");
+            }
             using (var direct = new SqliteConnection(
                 new SqliteConnectionStringBuilder { DataSource = path }.ToString()))
             {
