@@ -11,6 +11,9 @@ This project uses native .NET diagnostics (ActivitySource and Meter) with an int
 - No identifier or caller-supplied attribute can be included through this API.
 - No OTLP exporter is created unless explicitly enabled with a valid endpoint. Non-local endpoints require a separate privacy and cost approval flag.
 
+## Bounded workload hooks
+`FamilyTelemetry.RecordWorkflow` has enums for authorization, graph traversal, GEDCOM import/export, moderation and AI requests, and reports bounded allowed/denied/failed counts and durations. `RecordAiTokens` records only numeric token usage. **These are instrumentation hooks, not a claim that incomplete workflows already exist**. M1/M2 feature implementations must call them from trusted API boundaries after permissions are enforced.
+
 ## Forbidden information
 Names, email addresses, account/family/person IDs, birth dates, GEDCOM contents, full URLs, request paths containing identifiers, query strings, photos, tokens, cookies, prompts, message bodies, IP addresses and exception detail strings.
 
