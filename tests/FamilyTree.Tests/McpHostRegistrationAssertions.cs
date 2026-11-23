@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
+using ModelContextProtocol.Protocol;
 
 internal static class McpHostRegistrationAssertions
 {
@@ -19,10 +20,29 @@ internal static class McpHostRegistrationAssertions
         var returned = McpHostConfiguration.Configure(builder);
         Check(ReferenceEquals(returned, builder) && builder.Services.Count > before,
             "production MCP stdio services registered on the original host");
-        Check(builder.Services.Any(item =>
-            item.ServiceType.FullName?.Contains("ModelContextProtocol",
-                StringComparison.Ordinal) == true),
-            "MCP server registered rather than a web listener");
+        // SDK v2.4.0 registers stdio as exactly one singleton ITransport
+        // factory, and a single-session hosted service. Do not resolve the
+        // factory here: constructing StdioServerTransport in-process may
+        // open a blocking reader on the test process's stdin.
+        var transports = builder.Services.Where(item =>
+            item.ServiceType == typeof(ITransport)).ToArray();
+        Check(transports.Length == 1 &&
+              transports[0].Lifetime == ServiceLifetime.Singleton &&
+              transports[0].ImplementationFactory?.Method.Name.Contains(
+                  "WithStdioServerTransport", StringComparison.Ordinal) == true,
+            "exactly one stdio transport factory, not HTTP/stream, must be registered");
+        var hosted = builder.Services.Where(item =>
+            item.ServiceType == typeof(IHostedService)).ToArray();
+        Check(hosted.Any(item => item.ImplementationType?.Name ==
+              "SingleSessionMcpServerHostedService"),
+            "MCP must use the SDK single-session stdio hosted service");
+        Check(!hosted.Any(item =>
+                item.ImplementationType?.FullName?.Contains("WebHost",
+                    StringComparison.OrdinalIgnoreCase) == true) &&
+              !builder.Services.Any(item =>
+                item.ServiceType.FullName ==
+                    "Microsoft.AspNetCore.Hosting.Server.IServer"),
+            "HTTP web-host and Kestrel listeners must not be registered");
 
         // Constructing a host (without starting it) must not open a port,
         // consume stdin, launch a remote provider or persist any records.
