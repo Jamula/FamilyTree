@@ -83,6 +83,7 @@ public static class SyntheticTreeExplorer
         html.Append("<p>Select a person or use a row's Center link. Keyboard users can Tab");
         html.Append(" through center links, and touch users can tap links.");
         html.Append(" The table is an accessible alternative to pan/zoom.</p></details>");
+        html.Append(FictionalSvgTree.Render(tree, options));
         html.Append("<h2 id='visible-people'>Visible fictional people</h2>");
         html.Append("<table><caption>Keyboard-accessible generation list</caption><thead>");
         html.Append("<tr><th scope='col'>Person</th><th scope='col'>Relative generation</th></tr></thead><tbody>");
