@@ -14,7 +14,7 @@ from collections import defaultdict
 from pathlib import Path
 
 COMPONENTS = (
-    "Domain", "Api", "Web", "Mcp", "ServiceDefaults", "SyntheticDemo",
+    "Domain", "Persistence", "Api", "Web", "Mcp", "ServiceDefaults", "SyntheticDemo",
 )
 SOURCE = re.compile(r"(?:^|/)src/FamilyTree\.([A-Za-z]+)/")
 CONDITION = re.compile(r"\((\d+)/(\d+)\)")
