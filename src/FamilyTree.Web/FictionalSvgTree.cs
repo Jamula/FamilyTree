@@ -75,18 +75,21 @@ public static class FictionalSvgTree
         {
             var edges = group.OrderBy(edge => edge.Kind).ThenBy(edge => edge.Inferred)
                 .ToArray();
-            for (var index = 0; index < edges.Length; index++)
+            foreach (var placement in edges.Select((edge, index) => (
+                Edge: edge, Index: index,
+                From: positions[edge.From], To: positions[edge.To])))
             {
-                var edge = edges[index];
-                var from = positions[edge.From];
-                var to = positions[edge.To];
+                var edge = placement.Edge;
+                var index = placement.Index;
+                var from = placement.From;
+                var to = placement.To;
                 var fromX = from.X + NodeWidth / 2;
                 var fromY = from.Y + NodeHeight / 2;
                 var toX = to.X + NodeWidth / 2;
                 var toY = to.Y + NodeHeight / 2;
                 var bend = (index - (edges.Length - 1) / 2.0) * 32;
-                var midX = (fromX + toX) / 2.0;
-                var midY = (fromY + toY) / 2.0;
+                var midX = ((double)fromX + toX) / 2.0;
+                var midY = ((double)fromY + toY) / 2.0;
                 double controlX, controlY;
                 if (fromY == toY)
                 {
@@ -97,8 +100,8 @@ public static class FictionalSvgTree
                 }
                 else
                 {
-                    var dx = toX - fromX;
-                    var dy = toY - fromY;
+                    double dx = toX - fromX;
+                    double dy = toY - fromY;
                     var length = Math.Sqrt(dx * dx + dy * dy);
                     controlX = midX - dy / length * bend;
                     controlY = midY + dx / length * bend;
