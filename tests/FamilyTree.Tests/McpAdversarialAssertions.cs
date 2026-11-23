@@ -94,6 +94,7 @@ internal static class McpAdversarialAssertions
             "overflow cannot mutate queue");
         Check(snapshot.Count==0, "previous snapshot does not change with later mutations");
         Console.WriteLine("PASS MCP invalid tools, bounded input, nonpublication, overflow and concurrency");
+        McpHostRegistrationAssertions.Run();
     }
 
     private static void Check(bool value, string message)
