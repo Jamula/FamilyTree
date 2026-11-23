@@ -114,6 +114,36 @@ internal static class SqliteRelationshipAssertions
             {
                 Check(store.ReadRelationships(family, actor).Count == 2,
                     "approved links survive restart");
+                var undoInbox = store.ListApprovedRelationshipsForUndo(family, admin);
+                Check(undoInbox.Count == 2 &&
+                    undoInbox.All(x => x.Relationship is not null &&
+                        !x.ContentUnreadable && x.SubmittedBy == actor),
+                    "independent moderator rediscovers exact approved proposals after restart");
+                Expect<UnauthorizedAccessException>(() =>
+                    store.ListApprovedRelationshipsForUndo(family, actor),
+                    "ordinary member cannot enumerate approved undo inbox");
+                var nullLabel = Relationship.Create(personA.Id, personB.Id,
+                    RelationKind.Spouse, null);
+                var emptyLabel = Relationship.Create(personA.Id, personB.Id,
+                    RelationKind.Partner, "");
+                var nullProposal = store.ProposeRelationship(family, actor, nullLabel);
+                var emptyProposal = store.ProposeRelationship(family, actor, emptyLabel);
+                store.ReviewRelationship(family, admin, nullProposal, true);
+                store.ReviewRelationship(family, admin, emptyProposal, true);
+                Check(store.ReadRelationships(family, actor)
+                    .Single(x => x.Id == nullLabel.Id).Label is null &&
+                    store.ReadRelationships(family, actor)
+                    .Single(x => x.Id == emptyLabel.Id).Label == "",
+                    "encrypted null and explicit empty labels retain distinct meaning");
+                Check(store.ListApprovedRelationshipsForUndo(family, admin)
+                    .Any(x => x.ProposalId == emptyProposal &&
+                        x.Relationship?.Label == ""),
+                    "approved undo inbox retains explicit empty label");
+                store.UndoRelationship(family, admin, nullProposal);
+                store.UndoRelationship(family, admin, emptyProposal);
+                Check(store.ReadRelationships(family, actor).Count == 2,
+                    "temporary optional-label links reversed without touching original links");
+
                 using (var connection = new SqliteConnection(
                     new SqliteConnectionStringBuilder {
                         DataSource = database, Pooling = false }.ToString()))
@@ -192,6 +222,9 @@ internal static class SqliteRelationshipAssertions
                 store.RevokeMember(family, admin, actor);
                 Expect<UnauthorizedAccessException>(() => store.ReadRelationships(
                     family, actor), "member revocation blocks saved links");
+                Expect<UnauthorizedAccessException>(() =>
+                    store.ListApprovedRelationshipsForUndo(family, actor),
+                    "revoked member cannot enumerate approved undo inbox");
                 Expect<UnauthorizedAccessException>(() => store.ProposeRelationship(
                     family, actor, edgeB), "revoked member cannot write");
                 Check(store.ReadRelationships(family, admin).Count==2,
