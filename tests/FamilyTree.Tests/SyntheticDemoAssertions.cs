@@ -66,7 +66,31 @@ internal static class SyntheticDemoAssertions
         }
         Ensure(selfLinkRejected, "self relationship proposals must be rejected");
 
-        Console.WriteLine("PASS 14 synthetic family and safe MCP tools assertions");
+        var foreignIdRejected = false;
+        try
+        {
+            FamilyDemoTools.ProposeDemoRelationship(
+                SyntheticFamilyCatalog.PersonId(1).ToString(),
+                Guid.NewGuid().ToString(), "Friend");
+        }
+        catch (ArgumentException)
+        {
+            foreignIdRejected = true;
+        }
+        Ensure(foreignIdRejected, "unknown real or non-demo IDs must be rejected");
+
+        var beforeDraft = edges.Count;
+        using var relationshipDraft = JsonDocument.Parse(FamilyDemoTools.ProposeDemoRelationship(
+            SyntheticFamilyCatalog.PersonId(14).ToString(),
+            SyntheticFamilyCatalog.PersonId(18).ToString(), "Friend"));
+        Ensure(relationshipDraft.RootElement.GetProperty("Status").GetString() == "pending" &&
+               !relationshipDraft.RootElement.GetProperty("Approved").GetBoolean() &&
+               !relationshipDraft.RootElement.GetProperty("Persisted").GetBoolean(),
+            "valid fictional relationship stays pending and unpersisted");
+        Ensure(edges.Count == beforeDraft,
+            "staging must never change the approved synthetic catalog");
+
+        Console.WriteLine("PASS synthetic family, safe MCP discovery and draft-only assertions");
 
         bool HasParentChain(params int[] chain)
         {
