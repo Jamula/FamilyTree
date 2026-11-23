@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
 using FamilyTree.Domain;
+using System.Security;
+using System.Security.Claims;
 
 namespace FamilyTree.Api;
 
@@ -87,6 +89,34 @@ public static class InteractiveOidc
         options.SaveTokens = false;
         options.TokenValidationParameters.ValidateIssuer = true;
         options.TokenValidationParameters.ValidateAudience = true;
+        options.Events.OnTokenValidated = context =>
+        {
+            // Framework token verification precedes this callback. Do not
+            // let caller-supplied headers/claims construct a trusted session.
+            if (context.Principal?.Identity is not ClaimsIdentity identity)
+            {
+                context.Fail("Verified OIDC identity required.");
+                return Task.CompletedTask;
+            }
+            var subjectClaims = context.Principal.FindAll("sub").ToArray();
+            if (subjectClaims.Length == 0)
+                subjectClaims = context.Principal.FindAll(ClaimTypes.NameIdentifier).ToArray();
+            if (subjectClaims.Length != 1)
+            {
+                context.Fail("Unique OIDC subject required.");
+                return Task.CompletedTask;
+            }
+            try
+            {
+                VerifiedOidcSession.Stamp(identity, provider,
+                    context.SecurityToken?.Issuer, subjectClaims[0].Value);
+            }
+            catch (SecurityException)
+            {
+                context.Fail("OIDC subject binding denied.");
+            }
+            return Task.CompletedTask;
+        };
         options.Events.OnRemoteFailure = context =>
         {
             context.HandleResponse();
@@ -148,8 +178,8 @@ public static class InteractiveOidc
                     RedirectUri = "/auth/session"
                 }, [item.Scheme]);
         });
-        app.MapGet("/auth/session", (HttpContext context) =>
-            context.User.Identity?.IsAuthenticated == true
+        app.MapGet("/auth/session", async (HttpContext context) =>
+            await VerifiedOidcSession.ReadAsync(context, providers)
                 ? Results.Ok(new { authenticated = true, familyAccess = false })
                 : Results.Unauthorized());
         app.MapGet("/auth/error", () =>
