@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using FamilyTree.ServiceDefaults;
 
 internal static class TelemetryAssertions
@@ -36,7 +38,28 @@ internal static class TelemetryAssertions
             Ensure(FamilyTelemetry.Start(FamilyOperation.Health) is null,
                 "baggage from untrusted ambient activity must never enter our span");
         }
-        Console.WriteLine("PASS telemetry privacy vocabulary and baggage assertions");
+        // Exporters are opt-in: absent enablement must not register a provider.
+        var services = new ServiceCollection();
+        var off = new ConfigurationBuilder().Build();
+        services.AddFamilyTreeObservability(off);
+        Ensure(services.Count == 0, "default observability must add no SDK/exporter services");
+
+        var remote = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?>
+            {
+                ["FAMILYTREE_OTLP_ENABLED"] = "true",
+                ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://api.vendor.example"
+            }).Build();
+        try
+        {
+            new ServiceCollection().AddFamilyTreeObservability(remote);
+            throw new InvalidOperationException("unapproved remote exporter was accepted");
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("Remote OTLP", StringComparison.Ordinal))
+        {
+            // Remote telemetry is rejected before a provider can be configured.
+        }
+        Console.WriteLine("PASS telemetry privacy, default-off and remote-export guard assertions");
     }
 
     private static void Ensure(bool condition, string message)
