@@ -49,15 +49,20 @@ internal static class VerifiedCookieHandlerAssertions
             };
             await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
                 new ClaimsPrincipal(identity), properties);
-            var header = context.Response.Headers.SetCookie.ToString();
-            var value = header.Split(';')[0];
-            Check(value.StartsWith("__Host-FamilyTreeSession=", StringComparison.Ordinal),
+            var headers = context.Response.Headers.SetCookie.ToArray();
+            var pieces = headers.Select(value => value!.Split(';')[0]).ToArray();
+            Check(pieces.Length > 0 &&
+                pieces[0].StartsWith("__Host-FamilyTreeSession=", StringComparison.Ordinal),
                 "protected __Host cookie set");
-            Check(header.Contains("secure", StringComparison.OrdinalIgnoreCase),
-                "cookie must have Secure attribute");
-            Check(header.Contains("httponly", StringComparison.OrdinalIgnoreCase),
-                "cookie must have HttpOnly attribute");
-            return value;
+            Check(headers.All(value => value is not null &&
+                    value.Contains("secure", StringComparison.OrdinalIgnoreCase)),
+                "all cookie chunks must carry Secure attribute");
+            Check(headers.All(value => value is not null &&
+                    value.Contains("httponly", StringComparison.OrdinalIgnoreCase)),
+                "all cookie chunks must carry HttpOnly attribute");
+            // CookieAuthentication's chunking manager may emit several
+            // Set-Cookie headers. Replay ALL protected cookie fragments.
+            return string.Join("; ", pieces);
         }
 
         var goodCookie = await SignInAsync(expired: false);
