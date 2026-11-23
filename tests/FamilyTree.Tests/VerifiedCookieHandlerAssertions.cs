@@ -51,6 +51,8 @@ internal static class VerifiedCookieHandlerAssertions
                 new ClaimsPrincipal(identity), properties);
             var headers = context.Response.Headers.SetCookie.ToArray();
             var pieces = headers.Select(value => value!.Split(';')[0]).ToArray();
+            Console.WriteLine("COOKIE set-cookie synthetic chunk count=" + pieces.Length +
+                " totalProtectedChars=" + pieces.Sum(value => value.Length));
             Check(pieces.Length > 0 &&
                 pieces[0].StartsWith("__Host-FamilyTreeSession=", StringComparison.Ordinal),
                 "protected __Host cookie set");
@@ -67,6 +69,11 @@ internal static class VerifiedCookieHandlerAssertions
 
         var goodCookie = await SignInAsync(expired: false);
         var protectedContext = Context(goodCookie);
+        Console.WriteLine("COOKIE request synthetic keys=" +
+            protectedContext.Request.Cookies.Count +
+            " containsPrimary=" + protectedContext.Request.Cookies.ContainsKey(
+                "__Host-FamilyTreeSession") +
+            " headerChars=" + protectedContext.Request.Headers.Cookie.ToString().Length);
         var ticket = await protectedContext.AuthenticateAsync(
             CookieAuthenticationDefaults.AuthenticationScheme);
         Console.WriteLine("COOKIE synthetic probe: succeeded=" + ticket.Succeeded +
