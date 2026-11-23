@@ -73,6 +73,13 @@ public static class FictionalSvgTree
                 ? (edge.From, edge.To) : (edge.To, edge.From));
         foreach (var group in groups)
         {
+            // Calculate the normal from the canonical unordered pair, not
+            // from each edge direction, so opposite-direction links cannot
+            // receive identical bends and paint over each other.
+            var canonicalFirst = positions[group.Key.Item1];
+            var canonicalSecond = positions[group.Key.Item2];
+            var canonicalDx = (double)canonicalSecond.X - canonicalFirst.X;
+            var canonicalDy = (double)canonicalSecond.Y - canonicalFirst.Y;
             var edges = group.OrderBy(edge => edge.Kind).ThenBy(edge => edge.Inferred)
                 .ToArray();
             foreach (var placement in edges.Select((edge, index) => (
@@ -96,15 +103,14 @@ public static class FictionalSvgTree
                     // Lift the curve above same-generation cards, rather than
                     // drawing it straight through any intervening people.
                     controlX = midX;
-                    controlY = midY - NodeHeight - 36 - index * 20;
+                    controlY = midY - NodeHeight - 36 - index * 20.0;
                 }
                 else
                 {
-                    double dx = toX - fromX;
-                    double dy = toY - fromY;
-                    var length = Math.Sqrt(dx * dx + dy * dy);
-                    controlX = midX - dy / length * bend;
-                    controlY = midY + dx / length * bend;
+                    var length = Math.Sqrt(canonicalDx * canonicalDx +
+                        canonicalDy * canonicalDy);
+                    controlX = midX - canonicalDy / length * bend;
+                    controlY = midY + canonicalDx / length * bend;
                 }
                 var social = edge.Kind is RelationKind.Friend or RelationKind.Neighbor
                     or RelationKind.Mentor or RelationKind.Other;
