@@ -22,6 +22,7 @@ public static class GedcomLegacyCompatibility
         var hasUtf8 = false;
         var inHeader = true;
         var versionCount = 0;
+        var headerSection = "";
         for (var i = 1; i < lines.Length; i++)
         {
             var line = lines[i];
@@ -31,7 +32,12 @@ public static class GedcomLegacyCompatibility
             if (line.StartsWith("0 ", StringComparison.Ordinal))
                 inHeader = false;
             if (!inHeader) continue;
-            if (line.StartsWith("2 VERS ", StringComparison.Ordinal))
+            if (line.StartsWith("1 ", StringComparison.Ordinal))
+                headerSection = line.Split(' ', 3)[1];
+            // 2 VERS also occurs under SOUR for the exporting application's
+            // version. Only GEDC/VERS declares the GEDCOM format version.
+            if (headerSection == "GEDC" &&
+                line.StartsWith("2 VERS ", StringComparison.Ordinal))
             {
                 versionCount++;
                 version = line["2 VERS ".Length..];
