@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.RegularExpressions;
 using FamilyTree.Web;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,9 +29,27 @@ internal static class FictionalWorkbenchHttpAssertions
             await next();
         });
         SyntheticWorkbenchRoutes.Map(app);
+        app.MapGet("/demo", (Delegate)(Func<HttpContext, Task<IResult>>)SyntheticTreeExplorer.ShowAsync);
         await app.StartAsync();
         using var client = app.GetTestClient();
         client.BaseAddress = new Uri("http://localhost");
+
+        using (var explorer = await client.GetAsync("/demo?above=8&below=0&social=yes&spouses=no&siblings=no"))
+        {
+            var body=await explorer.Content.ReadAsStringAsync();
+            Check(explorer.StatusCode == HttpStatusCode.OK &&
+                  body.Contains("Fictional family explorer",StringComparison.Ordinal) &&
+                  body.Contains("Center on ",StringComparison.Ordinal) &&
+                  body.Contains("Try local fictional editing and review",StringComparison.Ordinal),
+                "fictional explorer recenter and option toggles rendered");
+        }
+        using (var invalid = await client.GetAsync("/demo?center=invalid&above=99&below=-3&social=no"))
+        {
+            var body=await invalid.Content.ReadAsStringAsync();
+            Check(invalid.StatusCode == HttpStatusCode.OK &&
+                  body.Contains("Visible fictional people",StringComparison.Ordinal),
+                "invalid center and out-of-range generation options recover safely");
+        }
 
         using (var remote = new HttpRequestMessage(HttpMethod.Get, "/demo/workbench"))
         {
