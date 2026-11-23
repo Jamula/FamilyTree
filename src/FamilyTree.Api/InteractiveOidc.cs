@@ -70,7 +70,7 @@ public static class InteractiveOidc
         return providers;
     }
 
-    private static IReadOnlyList<Provider> ReadConfiguration(IConfiguration config)
+    public static IReadOnlyList<Provider> ReadConfiguration(IConfiguration config)
     {
         var providers = new List<Provider>();
         static bool Partial(params string?[] parts) => parts.Any(x => !string.IsNullOrEmpty(x));
