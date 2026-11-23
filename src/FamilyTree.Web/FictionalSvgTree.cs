@@ -161,8 +161,9 @@ public static class FictionalSvgTree
         }
 
         html.Append("</svg></div>");
-        html.Append("<p><small>Green links represent parents, blue links represent ");
-        html.Append("partnerships or siblings; dotted gray links represent social associations.</small></p>");
+        html.Append("<p><small>Solid green: parent. Long-dashed blue: partner. ");
+        html.Append("Short-dashed blue: sibling. Dotted blue: inferred sibling. ");
+        html.Append("Dotted gray: social association. Each link also has a text description.</small></p>");
         return html.ToString();
     }
 }
