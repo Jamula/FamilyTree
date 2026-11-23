@@ -47,10 +47,15 @@ internal static class FictionalSvgTreeAssertions
             ]
         };
         var reversedHtml = FictionalSvgTree.Render(reversedLinks, options);
-        var reversedPaths = Regex.Matches(reversedHtml, @"<path d='([^']+)'")
-            .Select(match => match.Groups[1].Value).Distinct().ToArray();
-        Check(reversedPaths.Length == 2,
-            "oppositely directed connections must have distinct paths");
+        // Reversed M...Q... endpoints can describe the exact same curve
+        // even when the raw path strings differ. Require distinct control
+        // points for each edge in this two-node test instead.
+        var controlPoints = Regex.Matches(reversedHtml,
+                @"<path d='M -?[0-9.]+ -?[0-9.]+ Q (-?[0-9.]+) (-?[0-9.]+) -?[0-9.]+ -?[0-9.]+'")
+            .Select(match => match.Groups[1].Value + ":" + match.Groups[2].Value)
+            .Distinct().ToArray();
+        Check(controlPoints.Length == 2,
+            "oppositely directed connections must have distinct control points");
         Check(html.Contains("Parent connection", StringComparison.Ordinal) &&
               html.Contains("Friend connection", StringComparison.Ordinal),
             "relationship SVG paths have accessible typed descriptions");
