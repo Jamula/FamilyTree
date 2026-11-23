@@ -97,6 +97,15 @@ internal static class SqliteRelationshipAssertions
                     family, actor, edgeA), "duplicate approved edge denied");
                 Check(store.CountAudit(family, admin) == 5,
                     "membership approval, people reviews and link approvals audited");
+                var adminOwned = store.ProposeRelationship(family, admin,
+                    Relationship.Create(personA.Id,personB.Id,RelationKind.Other,
+                        "fictional-unreviewed-admin"));
+                Check(!store.ListPendingRelationships(family, admin).Any(x =>
+                    x.ProposalId == adminOwned),
+                    "self-submitted items do not occupy independent review inbox");
+                Expect<UnauthorizedAccessException>(() => store.ReviewRelationship(
+                    family, admin, adminOwned, true),
+                    "administrator cannot approve self-authored link");
                 Check(!Encoding.UTF8.GetString(File.ReadAllBytes(database)).Contains(
                     "synthetic-neighbor-private", StringComparison.Ordinal),
                     "relationship label encrypted at rest");
@@ -105,6 +114,29 @@ internal static class SqliteRelationshipAssertions
             {
                 Check(store.ReadRelationships(family, actor).Count == 2,
                     "approved links survive restart");
+                using (var connection = new SqliteConnection(
+                    new SqliteConnectionStringBuilder {
+                        DataSource = database, Pooling = false }.ToString()))
+                {
+                    connection.Open();
+                    using var tamper = connection.CreateCommand();
+                    tamper.CommandText = """
+                        UPDATE relationships SET kind='Mentor' WHERE id=$id;
+                        """;
+                    tamper.Parameters.AddWithValue("$id", edgeA.Id.ToString("D"));
+                    Check(tamper.ExecuteNonQuery() == 1,
+                        "one approved relation metadata row tampered");
+                    Expect<InvalidDataException>(() => store.ReadRelationships(
+                        family, actor), "modified valid kind must invalidate AES-GCM AAD");
+                    using var restore = connection.CreateCommand();
+                    restore.CommandText = """
+                        UPDATE relationships SET kind='Friend' WHERE id=$id;
+                        """;
+                    restore.Parameters.AddWithValue("$id",edgeA.Id.ToString("D"));
+                    Check(restore.ExecuteNonQuery() == 1, "original metadata restored");
+                }
+                Check(store.ReadRelationships(family, actor).Count == 2,
+                    "restored authentic metadata remains readable");
                 var review = store.ListPendingRelationships(family, admin);
                 Check(review.Count == 0,"approved proposals excluded from pending inbox");
                 var parent = Relationship.Create(personA.Id, personB.Id, RelationKind.Parent);
