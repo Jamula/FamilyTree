@@ -1,6 +1,6 @@
 # FamilyTree changelog
 
-Versioning policy: [docs/VERSIONING.md](docs/VERSIONING.md).
+Versioning policy: [docs/versioning.md](docs/versioning.md).
 
 ## Unreleased
 - Ongoing M0 foundation improvements before the first publication.
