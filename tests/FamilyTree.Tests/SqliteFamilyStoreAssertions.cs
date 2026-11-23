@@ -91,9 +91,12 @@ internal static class SqliteFamilyStoreAssertions
                 var proposal = store.ProposePerson(family, member, fictionalPerson);
                 Check(store.ReadPeople(family, admin).Count == 0,
                     "pending proposal hidden from family reads");
+                Expect<InvalidOperationException>(() => store.ProposePerson(
+                    family, member, fictionalPerson),
+                    "duplicate pending proposal must be rejected");
                 Expect<UnauthorizedAccessException>(() => store.ReviewPerson(
                     family, member, proposal, true), "submitter cannot self approve");
-                Expect<UnauthorizedAccessException>(() => store.ReviewPerson(
+                Expect<InvalidOperationException>(() => store.ReviewPerson(
                     otherFamily, otherAdmin, proposal, true),
                     "moderator cannot approve cross-family proposal");
                 Expect<InvalidOperationException>(() => store.ReviewPerson(
