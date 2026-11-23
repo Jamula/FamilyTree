@@ -1,7 +1,10 @@
+using System.Runtime.CompilerServices;
+using System.Reflection;
 using FamilyTree.Domain;
 
 internal static class ChangeReviewAssertions
 {
+    [ModuleInitializer]
     public static void Run()
     {
         var family = Guid.NewGuid();
@@ -9,6 +12,10 @@ internal static class ChangeReviewAssertions
         var moderator = Guid.NewGuid();
         var request = GenealogyChangeProposal.Submit(family, author, Guid.NewGuid());
         Check(request.State == ChangeReviewState.Pending, "new edits start pending");
+        Check(typeof(GenealogyChangeProposal).GetConstructors(BindingFlags.Public | BindingFlags.Instance).Length == 0,
+            "public constructors cannot mint an approved proposal");
+        Check(typeof(GenealogyChangeProposal).GetProperty(nameof(GenealogyChangeProposal.State))!.SetMethod is null,
+            "review state cannot be set externally");
         ExpectUnauthorized(() => request.Review(author, family, true, true),
             "self approval rejected");
         ExpectUnauthorized(() => request.Review(moderator, Guid.NewGuid(), true, true),
