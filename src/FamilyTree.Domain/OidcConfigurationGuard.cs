@@ -46,9 +46,9 @@ public sealed class OidcConfigurationGuard
 
         // Explicit provider allowlisting avoids trusting attacker-controlled
         // discovery hosts, wildcard tenants and loopback issuers.
-        if (string.Equals(url.Host, "accounts.google.com", StringComparison.Ordinal) &&
-            (url.AbsolutePath == "/" || url.AbsolutePath == ""))
-            return true;
+        if (string.Equals(url.Host, "accounts.google.com", StringComparison.Ordinal))
+            return string.Equals(issuer, "https://accounts.google.com",
+                StringComparison.Ordinal);
 
         if (string.Equals(url.Host, "login.microsoftonline.com", StringComparison.Ordinal))
         {
@@ -56,7 +56,9 @@ public sealed class OidcConfigurationGuard
             return parts.Length == 2 &&
                 Guid.TryParse(parts[0], out var tenantId) &&
                 tenantId != Guid.Empty &&
-                string.Equals(parts[1], "v2.0", StringComparison.Ordinal);
+                string.Equals(issuer,
+                    $"https://login.microsoftonline.com/{tenantId:D}/v2.0",
+                    StringComparison.Ordinal);
         }
         return false;
     }
