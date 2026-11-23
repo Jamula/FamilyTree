@@ -36,8 +36,7 @@ public static class SyntheticWorkbenchRoutes
             // or FormFeature can buffer content or spool uploaded files.
             if (http.Request.ContentLength is null or > 2048 ||
                 http.Request.ContentType is null ||
-                !http.Request.ContentType.StartsWith(
-                    "application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase))
+                !ValidFormContentType(http.Request.ContentType))
                 return Results.BadRequest();
             try
             {
@@ -47,7 +46,15 @@ public static class SyntheticWorkbenchRoutes
             {
                 return Results.BadRequest();
             }
-            var form = await http.Request.ReadFormAsync(http.RequestAborted);
+            Microsoft.AspNetCore.Http.IFormCollection form;
+            try
+            {
+                form = await http.Request.ReadFormAsync(http.RequestAborted);
+            }
+            catch (InvalidDataException)
+            {
+                return Results.BadRequest();
+            }
             if (form.Files.Count != 0 || form.Count != 3 ||
                 !form.TryGetValue("__RequestVerificationToken", out var formToken) ||
                 formToken.Count != 1 || string.IsNullOrWhiteSpace(formToken.ToString()) ||
@@ -65,6 +72,16 @@ public static class SyntheticWorkbenchRoutes
             http.Response.Headers.Location = "/demo/workbench";
             return Results.StatusCode(StatusCodes.Status303SeeOther);
         });
+    }
+
+    private static bool ValidFormContentType(string contentType)
+    {
+        var parts = contentType.Split(';', StringSplitOptions.TrimEntries);
+        if (parts.Length is < 1 or > 2 ||
+            !string.Equals(parts[0], "application/x-www-form-urlencoded",
+                StringComparison.OrdinalIgnoreCase)) return false;
+        return parts.Length == 1 ||
+            string.Equals(parts[1], "charset=utf-8", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool Local(HttpContext http) =>
