@@ -26,7 +26,14 @@ internal static class SqlitePrincipalRegistryAssertions
                 dbPath, new byte[8]), "reject weak HMAC key");
             Expect<ArgumentNullException>(() => new SqlitePrincipalRegistry(
                 dbPath, null!), "reject missing HMAC key");
-            Guid bound;
+            var parentIsAFile = Path.Join(directory, "not-a-directory");
+            File.WriteAllText(parentIsAFile, "fictional test blocker");
+            Expect<IOException>(() => new SqlitePrincipalRegistry(
+                Path.Join(parentIsAFile, "unopenable.sqlite"), key),
+                "constructor cleans cloned key on directory creation failure");
+            Guid bound, msId, secondTenantId;
+            var otherMicrosoft = "https://login.microsoftonline.com/" +
+                Guid.NewGuid().ToString("D") + "/v2.0";
             using (var registry = new SqlitePrincipalRegistry(dbPath, key))
             {
                 Check(registry.FindVerifiedSubject("google", google, subject) is null,
@@ -39,12 +46,10 @@ internal static class SqlitePrincipalRegistryAssertions
                     "mapping can be resolved without family grant");
                 Check(registry.FindVerifiedSubject("google", google, "other-synthetic") is null,
                     "different subject cannot resolve");
-                var msId = registry.EnrollVerifiedSubject("microsoft", microsoft, subject);
+                msId = registry.EnrollVerifiedSubject("microsoft", microsoft, subject);
                 Check(msId != bound && msId != Guid.Empty,
                     "same subject under different issuer/provider is distinct");
-                var otherMicrosoft = "https://login.microsoftonline.com/" +
-                    Guid.NewGuid().ToString("D") + "/v2.0";
-                var secondTenantId = registry.EnrollVerifiedSubject(
+                secondTenantId = registry.EnrollVerifiedSubject(
                     "microsoft", otherMicrosoft, subject);
                 Check(secondTenantId != msId && secondTenantId != bound &&
                     registry.FindVerifiedSubject("microsoft", microsoft, subject) == msId &&
@@ -73,8 +78,14 @@ internal static class SqlitePrincipalRegistryAssertions
                     "identity subject must never appear in SQLite plaintext");
             }
             using (var reopened = new SqlitePrincipalRegistry(dbPath, key))
+            {
                 Check(reopened.FindVerifiedSubject("google", google, subject) == bound,
-                    "mapping survives restart");
+                    "Google identity mapping survives restart");
+                Check(reopened.FindVerifiedSubject("microsoft", microsoft, subject) == msId &&
+                    reopened.FindVerifiedSubject(
+                        "microsoft", otherMicrosoft, subject) == secondTenantId,
+                    "two valid Microsoft tenants keep distinct durable identities after restart");
+            }
             Expect<InvalidDataException>(() =>
                 new SqlitePrincipalRegistry(dbPath, wrongKey),
                 "wrong HMAC key fails closed rather than silently splitting identities");
