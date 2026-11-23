@@ -68,7 +68,7 @@ public static class InteractiveOidc
             provider.Callback == "/auth/callback/google";
         var isMicrosoft = provider.Name == "microsoft" && provider.Scheme == "MicrosoftOidc" &&
             provider.Callback == "/auth/callback/microsoft" &&
-            provider.Authority.StartsWith("https://login.microsoftonline.com/",
+            provider.Authority is not null && provider.Authority.StartsWith("https://login.microsoftonline.com/",
                 StringComparison.Ordinal);
         if (!isGoogle && !isMicrosoft)
             throw new ArgumentException("OIDC provider is not recognized.", nameof(provider));
