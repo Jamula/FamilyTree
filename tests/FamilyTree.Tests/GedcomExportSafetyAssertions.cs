@@ -39,10 +39,10 @@ internal static class GedcomExportSafetyAssertions
             [first], [new Relationship(Guid.Empty, first.Id, child.Id, RelationKind.Parent)], auth),
             "empty relationship ID");
 
-        foreach (var invalid in new[] { "Fictional\0Hidden", "Fictional\u0007Hidden",
-            "Fictional@Hidden", "Fictional\nHidden" })
+        foreach (var person in new[] { "Fictional\0Hidden", "Fictional\u0007Hidden",
+            "Fictional@Hidden", "Fictional\nHidden" }
+            .Select(invalid => new Person(Guid.NewGuid(), invalid)))
         {
-            var person = new Person(Guid.NewGuid(), invalid);
             var scoped = Grant(viewer, family, [person.Id], []);
             Throws<InvalidOperationException>(() => Export(viewer, [person], [], scoped),
                 "unsafe GEDCOM control character rejected");
@@ -67,6 +67,19 @@ internal static class GedcomExportSafetyAssertions
         var allVisible = Grant(viewer, family, manyVisible.Select(x => x.Id), []);
         Throws<InvalidOperationException>(() => Export(viewer, manyVisible, [], allVisible),
             "oversized visible export rejected");
+
+        var allowedEdges = Enumerable.Range(0, 1_501).Select(_ =>
+            Relationship.Create(first.Id, child.Id, RelationKind.Parent)).ToArray();
+        var allowedEdgeScope = Grant(viewer, family, [first.Id, child.Id],
+            allowedEdges.Select(x => x.Id));
+        var upToLimit = Export(viewer, [first, child], allowedEdges.Take(1_500),
+            allowedEdgeScope);
+        Check(GedcomSevenSubset.Preview(upToLimit).Valid &&
+              GedcomSevenSubset.Preview(upToLimit).Families.Count == 1_500,
+            "1,500 approved parent edges accepted at the export limit");
+        Throws<InvalidOperationException>(() => Export(viewer, [first, child],
+            allowedEdges, allowedEdgeScope),
+            "1,501 approved parent edges rejected independently of file length");
 
         var manyLinks = Enumerable.Range(0, 20_001).Select(_ =>
             Relationship.Create(first.Id, child.Id, RelationKind.Friend)).ToArray();
