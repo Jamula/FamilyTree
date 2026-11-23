@@ -11,7 +11,12 @@ cleanup() {
 trap cleanup EXIT
 
 # The Aspire CLI may download its public CLI bundle on the first local run.
-dotnet run --project src/FamilyTree.AppHost/FamilyTree.AppHost.csproj --no-restore -c Release >"$TMP/aspire.log" 2>&1 &
+# Aspire CLI's AppHost launcher selects the Debug target path by default.
+# The parent solution is built in Release by CI, so also compile the
+# Debug AppHost before the one-command startup test.
+dotnet build src/FamilyTree.AppHost/FamilyTree.AppHost.csproj --no-restore -c Debug >"$TMP/build.log" 2>&1 ||
+  { echo "FAIL: Debug AppHost build"; exit 1; }
+dotnet run --project src/FamilyTree.AppHost/FamilyTree.AppHost.csproj --no-restore -c Debug >"$TMP/aspire.log" 2>&1 &
 PID=$!
 
 ready=0
