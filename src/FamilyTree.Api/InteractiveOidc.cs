@@ -1,0 +1,139 @@
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Configuration;
+
+namespace FamilyTree.Api;
+
+/// <summary>
+/// Interactive OIDC login is NOT a family membership. Even successful
+/// authentication must never bypass the pre-MVP private API boundary.
+/// </summary>
+public static class InteractiveOidc
+{
+    public sealed record Provider(string Name, string Scheme, string Authority,
+        string ClientId, string ClientSecret, string Callback);
+
+    public static IReadOnlyList<Provider> Configure(WebApplicationBuilder builder)
+    {
+        var providers = ReadConfiguration(builder.Configuration);
+        var auth = builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+            .AddCookie(ConfigureCookieOptions);
+        builder.Services.AddAuthorization();
+        foreach (var provider in providers)
+        {
+            // Maintained ASP.NET Core OIDC middleware performs actual token validation.
+            auth.AddOpenIdConnect(provider.Scheme, options =>
+                ConfigureProviderOptions(options, provider));
+        }
+        return providers;
+    }
+
+    /// <summary>Pure configuration seam for negative-case unit tests.</summary>
+    public static void ConfigureCookieOptions(CookieAuthenticationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        options.Cookie.Name = "__Host-FamilyTreeSession";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.Path = "/";
+        options.SlidingExpiration = false;
+        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        options.Events.OnRedirectToLogin = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToAccessDenied = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        };
+    }
+
+    /// <summary>Provider config does not authenticate users on its own.</summary>
+    public static void ConfigureProviderOptions(OpenIdConnectOptions options, Provider provider)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(provider);
+        options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+        options.Authority = provider.Authority;
+        options.ClientId = provider.ClientId;
+        options.ClientSecret = provider.ClientSecret;
+        options.CallbackPath = provider.Callback;
+        options.ResponseType = "code";
+        options.UsePkce = true;
+        options.RequireHttpsMetadata = true;
+        options.SaveTokens = false;
+        options.TokenValidationParameters.ValidateIssuer = true;
+        options.TokenValidationParameters.ValidateAudience = true;
+        options.Events.OnRemoteFailure = context =>
+        {
+            context.HandleResponse();
+            context.Response.Redirect("/auth/error");
+            return Task.CompletedTask;
+        };
+    }
+
+    public static IReadOnlyList<Provider> ReadConfiguration(IConfiguration config)
+    {
+        var providers = new List<Provider>();
+        static bool Partial(params string?[] parts) => parts.Any(x => !string.IsNullOrEmpty(x));
+        static void RequireComplete(params string?[] parts)
+        {
+            if (parts.Any(string.IsNullOrWhiteSpace))
+                throw new InvalidOperationException("An OIDC provider is partially configured.");
+        }
+
+        var gId = config["FAMILYTREE_OIDC_GOOGLE_CLIENT_ID"];
+        var gSecret = config["FAMILYTREE_OIDC_GOOGLE_CLIENT_SECRET"];
+        if (Partial(gId, gSecret))
+        {
+            RequireComplete(gId, gSecret);
+            providers.Add(new("google", "GoogleOidc", "https://accounts.google.com",
+                gId!, gSecret!, "/auth/callback/google"));
+        }
+
+        var tenant = config["FAMILYTREE_OIDC_MICROSOFT_TENANT_ID"];
+        var mId = config["FAMILYTREE_OIDC_MICROSOFT_CLIENT_ID"];
+        var mSecret = config["FAMILYTREE_OIDC_MICROSOFT_CLIENT_SECRET"];
+        if (Partial(tenant, mId, mSecret))
+        {
+            RequireComplete(tenant, mId, mSecret);
+            if (!Guid.TryParse(tenant, out var id) || id == Guid.Empty)
+                throw new InvalidOperationException("An explicit Microsoft tenant GUID is required.");
+            providers.Add(new("microsoft", "MicrosoftOidc",
+                $"https://login.microsoftonline.com/{id:D}/v2.0",
+                mId!, mSecret!, "/auth/callback/microsoft"));
+        }
+        return providers;
+    }
+
+    public static void MapInteractiveOidc(this WebApplication app,
+        IReadOnlyList<Provider> providers)
+    {
+        app.MapGet("/auth/providers", () =>
+            Results.Ok(new { providers = providers.Select(x => x.Name).ToArray(),
+                membershipAuthorization = false }));
+        app.MapGet("/auth/login/{provider}", (string provider) =>
+        {
+            var item = providers.FirstOrDefault(p =>
+                string.Equals(p.Name, provider, StringComparison.Ordinal));
+            return item is null ? Results.NotFound() :
+                Results.Challenge(new AuthenticationProperties
+                {
+                    RedirectUri = "/auth/session"
+                }, [item.Scheme]);
+        });
+        app.MapGet("/auth/session", (HttpContext context) =>
+            context.User.Identity?.IsAuthenticated == true
+                ? Results.Ok(new { authenticated = true, familyAccess = false })
+                : Results.Unauthorized());
+        app.MapGet("/auth/error", () =>
+            Results.Problem("Authentication could not be completed.",
+                statusCode: StatusCodes.Status401Unauthorized));
+    }
+}

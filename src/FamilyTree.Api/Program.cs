@@ -5,6 +5,7 @@ using System.Diagnostics;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddFamilyTreeObservability(builder.Configuration);
+var identityProviders = InteractiveOidc.Configure(builder);
 var app = builder.Build();
 
 // Local, privacy-filtered diagnostics only. No exporter is configured.
@@ -30,6 +31,9 @@ app.Use(async (context, next) =>
 
 // This global route gate must remain active until authenticated server policies are reviewed.
 app.UsePrivateApiBoundary();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapInteractiveOidc(identityProviders);
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "FamilyTree.Api" }))
    .WithName("Health");
