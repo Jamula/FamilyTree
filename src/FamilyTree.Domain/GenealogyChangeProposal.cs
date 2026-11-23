@@ -1,19 +1,28 @@
 namespace FamilyTree.Domain;
 
 /// <summary>
-/// Pure state-transition rules only. No persistence, identity provider,
-/// audit store, or API is exposed by this primitive.
+/// Immutable proposal state machine. Construction is restricted to Submit
+/// and Review; no public init setters or with-clones can bypass moderation.
+/// Identity and moderator authority must be verified by the server.
 /// </summary>
 public enum ChangeReviewState { Pending, Approved, Rejected }
 
-public sealed record GenealogyChangeProposal(
-    Guid Id,
-    Guid FamilyId,
-    Guid SubmittedByPrincipalId,
-    Guid SubjectPersonId,
-    ChangeReviewState State,
-    Guid? ReviewedByPrincipalId = null)
+public sealed class GenealogyChangeProposal
 {
+    public Guid Id { get; }
+    public Guid FamilyId { get; }
+    public Guid SubmittedByPrincipalId { get; }
+    public Guid SubjectPersonId { get; }
+    public ChangeReviewState State { get; }
+    public Guid? ReviewedByPrincipalId { get; }
+
+    private GenealogyChangeProposal(Guid id, Guid familyId, Guid submitter,
+        Guid subject, ChangeReviewState state, Guid? reviewer)
+    {
+        Id = id; FamilyId = familyId; SubmittedByPrincipalId = submitter;
+        SubjectPersonId = subject; State = state; ReviewedByPrincipalId = reviewer;
+    }
+
     public static GenealogyChangeProposal Submit(Guid familyId, Guid submitterId,
         Guid subjectPersonId)
     {
@@ -21,7 +30,7 @@ public sealed record GenealogyChangeProposal(
             subjectPersonId == Guid.Empty)
             throw new ArgumentException("Nonempty family, submitter and subject are required.");
         return new(Guid.NewGuid(), familyId, submitterId, subjectPersonId,
-            ChangeReviewState.Pending);
+            ChangeReviewState.Pending, null);
     }
 
     public GenealogyChangeProposal Review(Guid moderatorPrincipalId,
@@ -33,10 +42,8 @@ public sealed record GenealogyChangeProposal(
             moderatorPrincipalId == SubmittedByPrincipalId ||
             moderatorFamilyId != FamilyId || !canModerate)
             throw new UnauthorizedAccessException("Review is not authorized.");
-        return this with
-        {
-            State = approve ? ChangeReviewState.Approved : ChangeReviewState.Rejected,
-            ReviewedByPrincipalId = moderatorPrincipalId
-        };
+        return new(Id, FamilyId, SubmittedByPrincipalId, SubjectPersonId,
+            approve ? ChangeReviewState.Approved : ChangeReviewState.Rejected,
+            moderatorPrincipalId);
     }
 }
