@@ -16,7 +16,10 @@ internal static class FictionalWorkbenchAssertions
               !state.Execute("reject") && !state.Execute("anything") &&
               !state.Execute(null),
             "invalid or premature actions denied");
-        Check(state.Execute("propose-person"),"submit invented guest");
+        Check(state.Read().Version == 0, "initial revision zero");
+        Check(state.Execute("propose-person", expectedVersion: 0),"submit invented guest");
+        Check(state.Read().Version == 1 && !state.Execute("reject", expectedVersion: 0),
+            "stale action denied without state change");
         Check(state.Read().PendingKind == "AddPerson" &&
               state.Read().People.Count == 2,
             "pending person cannot appear before approval");
