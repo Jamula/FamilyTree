@@ -31,4 +31,10 @@ with tempfile.TemporaryDirectory() as workspace:
     assert any('outside repository' in x for x in module.validate(root))
     (root / 'docs' / 'UPPER.md').write_text('No links', encoding='utf-8')
     assert any('filename must be lowercase' in x for x in module.validate(root))
+    for root_name in ('README.md', 'CHANGELOG.md'):
+        root_file = root / root_name
+        root_file.write_text('Uppercase filename', encoding='utf-8')
+        assert any(root_name in x and 'filename must be lowercase' in x
+                   for x in module.validate(root))
+        root_file.unlink()
 print('PASS docs link checker broken URL, case, traversal, image and code-fence tests')
