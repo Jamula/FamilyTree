@@ -80,9 +80,21 @@ try:
           "params": {"name": overview_name, "arguments": {}}})
     result = response(3)
     rendered = json.dumps(result)
-    if '"syntheticOnly"' not in rendered or 'true' not in rendered:
+    if "syntheticOnly" not in rendered or "true" not in rendered:
         raise AssertionError("MCP overview did not confirm synthetic-only scope")
-    print("PASS MCP stdio handshake, tool discovery and fictional overview call")
+    # Demonstrate the proposal workflow, without approving or persisting data.
+    send({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+          "params": {"name": by_normalized["proposedemoperson"],
+                     "arguments": {"displayName": "Fictional Proposal"}}})
+    staged = response(4)
+    if "pending" not in json.dumps(staged):
+        raise AssertionError("MCP proposal was not staged as pending")
+    send({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+          "params": {"name": by_normalized["listdemodrafts"], "arguments": {}}})
+    listed = response(5)
+    if "Fictional Proposal" not in json.dumps(listed):
+        raise AssertionError("In-memory staged proposal was not discoverable")
+    print("PASS MCP stdio handshake, fictional discovery and in-memory proposal call")
 finally:
     selector.close()
     process.terminate()
