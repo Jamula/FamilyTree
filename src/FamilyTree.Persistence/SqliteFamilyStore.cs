@@ -460,7 +460,8 @@ public sealed partial class SqliteFamilyStore : IDisposable
             """, ("$f", family.ToString("D")), ("$subject", subject.ToString("D")),
             ("$actor", actor.ToString("D")), ("$action", action));
 
-    private byte[] Encrypt(Guid familyId, Guid personId, string name)
+    private byte[] Encrypt(Guid familyId, Guid personId, string name,
+        byte[]? additionalContext = null)
     {
         var clear = Encoding.UTF8.GetBytes(name);
         try
@@ -469,13 +470,15 @@ public sealed partial class SqliteFamilyStore : IDisposable
             var cipher = new byte[clear.Length];
             var tag = new byte[16];
             using var aes = new AesGcm(_key, 16);
-            aes.Encrypt(nonce, clear, cipher, tag, AssociatedData(familyId, personId));
+            aes.Encrypt(nonce, clear, cipher, tag,
+                AssociatedData(familyId, personId, additionalContext));
             return [..nonce, ..tag, ..cipher];
         }
         finally { CryptographicOperations.ZeroMemory(clear); }
     }
 
-    private string Decrypt(Guid familyId, Guid personId, byte[] envelope)
+    private string Decrypt(Guid familyId, Guid personId, byte[] envelope,
+        byte[]? additionalContext = null)
     {
         if (envelope.Length < 28)
             throw new InvalidDataException("Encrypted person record invalid.");
@@ -484,7 +487,8 @@ public sealed partial class SqliteFamilyStore : IDisposable
         {
             using var aes = new AesGcm(_key, 16);
             aes.Decrypt(envelope.AsSpan(0, 12), envelope.AsSpan(28),
-                envelope.AsSpan(12, 16), clear, AssociatedData(familyId, personId));
+                envelope.AsSpan(12, 16), clear,
+                AssociatedData(familyId, personId, additionalContext));
             return Encoding.UTF8.GetString(clear);
         }
         catch (CryptographicException)
@@ -494,8 +498,10 @@ public sealed partial class SqliteFamilyStore : IDisposable
         finally { CryptographicOperations.ZeroMemory(clear); }
     }
 
-    private static byte[] AssociatedData(Guid family, Guid person)
-        => [..family.ToByteArray(), ..person.ToByteArray()];
+    private static byte[] AssociatedData(Guid family, Guid person,
+        byte[]? additionalContext = null)
+        => [..family.ToByteArray(), ..person.ToByteArray(),
+            ..(additionalContext ?? [])];
 
     public void Dispose()
     {
