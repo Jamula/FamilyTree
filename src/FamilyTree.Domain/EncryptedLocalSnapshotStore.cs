@@ -138,7 +138,10 @@ public sealed class EncryptedLocalSnapshotStore : IDisposable
         foreach (var edge in snapshot.Relationships)
             if (edge is null || edge.Id == Guid.Empty || !links.Add(edge.Id) ||
                 !ids.Contains(edge.FromPersonId) || !ids.Contains(edge.ToPersonId) ||
-                edge.FromPersonId == edge.ToPersonId)
+                edge.FromPersonId == edge.ToPersonId || !Enum.IsDefined(edge.Kind) ||
+                (edge.Kind == RelationKind.Other && string.IsNullOrWhiteSpace(edge.Label)) ||
+                (edge.Label is not null && (edge.Label.Length > 200 ||
+                    edge.Label.IndexOfAny(['\r', '\n']) >= 0)))
                 throw new InvalidDataException("Snapshot structure invalid.");
     }
 
