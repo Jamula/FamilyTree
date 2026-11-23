@@ -43,4 +43,19 @@ grep -q '"publicFamilyRecords":false' "$TMP/response.txt" || { echo "FAIL: priva
 [[ "$(status "$WEB/demo")" == 200 ]] || { echo "FAIL: fictional explorer"; exit 1; }
 grep -q 'Fictional family explorer' "$TMP/response.txt" || { echo "FAIL: demo fixture marker"; exit 1; }
 [[ "$(status "$WEB/demo?above=9&below=-1&social=yes")" == 200 ]] || { echo "FAIL: bounded tree options"; exit 1; }
-printf 'PASS HTTP smoke: health, capabilities, fail-closed people/tree, web home\n'
+# Security invariant: reserved private paths never trust forged identity headers
+# or token-shaped text, and known/unknown IDs receive identical empty replies.
+for path in /api/v1/people/123 /api/v1/people/456 /api/v1/families/123 \
+    /api/v1/media/private /api/v1/search /api/v1/exports \
+    /api/v1/admin/members /api/v1/invitations/accept /api/v1/mcp; do
+  code="$(curl --silent --max-time 5 -o "$TMP/response.txt" -w '%{http_code}' \
+    -H 'Authorization: Bearer forged' -H 'X-Forwarded-User: administrator' \
+    -H 'X-Family-ID: spoof' "$API$path")"
+  [[ "$code" == 501 ]] || { echo "FAIL: reserved private path exposed ($path)"; exit 1; }
+  [[ ! -s "$TMP/response.txt" ]] || { echo "FAIL: private path leaked body ($path)"; exit 1; }
+done
+code="$(curl --silent --max-time 5 -X POST -o "$TMP/response.txt" -w '%{http_code}' \
+  "$API/api/v1/people" -H 'Content-Type: application/json' --data '{"name":"fictional"}')"
+[[ "$code" == 501 ]] || { echo "FAIL: unauthorized private write"; exit 1; }
+[[ ! -s "$TMP/response.txt" ]] || { echo "FAIL: unauthorized write echoed body"; exit 1; }
+printf 'PASS HTTP smoke: fail-closed private routes, identity spoofing and empty responses\n'
