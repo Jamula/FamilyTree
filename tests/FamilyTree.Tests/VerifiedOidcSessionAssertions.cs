@@ -2,6 +2,10 @@ using System.Runtime.CompilerServices;
 using System.Security;
 using System.Security.Claims;
 using FamilyTree.Api;
+using System.IdentityModel.Tokens.Jwt;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Http;
 
 internal static class VerifiedOidcSessionAssertions
 {
@@ -20,12 +24,15 @@ internal static class VerifiedOidcSessionAssertions
         var principal = new ClaimsPrincipal(identity);
         Check(!VerifiedOidcSession.IsVerifiedOidcCookiePrincipal(principal, configured),
             "untrusted session claims are never accepted");
+        identity.AddClaim(new Claim("FamilyTree:trusted:issuer", "external-spoof"));
         VerifiedOidcSession.Stamp(identity, provider, provider.Authority,
             "synthetic-oidc-subject");
         Check(VerifiedOidcSession.IsVerifiedOidcCookiePrincipal(principal, configured),
             "verified, single-provider binding accepted");
         Check(identity.FindAll("familytree:trusted:issuer").Count() == 1,
             "identity-provider reserved claims replaced");
+        Check(!identity.Claims.Any(x => x.Value == "external-spoof"),
+            "mixed-case reserved claims cleared before cookie issuance");
         Check(!VerifiedOidcSession.IsVerifiedOidcCookiePrincipal(principal, []),
             "removed provider configuration invalidates sessions");
         Check(!VerifiedOidcSession.IsVerifiedOidcCookiePrincipal(principal, [
@@ -63,7 +70,48 @@ internal static class VerifiedOidcSessionAssertions
             "null principal denied");
         Check(!VerifiedOidcSession.IsVerifiedOidcCookiePrincipal(principal, null!),
             "null provider configuration denied");
+        // Invoke the real OnTokenValidated callback under synthetic contexts,
+        // never treating these unsigned test JWTs as externally verified tokens.
+        var options = new OpenIdConnectOptions();
+        InteractiveOidc.ConfigureProviderOptions(options, provider);
+        CheckCallback(options, provider, new ClaimsIdentity([
+            new Claim("sub", "fictional-raw")
+        ], "OIDC"), provider.Authority, true, "raw sub");
+        CheckCallback(options, provider, new ClaimsIdentity([
+            new Claim(ClaimTypes.NameIdentifier, "fictional-mapped")
+        ], "OIDC"), provider.Authority, true, "mapped sub");
+        CheckCallback(options, provider, new ClaimsIdentity([
+            new Claim("sub", "first"), new Claim("sub", "second")
+        ], "OIDC"), provider.Authority, false, "duplicate raw subjects");
+        CheckCallback(options, provider, new ClaimsIdentity(), provider.Authority,
+            false, "anonymous identity");
+        CheckCallback(options, provider, new ClaimsIdentity([
+            new Claim("sub", "fictional")
+        ], "OIDC"), "https://wrong.example", false, "issuer mismatch");
+        CheckCallback(options, provider, new ClaimsIdentity([
+            new Claim("sub", "Bad\nSubject")
+        ], "OIDC"), provider.Authority, false, "control character subject");
         Console.WriteLine("PASS OIDC validated-subject session binding, claim spoofing and negative paths");
+    }
+    private static void CheckCallback(OpenIdConnectOptions options,
+        InteractiveOidc.Provider provider, ClaimsIdentity identity,
+        string issuer, bool success, string scenario)
+    {
+        var scheme = new AuthenticationScheme(provider.Scheme,
+            provider.Scheme, typeof(OpenIdConnectHandler));
+        var principal = new ClaimsPrincipal(identity);
+        var context = new TokenValidatedContext(new DefaultHttpContext(),
+            scheme, options, principal, new AuthenticationProperties())
+        {
+            SecurityToken = new JwtSecurityToken(issuer: issuer)
+        };
+        options.Events.OnTokenValidated(context).GetAwaiter().GetResult();
+        Check((context.Result?.Failure is null) == success,
+            "OIDC token callback: " + scenario);
+        if (success)
+            Check(VerifiedOidcSession.IsVerifiedOidcCookiePrincipal(
+                principal, [provider]),
+                "OIDC callback must stamp exact provider and subject: " + scenario);
     }
     private static void Check(bool ok,string message)
     {if(!ok)throw new InvalidOperationException(message);}
