@@ -14,7 +14,7 @@ internal static class SqliteGraphGrantStoreAssertions
         var path=Path.Join(folder,"fictional.sqlite");
         var key=RandomNumberGenerator.GetBytes(32);
         var family=Guid.NewGuid();var otherFamily=Guid.NewGuid();
-        var admin=Guid.NewGuid();var otherAdmin=Guid.NewGuid();
+        var admin=Guid.NewGuid();var otherAdmin=Guid.NewGuid();var otherMember=Guid.NewGuid();
         var member=Guid.NewGuid();var branch=Guid.NewGuid();
         var otherBranch=Guid.NewGuid();var person=new Person(Guid.NewGuid(),"Fictional Privacy Person");
         try
@@ -25,6 +25,10 @@ internal static class SqliteGraphGrantStoreAssertions
             {
                 data.CreateFictionalFamily(family,admin);
                 data.CreateFictionalFamily(otherFamily,otherAdmin);
+                var otherInvite=data.IssueInvitation(otherFamily,otherAdmin,otherMember,
+                    DateTimeOffset.UtcNow.AddDays(1),DateTimeOffset.UtcNow);
+                data.AcceptInvitation(otherFamily,otherMember,otherInvite,DateTimeOffset.UtcNow);
+                data.ApproveMember(otherFamily,otherAdmin,otherMember);
                 var invitation=data.IssueInvitation(family,admin,member,
                     DateTimeOffset.UtcNow.AddDays(1),DateTimeOffset.UtcNow);
                 data.AcceptInvitation(family,member,invitation,DateTimeOffset.UtcNow);
@@ -58,10 +62,21 @@ internal static class SqliteGraphGrantStoreAssertions
                 otherFamily,branch,admin,member,person.Id),"cross-family grant denied");
             Expect<UnauthorizedAccessException>(()=>grants.GrantPerson(
                 family,branch,admin,member,Guid.NewGuid()),"unknown person not granted");
+            Expect<UnauthorizedAccessException>(()=>grants.GrantPerson(
+                otherFamily,branch,otherAdmin,otherMember,person.Id),
+                "authorized other-family members cannot grant a person from family A");
             grants.GrantPerson(family,branch,admin,member,person.Id);
             grants.GrantPerson(family,branch,admin,member,person.Id);
             Check(grants.ReadVisiblePersonIds(family,branch,member).SetEquals([person.Id]),
                 "explicit visible person grant is idempotent");
+            Expect<UnauthorizedAccessException>(()=>grants.RevokePerson(
+                family,branch,member,member,person.Id),
+                "ordinary member cannot revoke anyone's grant");
+            Expect<UnauthorizedAccessException>(()=>grants.RevokePerson(
+                family,branch,otherAdmin,member,person.Id),
+                "other-family administrator cannot revoke family grant");
+            Check(grants.ReadVisiblePersonIds(family,branch,member).Contains(person.Id),
+                "attempted unauthorized revoke leaves committed grant intact");
             Check(grants.ReadVisiblePersonIds(family,otherBranch,member).Count==0,
                 "other branch sees no person without grant");
             Check(grants.ReadVisiblePersonIds(family,branch,admin).Count==0,
