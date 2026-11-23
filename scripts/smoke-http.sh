@@ -42,6 +42,8 @@ grep -q '"publicFamilyRecords":false' "$TMP/response.txt" || { echo "FAIL: priva
 [[ "$(status "$WEB/")" == 200 ]] || { echo "FAIL: home page"; exit 1; }
 [[ "$(status "$WEB/demo")" == 200 ]] || { echo "FAIL: fictional explorer"; exit 1; }
 grep -q 'Fictional family explorer' "$TMP/response.txt" || { echo "FAIL: demo fixture marker"; exit 1; }
+grep -q 'Center on ' "$TMP/response.txt" || { echo "FAIL: accessible direct recenter links"; exit 1; }
+grep -q 'Keyboard and touch navigation' "$TMP/response.txt" || { echo "FAIL: accessible navigation instructions"; exit 1; }
 [[ "$(status "$WEB/demo?above=9&below=-1&social=yes")" == 200 ]] || { echo "FAIL: bounded tree options"; exit 1; }
 # Security invariant: reserved private paths never trust forged identity headers
 # or token-shaped text, and known/unknown IDs receive identical empty replies.

@@ -53,7 +53,12 @@ public static class SyntheticTreeExplorer
         html.Append("form{display:flex;flex-wrap:wrap;gap:.9rem;margin:1.5rem 0}");
         html.Append("label{display:grid;gap:.3rem}select,input,button{font:inherit;padding:.4rem}");
         html.Append("table{width:100%;border-collapse:collapse}td,th{padding:.65rem;border-bottom:1px solid #aaa;text-align:left}");
-        html.Append("small{color:#555}caption{text-align:left;margin:.5rem 0}</style></head><body><main>");
+        html.Append("small{color:#555}caption{text-align:left;margin:.5rem 0}");
+        html.Append("a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible");
+        html.Append("{outline:3px solid #185abc;outline-offset:3px}");
+        html.Append(".skip{position:absolute;left:-10000px}.skip:focus{position:static}");
+        html.Append("</style></head><body><main>");
+        html.Append("<a class='skip' href='#visible-people'>Skip to visible people</a>");
         html.Append("<h1>🌳 Fictional family explorer</h1>");
         html.Append("<p><strong>Demonstration data only.</strong> The 32 people are invented; ");
         html.Append("there is no login, production database or access to real family records.</p>");
@@ -74,13 +79,24 @@ public static class SyntheticTreeExplorer
         Toggle("siblings","Include sibling branches",options.SiblingBranches);
         Toggle("social","Include social connections",options.SocialConnections);
         html.Append("<button type='submit'>Explore family</button></form>");
-        html.Append("<h2>Visible fictional people</h2>");
+        html.Append("<details><summary>Keyboard and touch navigation</summary>");
+        html.Append("<p>Select a person or use a row's Center link. Keyboard users can Tab");
+        html.Append(" through center links, and touch users can tap links.");
+        html.Append(" The table is an accessible alternative to pan/zoom.</p></details>");
+        html.Append("<h2 id='visible-people'>Visible fictional people</h2>");
         html.Append("<table><caption>Keyboard-accessible generation list</caption><thead>");
         html.Append("<tr><th scope='col'>Person</th><th scope='col'>Relative generation</th></tr></thead><tbody>");
         foreach (var node in tree?.Nodes ?? Array.Empty<PersonTreeNode>())
         {
-            html.Append("<tr><td>").Append(WebUtility.HtmlEncode(node.Person.DisplayName))
-                .Append("</td><td>").Append(node.Generation).Append("</td></tr>");
+            html.Append("<tr><td><a href='/demo?center=").Append(node.Person.Id.ToString("D"))
+                .Append("&amp;above=").Append(options.GenerationsAbove)
+                .Append("&amp;below=").Append(options.GenerationsBelow)
+                .Append("&amp;spouses=").Append(options.Spouses ? "yes" : "no")
+                .Append("&amp;siblings=").Append(options.SiblingBranches ? "yes" : "no")
+                .Append("&amp;social=").Append(options.SocialConnections ? "yes" : "no")
+                .Append("'>Center on ")
+                .Append(WebUtility.HtmlEncode(node.Person.DisplayName))
+                .Append("</a></td><td>").Append(node.Generation).Append("</td></tr>");
         }
         html.Append("</tbody></table><p><small>Visible relationship links: ");
         html.Append(tree?.Relationships.Count ?? 0).Append("; inferred sibling connections: ");
