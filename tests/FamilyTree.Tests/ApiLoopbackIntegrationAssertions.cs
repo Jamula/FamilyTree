@@ -133,6 +133,7 @@ internal static class ApiLoopbackIntegrationAssertions
                 using var blocked = await client.SendAsync(attempt);
                 Check(blocked.StatusCode == HttpStatusCode.NotImplemented &&
                     await blocked.Content.ReadAsStringAsync() == "" &&
+                    blocked.Content.Headers.ContentLength == 0 &&
                     blocked.Headers.CacheControl?.NoStore == true &&
                     blocked.Headers.TryGetValues("X-Content-Type-Options",
                         out var contentTypeOptions) &&
