@@ -10,6 +10,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Don't mistake unrelated services for a successful AppHost startup.
+python3 - <<'PY'
+import socket
+for port in (5181, 5182):
+    with socket.socket() as sock:
+        sock.settimeout(0.6)
+        if sock.connect_ex(("127.0.0.1", port)) == 0:
+            raise SystemExit(f"FAIL: pre-existing listener on localhost:{port}")
+PY
+
 # The Aspire CLI may download its public CLI bundle on the first local run.
 # Aspire CLI's AppHost launcher selects the Debug target path by default.
 # The parent solution is built in Release by CI, so also compile the
@@ -23,6 +33,10 @@ ready=0
 for i in $(seq 1 80); do
   if curl --fail --silent --max-time 2 "http://127.0.0.1:5181/health" -o "$TMP/api.json" &&
      curl --fail --silent --max-time 2 "http://127.0.0.1:5182/" -o /dev/null; then
+    if ! kill -0 "$PID" 2>/dev/null; then
+      echo "FAIL: AppHost exited even though localhost listeners responded"
+      exit 1
+    fi
     ready=1
     break
   fi
