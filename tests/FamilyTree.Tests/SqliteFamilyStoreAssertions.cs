@@ -10,10 +10,10 @@ internal static class SqliteFamilyStoreAssertions
     [ModuleInitializer]
     internal static void Run()
     {
-        var directory = Path.Combine(Path.GetTempPath(),
+        var directory = Path.Join(Path.GetTempPath(),
             "familytree-synthetic-sqlite-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "fictional-family.sqlite");
+        var path = Path.Join(directory, "fictional-family.sqlite");
         var secret = RandomNumberGenerator.GetBytes(32);
         var wrongSecret = RandomNumberGenerator.GetBytes(32);
         var family = Guid.NewGuid();
