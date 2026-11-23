@@ -55,6 +55,10 @@ if __name__ == "__main__":
     check(SAMPLE.replace('hits="0"', 'hits="-1"'), 2)
     check(SAMPLE.replace('number="2"', 'number="x"'), 2)
     check(SAMPLE.replace("50% (1/2)", "150% (3/2)"), 2)
+    check(SAMPLE.replace('<line number="2" hits="0"/>',
+        '<line number="2" hits="0" branch="true" condition-coverage="unknown"/>'), 2)
+    check(SAMPLE.replace('<line number="2" hits="0"/>',
+        '<line number="2" hits="0" branch="true"/>'), 2)
     # Independent C# lambda/classes can share a file and source line while
     # contributing distinct conditional branches. Never overstate branch %.
     same_line = SAMPLE.replace('<class filename="src/FamilyTree.Domain/A.cs">',
