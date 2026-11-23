@@ -141,11 +141,9 @@ public sealed class ReviewedGenealogyStore
                 if (!_people.Remove(original.Person.Id))
                     throw new InvalidOperationException("Approved record unavailable.");
             }
-            else if (original.Link is not null)
-            {
-                if (!_relationships.Remove(original.Link.Id))
-                    throw new InvalidOperationException("Approved record unavailable.");
-            }
+            else if (original.Link is not null &&
+                !_relationships.Remove(original.Link.Id))
+                throw new InvalidOperationException("Approved record unavailable.");
             _undone.Add(approvedRevision);
             var audit = new AuditEntry(++_revision, original.Request.Id,
                 moderatorId, original.Request.Kind, Approved: false, Reverted: true);
