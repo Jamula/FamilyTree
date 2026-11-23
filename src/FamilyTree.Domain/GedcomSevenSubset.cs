@@ -121,12 +121,26 @@ public static class GedcomSevenSubset
         ArgumentNullException.ThrowIfNull(people);
         ArgumentNullException.ThrowIfNull(relations);
         ArgumentNullException.ThrowIfNull(authorization);
+        const int MaxInputPeople = 10_000;
+        const int MaxExportedPeople = 1_000;
+        const int MaxInputRelations = 20_000;
+        const int MaxExportedRelations = 1_500;
         var visible = new List<Person>();
+        var personIds = new HashSet<Guid>();
+        var inputPeople = 0;
         foreach (var person in people)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (++inputPeople > MaxInputPeople)
+                throw new InvalidOperationException("Preview input exceeds safe bounds.");
+            if (person is null || person.Id == Guid.Empty || !personIds.Add(person.Id))
+                throw new InvalidOperationException("Preview contains malformed or duplicate people.");
             if (await authorization.CanSeePersonAsync(viewer, person.Id, cancellationToken))
+            {
+                if (visible.Count >= MaxExportedPeople)
+                    throw new InvalidOperationException("Preview export exceeds safe bounds.");
                 visible.Add(person);
+            }
         }
         // Sorting avoids unstable IDs between repeated previews; no data
         // other than explicitly permitted names leaves the API boundary.
@@ -134,14 +148,24 @@ public static class GedcomSevenSubset
         var ids = visible.Select((person,index) => (person.Id,Pointer:$"@I{index+1}@"))
             .ToDictionary(x=>x.Id,x=>x.Pointer);
         var accepted = new List<Relationship>();
+        var inputRelations = 0;
         foreach (var relation in relations)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (++inputRelations > MaxInputRelations)
+                throw new InvalidOperationException("Preview input exceeds safe bounds.");
+            if (relation is null || relation.Id == Guid.Empty ||
+                relation.FromPersonId == Guid.Empty || relation.ToPersonId == Guid.Empty)
+                throw new InvalidOperationException("Preview contains a malformed relationship.");
             if (relation.Kind == RelationKind.Parent &&
                 ids.ContainsKey(relation.FromPersonId) &&
                 ids.ContainsKey(relation.ToPersonId) &&
                 await authorization.CanSeeRelationshipAsync(viewer, relation, cancellationToken))
+            {
+                if (accepted.Count >= MaxExportedRelations)
+                    throw new InvalidOperationException("Preview export exceeds safe bounds.");
                 accepted.Add(relation);
+            }
         }
 
         var output = new StringBuilder();
@@ -151,7 +175,7 @@ public static class GedcomSevenSubset
             var name = person.DisplayName;
             var canonicalName = name?.Replace("/", "", StringComparison.Ordinal).Trim();
             if (string.IsNullOrWhiteSpace(canonicalName) || canonicalName.Length > 180 ||
-                canonicalName.IndexOfAny(['\r','\n','\t','@']) >= 0)
+                canonicalName.Contains('@') || canonicalName.Any(char.IsControl))
                 throw new InvalidOperationException("A display name cannot be safely exported.");
             output.Append("0 ").Append(ids[person.Id]).Append(" INDI\n1 NAME ")
                 .Append(canonicalName).Append('\n');
