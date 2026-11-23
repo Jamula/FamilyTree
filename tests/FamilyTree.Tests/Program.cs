@@ -21,3 +21,4 @@ Check(gratitude.Visibility == Visibility.PersonAndRecipient,"gratitude private d
 var unjoined = new Person(Guid.NewGuid(),"Sample Person");
 Check(unjoined.Id != Guid.Empty, "unjoined person can exist");
 Console.WriteLine($"PASS {assertions} domain assertions");
+await TreeProjectionAssertions.RunAsync();
