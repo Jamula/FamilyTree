@@ -1,0 +1,69 @@
+name: Publish tagged FamilyTree release
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release tag and history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install .NET 11
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: '11.0.x'
+      - name: Verify exact tag, version and main ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "Invalid release tag"; exit 1; }
+          VERSION="${GITHUB_REF_NAME#v}"
+          test "$(tr -d '\r\n' < VERSION)" = "$VERSION" || { echo "Tag and VERSION differ"; exit 1; }
+          grep -Fq "<Version>$VERSION</Version>" Directory.Build.props || { echo "Version mismatch"; exit 1; }
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main || { echo "Tag must point to a main commit"; exit 1; }
+      - name: Verify zero-cost source rules
+        run: python3 scripts/verify-zero-cost.py
+      - name: Restore
+        run: dotnet restore FamilyTree.slnx
+      - name: Build and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet build FamilyTree.slnx --no-restore --configuration Release
+          dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj --no-restore --no-build --configuration Release
+          bash scripts/smoke-http.sh
+      - name: Publish API and website bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet publish src/FamilyTree.Api/FamilyTree.Api.csproj -c Release --no-restore -o out/api
+          dotnet publish src/FamilyTree.Web/FamilyTree.Web.csproj -c Release --no-restore -o out/web
+          mkdir -p dist
+          tar -czf "dist/familytree-api-$GITHUB_REF_NAME.tar.gz" -C out/api .
+          tar -czf "dist/familytree-web-$GITHUB_REF_NAME.tar.gz" -C out/web .
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS.txt)
+      - name: Create GitHub prerelease without cloud deployment
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_NAME" == v0.* ]]; then
+            gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS.txt --verify-tag --generate-notes --prerelease --title "FamilyTree $GITHUB_REF_NAME"
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS.txt --verify-tag --generate-notes --title "FamilyTree $GITHUB_REF_NAME"
+          fi
+# A tag is created only after explicit release approval. This workflow does not
+# provision Azure, Cloudflare, paid storage or managed AI resources.
