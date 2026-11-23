@@ -244,6 +244,19 @@ public sealed partial class SqliteFamilyStore : IDisposable
               AND state='Offered';
             """, ("$f", familyId.ToString("D")),
             ("$p", memberId.ToString("D")));
+        // If the opt-in graph-grant schema is installed, revoke visibility in
+        // this SAME transaction. Merely checking current Active membership
+        // would silently resurrect old grants when a member rejoins.
+        var grantsInstalled = Scalar<long>(con, tx, """
+            SELECT COUNT(*) FROM sqlite_master
+            WHERE type='table' AND name='person_visibility';
+            """) != 0;
+        if (grantsInstalled)
+            Exec(con, tx, """
+                DELETE FROM person_visibility
+                WHERE family_id=$f AND principal_id=$p;
+                """, ("$f", familyId.ToString("D")),
+                ("$p", memberId.ToString("D")));
         Audit(con, tx, familyId, memberId, administratorId, "member-revoked");
         tx.Commit();
     }
