@@ -47,6 +47,18 @@ with tempfile.TemporaryDirectory() as workspace:
     index.write_text("[Guide](docs/guide(v1).md)\n", encoding="utf-8")
     assert module.validate(root) == [], module.validate(root)
 
+    index.write_text('[Valid](docs/architecture.md "Architecture guide")\n'
+                     '[Angle](<docs/guide(v1).md> "Versioned")\n'
+                     '![Preview](docs/assets/wireframe.svg "Image")\n',
+                     encoding="utf-8")
+    assert module.validate(root) == [], module.validate(root)
+    index.write_text('[Broken](docs/MISSING.md "Missing title")\n',
+                     encoding="utf-8")
+    assert any("case-mismatched" in x for x in module.validate(root))
+    index.write_text('![Broken](<docs/assets/notthere.svg> "Image")\n',
+                     encoding="utf-8")
+    assert any("broken" in x for x in module.validate(root))
+
     for root_name in ("README.md", "CHANGELOG.md", "README.MD"):
         root_file = root / root_name
         root_file.write_text("Uppercase filename", encoding="utf-8")
