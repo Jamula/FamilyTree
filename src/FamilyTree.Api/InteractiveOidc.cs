@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
+using FamilyTree.Domain;
 
 namespace FamilyTree.Api;
 
@@ -59,6 +60,22 @@ public static class InteractiveOidc
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(provider);
+        if (string.IsNullOrWhiteSpace(provider.ClientId) ||
+            string.IsNullOrWhiteSpace(provider.ClientSecret))
+            throw new ArgumentException("OIDC provider configuration is incomplete.", nameof(provider));
+        var isGoogle = provider.Name == "google" && provider.Scheme == "GoogleOidc" &&
+            provider.Authority == "https://accounts.google.com" &&
+            provider.Callback == "/auth/callback/google";
+        var isMicrosoft = provider.Name == "microsoft" && provider.Scheme == "MicrosoftOidc" &&
+            provider.Callback == "/auth/callback/microsoft" &&
+            provider.Authority.StartsWith("https://login.microsoftonline.com/",
+                StringComparison.Ordinal);
+        if (!isGoogle && !isMicrosoft)
+            throw new ArgumentException("OIDC provider is not recognized.", nameof(provider));
+        // Defense-in-depth: require provider-specific exact trusted issuer and
+        // audience even when callers bypass ReadConfiguration in tests.
+        _ = new OidcConfigurationGuard(
+            [new TrustedOidcIssuer(provider.Authority, provider.ClientId)]);
         options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
         options.Authority = provider.Authority;
         options.ClientId = provider.ClientId;
@@ -80,8 +97,11 @@ public static class InteractiveOidc
 
     public static IReadOnlyList<Provider> ReadConfiguration(IConfiguration config)
     {
+        ArgumentNullException.ThrowIfNull(config);
         var providers = new List<Provider>();
-        static bool Partial(params string?[] parts) => parts.Any(x => !string.IsNullOrEmpty(x));
+        // Explicitly configured but blank settings are an error, not a
+        // silent provider disablement that hides deployment mistakes.
+        static bool Partial(params string?[] parts) => parts.Any(x => x is not null);
         static void RequireComplete(params string?[] parts)
         {
             if (parts.Any(string.IsNullOrWhiteSpace))
