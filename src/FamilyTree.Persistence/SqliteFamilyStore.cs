@@ -12,7 +12,7 @@ namespace FamilyTree.Persistence;
 /// This is not a production data store until key lifecycle, backup and
 /// deployment access controls are reviewed. Tests use fictional names only.
 /// </summary>
-public sealed class SqliteFamilyStore : IDisposable
+public sealed partial class SqliteFamilyStore : IDisposable
 {
     private readonly string _path;
     private readonly byte[] _key;
@@ -67,6 +67,25 @@ public sealed class SqliteFamilyStore : IDisposable
             CREATE TABLE IF NOT EXISTS key_verifier (
                 id INTEGER PRIMARY KEY CHECK(id=1),
                 envelope BLOB NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS relationships (
+                family_id TEXT NOT NULL, id TEXT NOT NULL,
+                from_id TEXT NOT NULL, to_id TEXT NOT NULL,
+                kind TEXT NOT NULL, encrypted_label BLOB NOT NULL,
+                PRIMARY KEY(family_id, id),
+                FOREIGN KEY(family_id) REFERENCES families(id),
+                FOREIGN KEY(family_id,from_id) REFERENCES people(family_id,id),
+                FOREIGN KEY(family_id,to_id) REFERENCES people(family_id,id)
+            );
+            CREATE TABLE IF NOT EXISTS relationship_proposals (
+                id TEXT PRIMARY KEY, family_id TEXT NOT NULL,
+                relation_id TEXT NOT NULL, from_id TEXT NOT NULL,
+                to_id TEXT NOT NULL, kind TEXT NOT NULL,
+                encrypted_label BLOB NOT NULL, submitter TEXT NOT NULL,
+                state TEXT NOT NULL CHECK(state IN
+                    ('Pending','Approved','Rejected','Undone')),
+                reviewer TEXT NULL,
+                FOREIGN KEY(family_id) REFERENCES families(id)
             );
             """;
         command.ExecuteNonQuery();
