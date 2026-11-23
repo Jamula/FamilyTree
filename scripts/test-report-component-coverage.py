@@ -55,6 +55,18 @@ if __name__ == "__main__":
     check(SAMPLE.replace('hits="0"', 'hits="-1"'), 2)
     check(SAMPLE.replace('number="2"', 'number="x"'), 2)
     check(SAMPLE.replace("50% (1/2)", "150% (3/2)"), 2)
+    # Independent C# lambda/classes can share a file and source line while
+    # contributing distinct conditional branches. Never overstate branch %.
+    same_line = SAMPLE.replace('<class filename="src/FamilyTree.Domain/A.cs">',
+        '<class name="Parent" filename="src/FamilyTree.Domain/A.cs">', 1)
+    same_line = same_line.replace(
+        '</classes></package>\n<package name="FamilyTree.Api">',
+        '<class name="NestedLambda" filename="src/FamilyTree.Domain/A.cs">'
+        '<lines><line number="1" hits="1" branch="true" '
+        'condition-coverage="0% (0/2)"/></lines></class>'
+        '</classes></package>\n<package name="FamilyTree.Api">', 1)
+    branch_output = check(same_line, 0)
+    assert "branches=25.0% (4 conditions)" in branch_output, branch_output
     check("<notcoverage/>", 2)
     check("<coverage", 2)
     print("PASS component coverage separation, duplicate source, missing components and malformed data")
