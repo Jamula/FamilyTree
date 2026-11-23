@@ -1,7 +1,10 @@
+using System.Runtime.CompilerServices;
 using FamilyTree.Domain;
 
 internal static class AiProposalAssertions
 {
+    [ModuleInitializer]
+    internal static void ExecuteAtStartup() => RunAsync().GetAwaiter().GetResult();
     public static async Task RunAsync()
     {
         var viewer = Guid.NewGuid();
