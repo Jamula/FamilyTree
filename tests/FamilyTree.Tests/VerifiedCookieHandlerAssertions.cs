@@ -18,10 +18,16 @@ internal static class VerifiedCookieHandlerAssertions
         services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
             .AddCookie(InteractiveOidc.ConfigureCookieOptions);
         using var serviceProvider = services.BuildServiceProvider();
+        var requestScopes = new List<IServiceScope>();
 
         DefaultHttpContext Context(string? cookie = null)
         {
-            var c = new DefaultHttpContext { RequestServices = serviceProvider };
+            // ASP.NET authentication-handler providers are scoped per request.
+            // A shared root scope would reuse the first request's cached handler
+            // and incorrectly report all subsequent cookies as absent.
+            var scope = serviceProvider.CreateScope();
+            requestScopes.Add(scope);
+            var c = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
             c.Request.Scheme = "https";
             c.Request.Host = new HostString("localhost");
             c.Response.Body = new MemoryStream();
@@ -106,6 +112,7 @@ internal static class VerifiedCookieHandlerAssertions
         spoofed.User = new ClaimsPrincipal(identityInjected);
         Check(!await VerifiedOidcSession.ReadAsync(spoofed, [provider]),
             "request headers or injected User cannot bypass a missing cookie");
+        foreach (var scope in requestScopes) scope.Dispose();
         Console.WriteLine("PASS real cookie handler: verified, expired, tampered, removed-provider, and forged identity");
     }
 
