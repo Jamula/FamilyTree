@@ -30,6 +30,10 @@ Every P0 requirement must become an executable test before release. The followin
 - C01: `scripts/verify-zero-cost.py` enforces source-level action pinning and no configured deployments.
 - C02: GitHub `build-test` is the required branch rule check.
 
+| MCP tool gateway and safe agent discovery | [#44](https://github.com/Jamula/FamilyTree/issues/44) | Synthetic stdio handshake, bounded read tools, no approved writes | In progress |
+| Fictional multi-generation demo data | [#45](https://github.com/Jamula/FamilyTree/issues/45) | 32 fictional people, deterministic IDs, all relationships valid | In progress |
+| Agent proposals and real-data approval | [#46](https://github.com/Jamula/FamilyTree/issues/46) | No production access or automatic publication until M1 policies tested | Planned |
+
 ## Engineering acceptance
 - Each pull request references its issue and adds tests, or documents why automated coverage is not appropriate.
 - All read paths and graph traversal tests demonstrate *no existence leaks* for unauthorized people.
