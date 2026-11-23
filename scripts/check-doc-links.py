@@ -35,7 +35,7 @@ def validate(repo_root: Path) -> list[str]:
         rel = file.relative_to(root)
         if any(part in {'bin', 'obj', '.git', '.venv'} for part in rel.parts):
             continue
-        if (rel.parts[0] == 'docs' or rel.as_posix() in
+        if (rel.parts[0] == 'docs' or rel.as_posix().lower() in
             {'readme.md', 'changelog.md'}) and file.name != file.name.lower():
             errors.append(f'{rel}: user documentation filename must be lowercase')
         content = markdown_without_fences(file.read_text(encoding='utf-8'))
