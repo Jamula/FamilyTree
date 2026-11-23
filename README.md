@@ -22,3 +22,9 @@ Preserve family history, connect generations, celebrate people, and let families
 
 ## Status
 Bootstrap only. Product documentation, app code, CI, and security tests will be added through reviewed pull requests. No family information is deployed publicly.
+
+## Development baseline
+- **Framework:** .NET 11 GA (`net11.0`), SDK `11.0.100` or compatible .NET 11 servicing patch.
+- **Product version:** independent of framework; the intended initial product release is `0.1.0`.
+- **Cost policy:** $0 until the owner gives explicit prior approval for any charge. See [Cost policy](docs/COST_POLICY.md).
+- **Local setup:** [Development instructions](docs/DEVELOPMENT.md).

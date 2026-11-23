@@ -4,7 +4,7 @@ internal static class GedcomFixtureAssertions
 {
     public static void Run()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "fixtures", "synthetic-family.ged.txt");
+        var path = Path.Join(AppContext.BaseDirectory, "fixtures", "synthetic-family.ged.txt");
         var lines = File.ReadAllLines(path, Encoding.UTF8);
         Ensure(lines.Length > 8, "fixture must contain a nontrivial example");
         Ensure(lines[0] == "0 HEAD" && lines[^1] == "0 TRLR", "GEDCOM dataset boundaries");
