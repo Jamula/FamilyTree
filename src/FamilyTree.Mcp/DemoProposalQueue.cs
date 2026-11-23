@@ -1,40 +1,52 @@
 namespace FamilyTree.Mcp;
 
 /// <summary>
-/// Ephemeral in-memory drafts for a fictional demo only; restart clears all.
-/// Never treat proposed records as authorized, approved, or persisted family data.
+/// Ephemeral fictional-only draft queue. An instance supports isolated
+/// concurrency/overflow testing without changing global tool state.
+/// It cannot approve or persist a genealogy record.
 /// </summary>
-public static class DemoProposalQueue
+public sealed class DemoDraftBuffer
 {
-    private static readonly object Gate = new();
-    private static readonly List<DemoProposal> Drafts = new();
+    private readonly object _gate = new();
+    private readonly List<DemoProposal> _drafts = new();
     private const int MaxDrafts = 100;
 
-    public static DemoProposal Stage(string kind, string summary)
+    public DemoProposal Stage(string kind, string summary)
     {
-        // Only the known synthetic proposal types and bounded, printable
-        // summaries are accepted. No arbitrary payloads, private data or logs.
         if ((kind != "person" && kind != "relationship") ||
             string.IsNullOrWhiteSpace(summary) || summary.Length > 256 ||
             summary.Any(char.IsControl))
             throw new ArgumentException("Invalid fictional proposal.");
 
-        lock (Gate)
+        lock (_gate)
         {
-            if (Drafts.Count >= MaxDrafts)
+            if (_drafts.Count >= MaxDrafts)
                 throw new InvalidOperationException("Draft queue is full; restart to clear the demo.");
             var draft = new DemoProposal(Guid.NewGuid(), kind, summary, "pending",
                 Persisted: false, Approved: false);
-            Drafts.Add(draft);
+            _drafts.Add(draft);
             return draft;
         }
     }
 
-    public static IReadOnlyList<DemoProposal> All()
+    public IReadOnlyList<DemoProposal> All()
     {
-        lock (Gate)
-            return Drafts.ToArray();
+        lock (_gate) return _drafts.ToArray();
     }
+}
+
+/// <summary>
+/// Legacy synthetic MCP process singleton. No real family store or approval
+/// endpoint may ever be attached to this public tool facade.
+/// </summary>
+public static class DemoProposalQueue
+{
+    private static readonly DemoDraftBuffer Queue = new();
+
+    public static DemoProposal Stage(string kind, string summary) =>
+        Queue.Stage(kind, summary);
+
+    public static IReadOnlyList<DemoProposal> All() => Queue.All();
 }
 
 public sealed record DemoProposal(Guid Id, string Kind, string Summary,

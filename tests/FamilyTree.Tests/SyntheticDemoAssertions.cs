@@ -91,6 +91,8 @@ internal static class SyntheticDemoAssertions
             "staging must never change the approved synthetic catalog");
 
         Console.WriteLine("PASS synthetic family, safe MCP discovery and draft-only assertions");
+        // Parallel stress must run after CLR module initialization completes.
+        McpAdversarialAssertions.Run();
 
         bool HasParentChain(params int[] chain)
         {
