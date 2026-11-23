@@ -75,7 +75,7 @@ internal static class InteractiveOidcEndpointAssertions
         Check(cookies.Cookie.Name=="__Host-FamilyTreeSession" &&
               cookies.Cookie.HttpOnly &&
               cookies.Cookie.SecurePolicy==Microsoft.AspNetCore.Http.CookieSecurePolicy.Always &&
-              cookies.SlidingExpiration==false &&
+              !cookies.SlidingExpiration &&
               cookies.ExpireTimeSpan==TimeSpan.FromHours(8),
               "secure cookie policy without persistent token storage");
         if(configured)
