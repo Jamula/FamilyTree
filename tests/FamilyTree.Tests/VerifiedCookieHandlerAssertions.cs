@@ -61,7 +61,17 @@ internal static class VerifiedCookieHandlerAssertions
         }
 
         var goodCookie = await SignInAsync(expired: false);
-        Check(await VerifiedOidcSession.ReadAsync(Context(goodCookie), [provider]),
+        var protectedContext = Context(goodCookie);
+        var ticket = await protectedContext.AuthenticateAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme);
+        Console.WriteLine("COOKIE synthetic probe: succeeded=" + ticket.Succeeded +
+            " principalAuthenticated=" +
+            (ticket.Principal?.Identity?.IsAuthenticated ?? false) +
+            " trustedClaimTypes=" +
+            (ticket.Principal?.Claims.Count(c =>
+                c.Type.StartsWith("familytree:trusted:", StringComparison.OrdinalIgnoreCase)) ?? 0) +
+            " failed=" + (ticket.Failure?.GetType().Name ?? "none"));
+        Check(await VerifiedOidcSession.ReadAsync(protectedContext, [provider]),
             "real ASP.NET cookie handler accepts cryptographically protected ticket");
         Check(!await VerifiedOidcSession.ReadAsync(Context(goodCookie), []),
             "deconfigured provider invalidates even a still-valid cookie");
