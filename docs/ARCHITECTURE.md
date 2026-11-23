@@ -2,7 +2,7 @@
 
 - ADR-001: Independent codebase and product separate from Family Hub.
 - ADR-002: Standard GEDCOM 7 exchange, with validated round-trip tests; extension data in namespaced fields/sidecar export.
-- ADR-003: .NET 10 domain, server APIs, Blazor UI; no dependency on Gramps/webtrees for authoritative data. Evaluate mature libraries for import/export and visualization rather than reimplementing algorithms.
+- ADR-003: .NET 11 GA domain, server APIs, Blazor UI; no dependency on Gramps/webtrees for authoritative data. Evaluate mature libraries for import/export and visualization rather than reimplementing algorithms.
 - ADR-004: Deny by default at server and query boundary, including family/branch/person/field/media scopes; no public living-person directory.
 - ADR-005: People are distinct from user accounts. Membership opt-in is not required for genealogical representation.
 - ADR-006: Multiple independent relationship edges per pair; distinguish parent, spouse, partner, sibling and social associations.

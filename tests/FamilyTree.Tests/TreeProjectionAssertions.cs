@@ -47,11 +47,11 @@ internal static class TreeProjectionAssertions
 
         var zeroDepthSiblings = await PersonTreeProjector.ProjectAsync(
             viewer, center.Id, people, links, new TreeOptions(0, 0, false, true, false), auth);
-        Ensure(zeroDepthSiblings is not null, "authorized zero-depth tree must exist");
-        Ensure(zeroDepthSiblings!.Nodes.Select(x => x.Person.Id)
+        var verifiedSiblings = zeroDepthSiblings ?? throw new InvalidOperationException("authorized zero-depth tree must exist");
+        Ensure(verifiedSiblings.Nodes.Select(x => x.Person.Id)
             .ToHashSet().SetEquals(new[] {center.Id, sibling.Id}),
             "zero-depth sibling view must exclude the out-of-depth parent");
-        Ensure(zeroDepthSiblings.InferredSiblingConnections.Any(e =>
+        Ensure(verifiedSiblings.InferredSiblingConnections.Any(e =>
             (e.FirstPersonId == center.Id && e.SecondPersonId == sibling.Id)
             || (e.FirstPersonId == sibling.Id && e.SecondPersonId == center.Id)),
             "inferred sibling link must remain visible without leaking the parent");
