@@ -22,3 +22,4 @@ var unjoined = new Person(Guid.NewGuid(),"Sample Person");
 Check(unjoined.Id != Guid.Empty, "unjoined person can exist");
 Console.WriteLine($"PASS {assertions} domain assertions");
 TelemetryAssertions.Run();
+await TreeProjectionAssertions.RunAsync();
