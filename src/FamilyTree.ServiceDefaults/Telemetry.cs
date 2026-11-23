@@ -65,6 +65,10 @@ public static class FamilyTelemetry
 
     public static void Record(FamilyOperation operation, int statusCode, TimeSpan elapsed)
     {
+        if (statusCode is < 100 or > 599)
+            throw new ArgumentOutOfRangeException(nameof(statusCode));
+        if (elapsed < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(elapsed));
         var operationLabel = ToLabel(operation);
         var result = statusCode >= 500 ? "server_error" :
             statusCode >= 400 ? "client_error" : "success";
@@ -79,6 +83,10 @@ public static class FamilyTelemetry
 
     public static void RecordWorkflow(FamilyWorkload workload, FamilyOutcome outcome, TimeSpan elapsed)
     {
+        if (!Enum.IsDefined(workload) || !Enum.IsDefined(outcome))
+            throw new ArgumentOutOfRangeException(nameof(workload), "Unknown telemetry category.");
+        if (elapsed < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(elapsed));
         var tags = new TagList
         {
             { "familytree.workload", workload switch
