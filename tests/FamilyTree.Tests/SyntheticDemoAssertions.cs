@@ -53,14 +53,18 @@ internal static class SyntheticDemoAssertions
             "draft proposals stay ephemeral");
         Ensure(DemoProposalQueue.All().All(p => !p.Approved && !p.Persisted),
             "no draft can be approved or persisted through MCP");
+        var selfLinkRejected = false;
         try
         {
             FamilyDemoTools.ProposeDemoRelationship(
                 SyntheticFamilyCatalog.PersonId(1).ToString(),
                 SyntheticFamilyCatalog.PersonId(1).ToString(), "Parent");
-            throw new InvalidOperationException("Self relationship proposal was accepted");
         }
-        catch (ArgumentException) { }
+        catch (ArgumentException)
+        {
+            selfLinkRejected = true;
+        }
+        Ensure(selfLinkRejected, "self relationship proposals must be rejected");
 
         Console.WriteLine("PASS 14 synthetic family and safe MCP tools assertions");
 
