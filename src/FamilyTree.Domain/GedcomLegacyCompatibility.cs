@@ -47,7 +47,8 @@ public static class GedcomLegacyCompatibility
             {
                 var record = line.Split(' ', 3);
                 if (record.Length > 1 &&
-                    (record[1] == "HEAD" || record[1] == "TRLR"))
+                    (record[1] == "HEAD" ||
+                     (record[1] == "TRLR" && i != lines.Length - 1)))
                     return Reject("Repeated GEDCOM boundary record");
                 inHeader = false;
                 if (record.Length == 3 && record[1].StartsWith('@'))
