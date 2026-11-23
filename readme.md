@@ -1,31 +1,57 @@
 # FamilyTree
 
-A privacy-first, standards-based family heritage platform, distinct from Family Hub.
+> Privacy-first family genealogy. **Version 0.1.0, pre-MVP.** This public repository uses fictional demonstration data only.
 
-## Product vision
-Preserve family history, connect generations, celebrate people, and let families control their data.
+FamilyTree is an open-source, standards-oriented family heritage project, independent of Family Hub. Its aim is to help families preserve relationships and stories with explicit control over who can see or change each detail.
 
-## Proposed features
-- GEDCOM 7 import/export and person-centered tree navigation
-- Adjustable generations, spouses, sibling branches, and optional social connections
-- Opt-in participation, profile claims, and administrator-approved changes
-- Ring-fenced privacy by family, person, field, event, and photo
-- Life events, media, gratitude messages, and family research
-- Provider-neutral AI assistance with permission-aware retrieval
-- Self-hosted open-source and hosted freemium editions
+## What the app could look like
 
-## Technology direction
-.NET / Blazor first, OpenID Connect, documented APIs, portable genealogy records. The genealogy engine and hosting model remain under evaluation.
+![Grayscale UI wireframes for FamilyTree: a person-centered family tree and a separate proposal review queue, populated with invented example people. Concept artwork, not a screenshot of a completed feature.](docs/assets/familytree-ui-wireframes.svg)
 
-## Privacy requirement
-**This is a public code repository. Never commit real relatives' records, private photos, birth/death dates, email addresses, phone numbers, genealogy exports, secrets, or production configuration.** Development fixtures must be synthetic. Privacy must be enforced on the backend, not only by UI filtering.
+*Design wireframe, not a screenshot or production feature promise.* The tree navigator and fictional editing workbench already exist locally in simpler forms. The integrated private tree, real users, persistent review queue and full genealogy editing remain M1 work.
 
-## Status
-M0 engineering foundations are merged: .NET 11 API/web, SHA-pinned CI and smoke checks, protected graph projection, synthetic GEDCOM fixture, local Aspire AppHost and opt-in telemetry. The user-facing private family MVP remains M1 work. No real family information is deployed publicly.
+### Main interaction flows
 
-## Development baseline
-- **Framework:** .NET 11 GA (`net11.0`), SDK `11.0.100` or compatible .NET 11 servicing patch.
-- **Product version:** independent of framework; the version is **fixed at `0.1.0` until the private-family MVP is accepted**. The next version requires an explicit decision.
-- **Cost policy:** $0 incremental **hosting/production infrastructure**. GitHub and other development tooling is shared engineering overhead allocated across active projects; new paid services/overages require specific owner approval. See [Cost policy](docs/COST_POLICY.md).
-- **Local setup:** [Development instructions](docs/DEVELOPMENT.md).
-- **Local AI agents:** [Fictional-family MCP tools](docs/MCP_DEMO.md). They provide a stdio integration for supported agent clients, never access real family data, and never publish proposed changes.
+| Area | Intended experience | Current availability |
+| --- | --- | --- |
+| Tree | Center a person, adjust ancestor/descendant depth, follow relationships | Fictional explorer and local SVG prototype; real family graph still blocked |
+| People | Add people and create independent parent, partner or social links | Synthetic local workbench only |
+| Review | Propose a change, approve/reject independently, undo approved edits | Fictional local workbench only |
+| Privacy | Family, branch, person, field and media access policies | Domain rules; private-family API remains fail-closed |
+| Import/export | GEDCOM 7 migration, previews, controlled export | Bounded subset implementation; full interoperability still in progress |
+
+## Run the fictional demo locally
+
+Requirements: [free .NET 11 SDK](https://dotnet.microsoft.com/download/dotnet/11.0) and Git. On Windows PowerShell:
+
+```powershell
+git clone https://github.com/Jamula/FamilyTree.git
+cd FamilyTree
+dotnet restore FamilyTree.slnx
+dotnet run --project src/FamilyTree.Web/FamilyTree.Web.csproj --urls http://127.0.0.1:5182
+```
+
+Open **http://127.0.0.1:5182/demo** for the 32-person fictional explorer, or **http://127.0.0.1:5182/demo/workbench** for the local-only fictional create/review/link/undo workflow. The workbench resets at restart and must not be used for private or actual family records.
+
+## Core design commitments
+
+- Privacy defaults to **deny**. A login is not a genealogy Person or an automatic family membership.
+- Preserve multiple typed independent relationships, including social associations and their provenance.
+- Use GEDCOM 7 for interoperability and a versioned sidecar for concepts GEDCOM cannot preserve.
+- Human approval controls updates; AI and remote agent tools cannot silently publish family data.
+- Support an eventual self-hosted and hosted codebase without proprietary data lock-in.
+
+## Architecture and delivery
+
+- [Architecture and trust boundaries](docs/architecture.md), including a Mermaid diagram.
+- [Local development](docs/development.md), [test strategy](docs/test_strategy.md), and [release readiness](docs/release_readiness.md).
+- [Cost policy](docs/cost_policy.md) and [security boundary](docs/private_api_security_boundary.md).
+- [GitHub issues](https://github.com/Jamula/FamilyTree/issues) and [pull requests](https://github.com/Jamula/FamilyTree/pulls) are the live source of work status.
+
+**Current status:** The .NET 11 web app/API, fictional demo, domain authorization and moderation primitives, local observability, security tests, and smoke tests run in CI. A functional private-family MVP remains unaccepted. Private-family data endpoints stay blocked; no production identity provider or real genealogy data is exposed.
+
+**Cost and version controls:** Product version stays at **0.1.0** until explicit MVP acceptance. No incremental paid hosting or cloud services without approval.
+
+## Privacy notice
+
+**Never commit real relatives' identities, photos, birth/death dates, contacts, chat exports, GEDCOM files, authentication credentials, or secrets to this public repository.** Use only wholly fictional fixtures. Server authorization, not a hidden UI element, must enforce visibility.
