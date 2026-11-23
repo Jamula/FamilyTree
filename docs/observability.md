@@ -1,6 +1,6 @@
 # Privacy-safe observability foundation (#22)
 
-This project uses native .NET diagnostics (ActivitySource and Meter) with an intentionally tiny, allowlisted tag vocabulary. The OpenTelemetry 1.21 SDK and OTLP exporter are opt-in, disabled by default; see [local setup](OTEL_LOCAL.md).
+This project uses native .NET diagnostics (ActivitySource and Meter) with an intentionally tiny, allowlisted tag vocabulary. The OpenTelemetry 1.21 SDK and OTLP exporter are opt-in, disabled by default; see [local setup](otel_local.md).
 
 ## Current instrumentation
 - Activity source and meter: `FamilyTree.Api`

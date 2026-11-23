@@ -13,14 +13,14 @@ The version on `main` stays `0.1.0` until the owner approves a post-MVP change.
 ## Files and tags
 - `VERSION`: release version.
 - `Directory.Build.props`: central .NET assembly/package version.
-- `CHANGELOG.md`: published changes and planned versions.
+- `changelog.md`: published changes and planned versions.
 - Git tag: `vMAJOR.MINOR.REVISION` (e.g. `v0.1.0`).
 - GitHub Releases: release artifacts, checksums and generated notes, using approved public GitHub-hosted runners.
 
 ## Release process (human-approved)
 1. Milestone owner verifies completed/approved-deferred issues and records all release exceptions.
 2. Required `build-test`, HTTP smoke, privacy, security, cost and packaging checks pass.
-3. A reviewable PR updates `VERSION`, `Directory.Build.props`, `CHANGELOG.md` together. `0.1.0` is the initial baseline.
+3. A reviewable PR updates `VERSION`, `Directory.Build.props`, `changelog.md` together. `0.1.0` is the initial baseline.
 4. Merge to `main`; **only after explicit release approval**, create and push an annotated `vX.Y.Z` tag on the approved commit.
 5. Pushing that tag runs `.github/workflows/release.yml`, which verifies version consistency and ancestor relation to `main` and publishes source-built API/Web bundles and SHA256 checksums as a GitHub Release.
 6. Deployment is a **separate step**, never implied by publication. Real family data must not be hosted until authentication and privacy approval are complete.
