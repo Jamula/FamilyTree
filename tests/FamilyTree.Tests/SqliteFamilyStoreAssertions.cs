@@ -51,10 +51,11 @@ internal static class SqliteFamilyStoreAssertions
                 Expect<ArgumentException>(() => store.IssueInvitation(
                     family, admin, member, DateTimeOffset.UtcNow.AddMinutes(-1),
                     DateTimeOffset.UtcNow), "expired issued invitation");
-                var expired = store.IssueInvitation(family, admin, Guid.NewGuid(),
+                var expiredRecipient = Guid.NewGuid();
+                var expired = store.IssueInvitation(family, admin, expiredRecipient,
                     DateTimeOffset.UtcNow.AddSeconds(2), DateTimeOffset.UtcNow);
                 Expect<UnauthorizedAccessException>(() => store.AcceptInvitation(
-                    family, unknown, expired, DateTimeOffset.UtcNow.AddHours(1)),
+                    family, expiredRecipient, expired, DateTimeOffset.UtcNow.AddHours(1)),
                     "expired or wrong recipient invitation");
                 var invitation = store.IssueInvitation(family, admin, member,
                     DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow);
@@ -79,6 +80,14 @@ internal static class SqliteFamilyStoreAssertions
                 store.ApproveMember(family, admin, member);
                 Expect<UnauthorizedAccessException>(() => store.ApproveMember(
                     family, admin, member), "membership approved only once");
+                var adminProposal = store.ProposePerson(family, admin,
+                    new Person(Guid.NewGuid(), "Fictional Self-Review Target"));
+                Expect<UnauthorizedAccessException>(() => store.ReviewPerson(
+                    family, admin, adminProposal, true),
+                    "active administrator cannot approve a self-submitted proposal");
+                Check(store.ListPendingPeople(family, admin).Any(x =>
+                    x.ProposalId == adminProposal),
+                    "pending administrator proposal visible to private review inbox");
                 Check(store.ReadPeople(family, member).Count == 0,
                     "approved member sees no unreviewed people");
                 Expect<UnauthorizedAccessException>(() => store.ProposePerson(
@@ -92,6 +101,14 @@ internal static class SqliteFamilyStoreAssertions
                 var proposal = store.ProposePerson(family, member, fictionalPerson);
                 Check(store.ReadPeople(family, admin).Count == 0,
                     "pending proposal hidden from family reads");
+                Check(store.ListPendingPeople(family, admin).Any(x =>
+                    x.ProposalId == proposal && x.Person == fictionalPerson &&
+                    x.SubmittedBy == member),
+                    "independent administrator can review exact pending Person diff");
+                Expect<UnauthorizedAccessException>(() => store.ListPendingPeople(
+                    family, member), "ordinary member cannot enumerate proposals");
+                Expect<UnauthorizedAccessException>(() => store.ListPendingPeople(
+                    otherFamily, admin), "cross-family pending proposals hidden");
                 Expect<InvalidOperationException>(() => store.ProposePerson(
                     family, member, fictionalPerson),
                     "duplicate pending proposal must be rejected");
@@ -122,7 +139,7 @@ internal static class SqliteFamilyStoreAssertions
                 Check(!Encoding.UTF8.GetString(File.ReadAllBytes(path)).Contains(
                     fictionalPerson.DisplayName, StringComparison.Ordinal),
                     "person names encrypted at rest");
-                pendingCipherProposal = store.ProposePerson(family, admin,
+                pendingCipherProposal = store.ProposePerson(family, member,
                     new Person(Guid.NewGuid(), "Fictional Unapproved Cipher"));
             }
             using (var reopened = new SqliteFamilyStore(path, secret))
@@ -152,6 +169,9 @@ internal static class SqliteFamilyStoreAssertions
                 Expect<InvalidDataException>(() => wrong.ReviewPerson(
                     family, admin, pendingCipherProposal, true),
                     "wrong-key ciphertext cannot be approved into authoritative graph");
+                Expect<InvalidDataException>(() => wrong.ListPendingPeople(
+                    family, admin),
+                    "wrong-key administrator cannot render pending private names");
             }
             using (var direct = new SqliteConnection(
                 new SqliteConnectionStringBuilder { DataSource = path }.ToString()))
