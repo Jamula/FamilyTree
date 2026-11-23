@@ -6,9 +6,11 @@ WEB="http://127.0.0.1:5182"
 TMP="$(mktemp -d)"
 API_PID=""
 WEB_PID=""
+PROVIDER_API_PID=""
 cleanup() {
   [[ -z "$API_PID" ]] || kill "$API_PID" 2>/dev/null || true
   [[ -z "$WEB_PID" ]] || kill "$WEB_PID" 2>/dev/null || true
+  [[ -z "$PROVIDER_API_PID" ]] || kill "$PROVIDER_API_PID" 2>/dev/null || true
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -65,3 +67,31 @@ printf 'PASS HTTP smoke: fail-closed private routes, identity spoofing and empty
 grep -q '"membershipAuthorization":false' "$TMP/response.txt" || { echo "FAIL: OIDC login cannot grant family access"; exit 1; }
 [[ "$(status "$API/auth/session")" == 401 ]] || { echo "FAIL: anonymous session"; exit 1; }
 [[ "$(status "$API/auth/login/google")" == 404 ]] || { echo "FAIL: unconfigured provider must not issue login challenge"; exit 1; }
+
+# Real providers require separate owner registration. This branch tests only
+# a locally configured *synthetic* provider listing, never a live OIDC login.
+PROVIDER_API="http://127.0.0.1:5183"
+env -u FAMILYTREE_OIDC_MICROSOFT_TENANT_ID \
+    -u FAMILYTREE_OIDC_MICROSOFT_CLIENT_ID \
+    -u FAMILYTREE_OIDC_MICROSOFT_CLIENT_SECRET \
+    FAMILYTREE_OIDC_GOOGLE_CLIENT_ID=synthetic-test-client \
+    FAMILYTREE_OIDC_GOOGLE_CLIENT_SECRET=synthetic-test-secret \
+    dotnet run --project src/FamilyTree.Api/FamilyTree.Api.csproj \
+      --no-restore --no-build -c Release --urls "$PROVIDER_API" \
+      >"$TMP/api-provider.log" 2>&1 &
+PROVIDER_API_PID=$!
+provider_ready=0
+for i in $(seq 1 25); do
+  if curl --silent --max-time 1 -o /dev/null "$PROVIDER_API/health"; then
+    provider_ready=1
+    break
+  fi
+  sleep 1
+done
+[[ "$provider_ready" == 1 ]] || { echo "FAIL: synthetic provider API startup"; exit 1; }
+[[ "$(status "$PROVIDER_API/auth/providers")" == 200 ]] || { echo "FAIL: configured OIDC listing"; exit 1; }
+grep -q '"providers":\["google"\]' "$TMP/response.txt" || { echo "FAIL: only explicit Google scheme exposed"; exit 1; }
+! grep -q 'synthetic-test-secret' "$TMP/response.txt" || { echo "FAIL: OIDC secret leaked"; exit 1; }
+[[ "$(status "$PROVIDER_API/auth/session")" == 401 ]] || { echo "FAIL: configured provider cannot grant anonymous session"; exit 1; }
+[[ "$(status "$PROVIDER_API/api/v1/people")" == 501 ]] || { echo "FAIL: provider registration cannot unlock private family APIs"; exit 1; }
+printf 'PASS HTTP smoke: configured synthetic OIDC provider and privacy boundary\n'
