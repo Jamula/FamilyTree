@@ -10,6 +10,7 @@ public sealed record FamilyFieldGrant(Guid PrincipalId, Guid FamilyId, Guid Pers
 
 public sealed class FieldPrivacyPolicy(Guid familyId, IEnumerable<FamilyFieldGrant> trustedGrants)
 {
+    public Guid FamilyId { get; } = familyId;
     private readonly FamilyFieldGrant[] _grants =
         (trustedGrants ?? throw new ArgumentNullException(nameof(trustedGrants))).ToArray();
 
