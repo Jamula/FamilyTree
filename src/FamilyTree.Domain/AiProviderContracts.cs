@@ -34,8 +34,10 @@ public static class SyntheticProviderGate
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(input);
         if (!explicitOptIn || !permissionChecked ||
-            input.FictionalContext.Length > 8000 || input.Prompt.Length > 1000 ||
-            string.IsNullOrWhiteSpace(input.Prompt)) return null;
+            input.FictionalContext is null ||
+            string.IsNullOrWhiteSpace(input.Prompt) ||
+            input.FictionalContext.Length > 8000 || input.Prompt.Length > 1000)
+            return null;
         // Only synthetic input may enter this pre-MVP interface.
         // Real-family provider contracts must be separately designed and reviewed.
         return await provider.SuggestSyntheticAsync(input, ct);
