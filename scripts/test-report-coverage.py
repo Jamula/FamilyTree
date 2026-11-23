@@ -39,4 +39,6 @@ if __name__ == "__main__":
     check("<coverage line-rate='x' branch-rate='0'/>", 2)
     check("<coverage line-rate='2' branch-rate='0'/>", 2)
     check("<coverage", 2)
+    check(GOOD.replace("50% (1/2)", "150% (3/2)"), 2)
+    check(GOOD.replace("50% (1/2)", "0% (0/0)"), 2)
     print("PASS coverage-report parser, thresholds and malformed-report scenarios")
