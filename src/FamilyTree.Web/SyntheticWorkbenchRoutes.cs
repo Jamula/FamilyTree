@@ -21,7 +21,7 @@ public static class SyntheticWorkbenchRoutes
             http.Response.Headers.CacheControl = "no-store";
             http.Response.Headers["Referrer-Policy"] = "no-referrer";
             http.Response.Headers["X-Content-Type-Options"] = "nosniff";
-            http.Response.Headers.ContentSecurityPolicy =
+            http.Response.Headers["Content-Security-Policy"] =
                 "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; " +
                 "base-uri 'none'; frame-ancestors 'none'";
             return Results.Content(Render(state.Read(), token),
