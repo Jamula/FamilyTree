@@ -17,11 +17,11 @@ Invitations and membership records are distinct objects. Invitation expiry or de
 | Active | Left | Member voluntarily leaves, or an authorized administrator revokes membership |
 | Paused | Active | Member requests resumption; allowed only when prior grants remain valid and no admin suspension is active, otherwise require new approval |
 | Paused | Left | Member chooses to leave or administrator revokes membership |
-| Left | PendingApproval | Former member accepts a **new** invitation or submits a new application; previous grants are not automatically restored |
+| Left | PendingApproval | Former member presents a **fresh, valid, administrator-issued invitation** and submits a new application; no direct reapplication is permitted, and previous grants are not automatically restored |
 
 **All access-losing transitions must invalidate effective permissions and cached authorization decisions immediately.** No token can authorize a revoked grant merely because its signature and expiration remain valid. An identity linked to multiple families or branches loses only the grants for the affected membership.
 
-Rejoining requires fresh authorization; nobody can self-approve access or profile claims. A member's historical genealogy identity is preserved subject to data-rights processes.
+Rejoining requires a fresh administrator-issued invitation followed by independent administrator approval; nobody can self-approve access or profile claims. The membership-request endpoint rejects requests that cannot prove a valid, unused invitation. A member's historical genealogy identity is preserved subject to data-rights processes.
 
 
 ## Authorization
