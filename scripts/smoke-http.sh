@@ -102,6 +102,9 @@ printf 'PASS HTTP smoke: configured synthetic OIDC provider and privacy boundary
 # Never submit actual family names, user input, or credentials here.
 [[ "$(status "$WEB/demo/workbench")" == 200 ]] || { echo "FAIL: fictional local workbench"; exit 1; }
 grep -q 'Invented records only' "$TMP/response.txt" || { echo "FAIL: fictional-only marker"; exit 1; }
+wrong_host="$(curl --silent --max-time 5 -H 'Host: familytree.public.example' \
+    -o "$TMP/response.txt" -w '%{http_code}' "$WEB/demo/workbench")"
+[[ "$wrong_host" == 404 ]] || { echo "FAIL: public Host exposed local workbench"; exit 1; }
 bad="$(curl --silent --max-time 5 -X POST -o "$TMP/response.txt" -w '%{http_code}' \
     "$WEB/demo/workbench" -d 'action=propose-person')"
 [[ "$bad" == 400 ]] || { echo "FAIL: missing anti-forgery token accepted"; exit 1; }
