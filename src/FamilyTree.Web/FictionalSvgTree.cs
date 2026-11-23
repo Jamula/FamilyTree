@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 using FamilyTree.Domain;
@@ -54,38 +55,79 @@ public static class FictionalSvgTree
         html.Append("<desc id='tree-svg-description'>Links between invented people; ");
         html.Append("select any person to recenter. The following table is an alternative.</desc>");
 
-        foreach (var edge in tree.Relationships.Where(edge =>
-            positions.ContainsKey(edge.FromPersonId) &&
-            positions.ContainsKey(edge.ToPersonId)))
+        // Distinct typed links can connect the same two people. Group them
+        // together and bend their paths independently, so an ordinary parent
+        // edge cannot hide a dotted friendship or sibling connection.
+        var explicitEdges = tree.Relationships
+            .Where(edge => positions.ContainsKey(edge.FromPersonId) &&
+                positions.ContainsKey(edge.ToPersonId))
+            .Select(edge => (From: edge.FromPersonId, To: edge.ToPersonId,
+                Kind: edge.Kind, Inferred: false));
+        var inferredEdges = tree.InferredSiblingConnections
+            .Where(edge => positions.ContainsKey(edge.FirstPersonId) &&
+                positions.ContainsKey(edge.SecondPersonId))
+            .Select(edge => (From: edge.FirstPersonId, To: edge.SecondPersonId,
+                Kind: RelationKind.Sibling, Inferred: true));
+        var groups = explicitEdges.Concat(inferredEdges)
+            .GroupBy(edge => edge.From.CompareTo(edge.To) < 0
+                ? (edge.From, edge.To) : (edge.To, edge.From));
+        foreach (var group in groups)
         {
-            var first = positions[edge.FromPersonId];
-            var second = positions[edge.ToPersonId];
-            var social = edge.Kind is RelationKind.Friend or RelationKind.Neighbor
-                or RelationKind.Mentor or RelationKind.Other;
-            var parent = edge.Kind == RelationKind.Parent;
-            html.Append("<line x1='").Append(first.X + NodeWidth / 2)
-                .Append("' y1='").Append(first.Y + NodeHeight / 2)
-                .Append("' x2='").Append(second.X + NodeWidth / 2)
-                .Append("' y2='").Append(second.Y + NodeHeight / 2)
-                .Append("' stroke='").Append(social ? "#777" : parent ? "#35745b" : "#465c93")
-                .Append("' stroke-width='2'");
-            if (social) html.Append(" stroke-dasharray='5 5'");
-            html.Append("/>");
-        }
-
-        // Sibling branches may be inferred from two visible people sharing an
-        // authorized parent link, even when depth hides the parent nodes.
-        foreach (var sibling in tree.InferredSiblingConnections.Where(sibling =>
-            positions.ContainsKey(sibling.FirstPersonId) &&
-            positions.ContainsKey(sibling.SecondPersonId)))
-        {
-            var first = positions[sibling.FirstPersonId];
-            var second = positions[sibling.SecondPersonId];
-            html.Append("<line x1='").Append(first.X + NodeWidth / 2)
-                .Append("' y1='").Append(first.Y + NodeHeight / 2)
-                .Append("' x2='").Append(second.X + NodeWidth / 2)
-                .Append("' y2='").Append(second.Y + NodeHeight / 2)
-                .Append("' stroke='#465c93' stroke-width='2' stroke-dasharray='3 4'/>");
+            var edges = group.OrderBy(edge => edge.Kind).ThenBy(edge => edge.Inferred)
+                .ToArray();
+            for (var index = 0; index < edges.Length; index++)
+            {
+                var edge = edges[index];
+                var from = positions[edge.From];
+                var to = positions[edge.To];
+                var fromX = from.X + NodeWidth / 2;
+                var fromY = from.Y + NodeHeight / 2;
+                var toX = to.X + NodeWidth / 2;
+                var toY = to.Y + NodeHeight / 2;
+                var bend = (index - (edges.Length - 1) / 2.0) * 32;
+                var midX = (fromX + toX) / 2.0;
+                var midY = (fromY + toY) / 2.0;
+                double controlX, controlY;
+                if (fromY == toY)
+                {
+                    // Lift the curve above same-generation cards, rather than
+                    // drawing it straight through any intervening people.
+                    controlX = midX;
+                    controlY = midY - NodeHeight - 36 - index * 20;
+                }
+                else
+                {
+                    var dx = toX - fromX;
+                    var dy = toY - fromY;
+                    var length = Math.Sqrt(dx * dx + dy * dy);
+                    controlX = midX - dy / length * bend;
+                    controlY = midY + dx / length * bend;
+                }
+                var social = edge.Kind is RelationKind.Friend or RelationKind.Neighbor
+                    or RelationKind.Mentor or RelationKind.Other;
+                var color = social ? "#777" :
+                    edge.Kind == RelationKind.Parent ? "#35745b" : "#465c93";
+                var dash = edge.Inferred ? "3 4" : edge.Kind switch
+                {
+                    RelationKind.Parent => "",
+                    RelationKind.Sibling => "6 3",
+                    RelationKind.Spouse or RelationKind.Partner => "12 5",
+                    _ => "2 6"
+                };
+                static string Decimal(double value) =>
+                    value.ToString("0.##", CultureInfo.InvariantCulture);
+                html.Append("<path d='M ").Append(fromX).Append(' ').Append(fromY)
+                    .Append(" Q ").Append(Decimal(controlX)).Append(' ')
+                    .Append(Decimal(controlY)).Append(' ').Append(toX)
+                    .Append(' ').Append(toY).Append("' fill='none' stroke='")
+                    .Append(color).Append("' stroke-width='2'");
+                if (dash.Length != 0)
+                    html.Append(" stroke-dasharray='").Append(dash).Append(''');
+                html.Append("><title>")
+                    .Append(WebUtility.HtmlEncode(edge.Inferred ? "inferred sibling"
+                        : edge.Kind.ToString()))
+                    .Append(" connection between fictional people</title></path>");
+            }
         }
 
         foreach (var level in levels)
