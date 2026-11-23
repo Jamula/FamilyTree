@@ -28,3 +28,4 @@ M0 engineering foundations are merged: .NET 11 API/web, SHA-pinned CI and smoke 
 - **Product version:** independent of framework; the version is **fixed at `0.1.0` until the private-family MVP is accepted**. The next version requires an explicit decision.
 - **Cost policy:** $0 incremental **hosting/production infrastructure**. GitHub and other development tooling is shared engineering overhead allocated across active projects; new paid services/overages require specific owner approval. See [Cost policy](docs/COST_POLICY.md).
 - **Local setup:** [Development instructions](docs/DEVELOPMENT.md).
+- **Local AI agents:** [Fictional-family MCP tools](docs/MCP_DEMO.md). They provide a stdio integration for supported agent clients, never access real family data, and never publish proposed changes.

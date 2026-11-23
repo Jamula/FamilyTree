@@ -45,5 +45,7 @@ jobs:
         run: bash scripts/smoke-http.sh
       - name: One-command Aspire AppHost smoke
         run: bash scripts/smoke-aspire.sh
+      - name: Local fictional MCP protocol handshake
+        run: python3 scripts/smoke-mcp.py
 # No paid Code Quality upload or persisted artifacts: $0 cost guardrail.
 # Keep any future action SHA-pinned, approved, and behind explicit spending approval.

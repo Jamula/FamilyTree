@@ -24,3 +24,5 @@ Console.WriteLine($"PASS {assertions} domain assertions");
 GedcomFixtureAssertions.Run();
 TelemetryAssertions.Run();
 await TreeProjectionAssertions.RunAsync();
+
+SyntheticDemoAssertions.Run();

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "familytree-fictional": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "src/FamilyTree.Mcp/FamilyTree.Mcp.csproj",
+        "--configuration",
+        "Release"
+      ],
+      "tools": ["*"]
+    }
+  }
+}
