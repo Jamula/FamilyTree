@@ -36,4 +36,6 @@ await FictionalWorkbenchHttpAssertions.RunAsync();
 // Keep HTTP integration off module initializers to avoid CLR startup locks.
 await ApiLoopbackIntegrationAssertions.RunAsync();
 
+await VerifiedCookieHandlerAssertions.RunAsync();
+
 await SqliteRelationshipConcurrencyAssertions.RunAsync();
