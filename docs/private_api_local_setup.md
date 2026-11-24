@@ -115,12 +115,23 @@ database and must be backed up separately from it. Removing or rotating these
 keys invalidates existing cookies or makes encrypted records unreadable.
 
 The composed routes support verified identity registration and transactional
-invitation acceptance, approval, and revocation for an already provisioned
-family. Granted person lookup, bounded display-name search, and center-scoped
-tree reads use #100's persisted membership/branch/person/field checks inside
-the read transaction. Tree results contain only explicitly granted people;
-relationship edges remain absent. Cookie-authenticated writes require a
-same-origin request and antiforgery token from `GET /api/v1/csrf`.
+invitation acceptance, approval, and revocation. A local family can be
+bootstrapped with `POST /api/v1/admin/bootstrap` only after all three
+`FAMILYTREE_PRIVATE_API_BOOTSTRAP_OWNER_PROVIDER`,
+`FAMILYTREE_PRIVATE_API_BOOTSTRAP_OWNER_ISSUER`, and
+`FAMILYTREE_PRIVATE_API_BOOTSTRAP_OWNER_SUBJECT` settings explicitly identify
+the exact verified OIDC identity authorized as owner. Configure these values
+through the local process environment or secret provider, not committed
+settings. Missing configuration leaves bootstrap unavailable; incomplete or
+non-matching-provider configuration fails startup. A different verified
+account cannot bootstrap, and repeating bootstrap for the configured owner
+returns the same family. Cookie-authenticated writes require a same-origin
+request and antiforgery token from `GET /api/v1/csrf`.
+
+Granted person lookup, bounded display-name search, and center-scoped tree
+reads use #100's persisted membership/branch/person/field checks inside the
+read transaction. Tree results contain only explicitly granted people;
+relationship edges remain absent.
 `POST /api/v1/me` returns only the caller's stable opaque principal ID so an
 inviter can address that registered identity.
 
@@ -129,11 +140,10 @@ inviter can address that registered identity.
 Relationship persistence and review transactions from #94 enforce family
 membership but do not enforce branch/person/field grants. Relationship
 proposal, review, undo, and read routes therefore remain `501` until those
-grants are checked transactionally. Family creation/bootstrap and
-administrator-owner provisioning are also not exposed: the existing
-`CreateFictionalFamily` operation is a fictional local test seam, not an owner
-authorization mechanism. A verified OIDC login alone never creates a family
-or grants membership. GEDCOM routes remain disabled pending #104; #103's
+grants are checked transactionally and independent moderation remains
+enforced. Family bootstrap is available only for the exact owner identity
+explicitly configured above; an ordinary verified OIDC login does not create a
+family or grant membership. GEDCOM routes remain disabled pending #104; #103's
 process-level baseline remains separately scoped.
 
 Until secure owner provisioning and the reviewed read/mutation contracts land,

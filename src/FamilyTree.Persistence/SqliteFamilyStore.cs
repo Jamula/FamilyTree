@@ -71,6 +71,11 @@ public sealed partial class SqliteFamilyStore : IDisposable
                 id INTEGER PRIMARY KEY CHECK(id=1),
                 envelope BLOB NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS owner_bootstraps (
+                principal_id TEXT PRIMARY KEY NOT NULL,
+                family_id TEXT NOT NULL UNIQUE,
+                FOREIGN KEY(family_id) REFERENCES families(id)
+            );
             CREATE TABLE IF NOT EXISTS relationships (
                 family_id TEXT NOT NULL, id TEXT NOT NULL,
                 from_id TEXT NOT NULL, to_id TEXT NOT NULL,
@@ -155,6 +160,44 @@ public sealed partial class SqliteFamilyStore : IDisposable
             VALUES($f,$p,'Active',1);
             """, ("$f", familyId.ToString("D")), ("$p", administratorId.ToString("D")));
         transaction.Commit();
+    }
+
+    /// <summary>
+    /// Creates or returns the single family bootstrapped by an explicitly
+    /// configured, verified owner. The caller must authorize that identity
+    /// before invoking this operation.
+    /// </summary>
+    public Guid CreateFamilyForBootstrapOwner(Guid administratorId)
+    {
+        RequireIds(administratorId);
+        using var con = Open();
+        using var transaction = con.BeginTransaction(deferred: false);
+        var existingFamily = Scalar<string?>(con, transaction, """
+            SELECT family_id FROM owner_bootstraps WHERE principal_id=$principal;
+            """, ("$principal", administratorId.ToString("D")));
+        if (existingFamily is not null)
+        {
+            transaction.Commit();
+            return Guid.Parse(existingFamily);
+        }
+
+        var familyId = Guid.NewGuid();
+        Exec(con, transaction, "INSERT INTO families(id) VALUES($family);",
+            ("$family", familyId.ToString("D")));
+        Exec(con, transaction, """
+            INSERT INTO memberships(family_id,principal_id,state,administrator)
+            VALUES($family,$principal,'Active',1);
+            """, ("$family", familyId.ToString("D")),
+            ("$principal", administratorId.ToString("D")));
+        Exec(con, transaction, """
+            INSERT INTO owner_bootstraps(principal_id,family_id)
+            VALUES($principal,$family);
+            """, ("$principal", administratorId.ToString("D")),
+            ("$family", familyId.ToString("D")));
+        Audit(con, transaction, familyId, familyId, administratorId,
+            "owner-family-bootstrapped");
+        transaction.Commit();
+        return familyId;
     }
 
     /// <summary>

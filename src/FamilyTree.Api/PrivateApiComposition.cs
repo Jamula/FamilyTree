@@ -39,6 +39,10 @@ internal static class PrivateApiComposition
                 throw new InvalidOperationException("The private API is disabled."));
             builder.Services.AddSingleton<PrivateTreeReadService>(_ =>
                 throw new InvalidOperationException("The private API is disabled."));
+            builder.Services.AddSingleton<SqliteFamilyStore>(_ =>
+                throw new InvalidOperationException("The private API is disabled."));
+            builder.Services.AddSingleton<PrivateApiBootstrapOwner>(_ =>
+                throw new InvalidOperationException("The private API is disabled."));
             return false;
         }
 
@@ -51,6 +55,8 @@ internal static class PrivateApiComposition
         if (providers.Count == 0)
             throw new InvalidOperationException(
                 "The private API requires an explicitly configured OIDC provider.");
+        var bootstrapOwner = PrivateApiBootstrapOwner.Read(builder.Configuration, providers);
+        builder.Services.AddSingleton(bootstrapOwner);
 
         var configuredDirectory = builder.Configuration["FAMILYTREE_PRIVATE_API_DATA_DIRECTORY"];
         if (string.IsNullOrWhiteSpace(configuredDirectory) ||
@@ -70,10 +76,7 @@ internal static class PrivateApiComposition
 
         byte[]? encryptionKey = null;
         byte[]? identityKey = null;
-        SqliteFamilyStore? familyStore = null;
-        SqlitePrincipalRegistry? registry = null;
-        SqliteTreeReadSource? readSource = null;
-        var storesRegistered = false;
+        using var resources = new PrivateApiResourceLifetime();
         try
         {
             encryptionKey = ReadKey(builder.Configuration["FAMILYTREE_PRIVATE_API_ENCRYPTION_KEY"]);
@@ -96,9 +99,12 @@ internal static class PrivateApiComposition
                                FileAccess.ReadWrite, FileShare.None)) { }
                 SetPrivateWindowsFilePermissions(databasePath);
             }
-            familyStore = new SqliteFamilyStore(databasePath, encryptionKey);
-            registry = new SqlitePrincipalRegistry(databasePath, identityKey);
-            readSource = new SqliteTreeReadSource(databasePath, encryptionKey);
+            var familyStore = resources.Track(
+                new SqliteFamilyStore(databasePath, encryptionKey));
+            var registry = resources.Track(
+                new SqlitePrincipalRegistry(databasePath, identityKey));
+            var readSource = resources.Track(
+                new SqliteTreeReadSource(databasePath, encryptionKey));
             var isLinux = OperatingSystem.IsLinux();
             var isWindows = OperatingSystem.IsWindows();
             if (isLinux)
@@ -115,35 +121,43 @@ internal static class PrivateApiComposition
             builder.Services.AddSingleton(new VerifiedFamilyMembership(
                 registry, familyStore, providers));
 
-            var dataProtectionCertificate = new X509Certificate2(certificate);
-            try
-            {
-                builder.Services.AddSingleton<X509Certificate2>(_ => dataProtectionCertificate);
-                builder.Services.AddDataProtection()
-                    .SetApplicationName("FamilyTree.Api.Private.Local")
-                    .PersistKeysToFileSystem(new DirectoryInfo(keyDirectory))
-                    .ProtectKeysWithCertificate(dataProtectionCertificate);
-                storesRegistered = true;
-            }
-            catch
-            {
-                dataProtectionCertificate.Dispose();
-                throw;
-            }
+            var dataProtectionCertificate = resources.Track(
+                new X509Certificate2(certificate));
+            builder.Services.AddSingleton<X509Certificate2>(_ => dataProtectionCertificate);
+            builder.Services.AddDataProtection()
+                .SetApplicationName("FamilyTree.Api.Private.Local")
+                .PersistKeysToFileSystem(new DirectoryInfo(keyDirectory))
+                .ProtectKeysWithCertificate(dataProtectionCertificate);
+            resources.TransferToHost();
             return true;
         }
         finally
         {
-            if (!storesRegistered)
-            {
-                readSource?.Dispose();
-                registry?.Dispose();
-                familyStore?.Dispose();
-            }
             if (encryptionKey is not null)
                 CryptographicOperations.ZeroMemory(encryptionKey);
             if (identityKey is not null)
                 CryptographicOperations.ZeroMemory(identityKey);
+        }
+    }
+
+    private sealed class PrivateApiResourceLifetime : IDisposable
+    {
+        private readonly List<IDisposable> _resources = [];
+        private bool _transferred;
+
+        internal T Track<T>(T resource) where T : IDisposable
+        {
+            _resources.Add(resource);
+            return resource;
+        }
+
+        internal void TransferToHost() => _transferred = true;
+
+        public void Dispose()
+        {
+            if (_transferred) return;
+            for (var index = _resources.Count - 1; index >= 0; index--)
+                _resources[index].Dispose();
         }
     }
 
@@ -344,6 +358,36 @@ internal static class PrivateApiComposition
     }
 }
 
+internal sealed record PrivateApiBootstrapOwner(
+    bool IsConfigured, string Provider, string Issuer, string Subject)
+{
+    internal static PrivateApiBootstrapOwner Read(IConfiguration configuration,
+        IReadOnlyList<InteractiveOidc.Provider> providers)
+    {
+        var provider = configuration["FAMILYTREE_PRIVATE_API_BOOTSTRAP_OWNER_PROVIDER"];
+        var issuer = configuration["FAMILYTREE_PRIVATE_API_BOOTSTRAP_OWNER_ISSUER"];
+        var subject = configuration["FAMILYTREE_PRIVATE_API_BOOTSTRAP_OWNER_SUBJECT"];
+        var configuredValues = new[] { provider, issuer, subject };
+        if (configuredValues.All(string.IsNullOrWhiteSpace))
+            return new(false, string.Empty, string.Empty, string.Empty);
+        if (configuredValues.Any(string.IsNullOrWhiteSpace) ||
+            subject!.Length > 256 || subject.Any(char.IsControl) ||
+            subject != subject.Trim() ||
+            !providers.Any(candidate =>
+                string.Equals(candidate.Name, provider, StringComparison.Ordinal) &&
+                string.Equals(candidate.Authority, issuer, StringComparison.Ordinal)))
+            throw new InvalidOperationException(
+                "Private API bootstrap owner must match a configured OIDC provider and subject.");
+        return new(true, provider!, issuer!, subject);
+    }
+
+    internal bool Authorizes((string Provider, string Issuer, string Subject) identity) =>
+        IsConfigured &&
+        string.Equals(identity.Provider, Provider, StringComparison.Ordinal) &&
+        string.Equals(identity.Issuer, Issuer, StringComparison.Ordinal) &&
+        string.Equals(identity.Subject, Subject, StringComparison.Ordinal);
+}
+
 internal static class PrivateApiEndpoints
 {
     internal sealed record InvitationRequest(Guid IntendedPrincipalId);
@@ -409,6 +453,22 @@ internal static class PrivateApiEndpoints
                 return principalId is { } id
                     ? Results.Ok(new { principalId = id })
                     : Results.StatusCode(StatusCodes.Status404NotFound);
+            })).WithMetadata(PrivateApiBoundary.EnabledPrivateEndpoint.Instance);
+
+        app.MapPost("/api/v1/admin/bootstrap", async (HttpContext context,
+            VerifiedFamilyMembership membership, SqliteFamilyStore families,
+            PrivateApiBootstrapOwner bootstrapOwner, IAntiforgery antiforgery) =>
+            await ExecuteWriteAsync(context, providers, antiforgery, async () =>
+            {
+                var identity = await VerifiedOidcSession.ReadBindingAsync(context, providers);
+                if (identity is not { } verifiedIdentity ||
+                    !bootstrapOwner.Authorizes(verifiedIdentity))
+                    return Results.StatusCode(StatusCodes.Status404NotFound);
+                var administratorId = await membership.RegisterAsync(context);
+                if (administratorId is not { } principalId)
+                    return Results.StatusCode(StatusCodes.Status404NotFound);
+                var familyId = families.CreateFamilyForBootstrapOwner(principalId);
+                return Results.Ok(new { familyId });
             })).WithMetadata(PrivateApiBoundary.EnabledPrivateEndpoint.Instance);
 
         app.MapPost("/api/v1/families/{familyId:guid}/invitations",

@@ -80,7 +80,7 @@ internal static class PrivateApiLoopbackAssertions
         const string memberSubject = "synthetic-private-api-member";
         var provider = new InteractiveOidc.Provider("google", "GoogleOidc",
             authority, "synthetic-client", "synthetic-secret", "/auth/callback/google");
-        var familyId = Guid.NewGuid();
+        Guid familyId;
         var branchId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         Guid adminId;
         Guid memberId;
@@ -124,11 +124,9 @@ internal static class PrivateApiLoopbackAssertions
             AssertConfigurationFailures(directory, certificatePath, certificatePassword,
                 encryptionKey, identityKey, provider);
             using (var registry = new SqlitePrincipalRegistry(databasePath, identityKey))
-            using (var familyStore = new SqliteFamilyStore(databasePath, encryptionKey))
             {
                 adminId = registry.EnrollVerifiedSubject("google", authority, adminSubject);
                 memberId = registry.EnrollVerifiedSubject("google", authority, memberSubject);
-                familyStore.CreateFictionalFamily(familyId, adminId);
             }
 
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -147,6 +145,9 @@ internal static class PrivateApiLoopbackAssertions
                 ["FAMILYTREE_PRIVATE_API_DATA_PROTECTION_CERTIFICATE"] = certificatePath,
                 ["FAMILYTREE_PRIVATE_API_DATA_PROTECTION_CERTIFICATE_PASSWORD"] =
                     certificatePassword,
+                ["FAMILYTREE_PRIVATE_API_BOOTSTRAP_OWNER_PROVIDER"] = "google",
+                ["FAMILYTREE_PRIVATE_API_BOOTSTRAP_OWNER_ISSUER"] = authority,
+                ["FAMILYTREE_PRIVATE_API_BOOTSTRAP_OWNER_SUBJECT"] = adminSubject,
                 ["FAMILYTREE_OIDC_GOOGLE_CLIENT_ID"] = "synthetic-client",
                 ["FAMILYTREE_OIDC_GOOGLE_CLIENT_SECRET"] = "synthetic-secret"
             });
@@ -229,6 +230,43 @@ internal static class PrivateApiLoopbackAssertions
             }
 
             var memberCsrf = await GetCsrfAsync(client, memberCookie);
+            using (var unauthorizedBootstrap = await SendWriteAsync(client, HttpMethod.Post,
+                       "/api/v1/admin/bootstrap", memberCsrf, memberCookie))
+                Check(unauthorizedBootstrap.StatusCode == HttpStatusCode.NotFound &&
+                    unauthorizedBootstrap.Content.Headers.ContentLength == 0,
+                    "non-owner verified identities cannot bootstrap a family");
+            using (var ownerBootstrap = await SendWriteAsync(client, HttpMethod.Post,
+                       "/api/v1/admin/bootstrap", adminCsrf, adminCookie))
+            {
+                var json = await ownerBootstrap.Content.ReadFromJsonAsync<JsonElement>();
+                familyId = json.GetProperty("familyId").GetGuid();
+                Check(ownerBootstrap.StatusCode == HttpStatusCode.OK &&
+                    familyId != Guid.Empty &&
+                    app.Services.GetRequiredService<SqliteFamilyStore>()
+                        .IsActiveMember(familyId, adminId),
+                    "only the configured verified owner bootstraps an active family");
+            }
+            var bootstrapAuditCount = app.Services.GetRequiredService<SqliteFamilyStore>()
+                .CountAudit(familyId, adminId);
+            var repeatedBootstraps = await Task.WhenAll(
+                SendWriteAsync(client, HttpMethod.Post, "/api/v1/admin/bootstrap",
+                    adminCsrf, adminCookie),
+                SendWriteAsync(client, HttpMethod.Post, "/api/v1/admin/bootstrap",
+                    adminCsrf, adminCookie));
+            using (repeatedBootstraps[0])
+            using (repeatedBootstraps[1])
+            {
+                var first = await repeatedBootstraps[0].Content.ReadFromJsonAsync<JsonElement>();
+                var second = await repeatedBootstraps[1].Content.ReadFromJsonAsync<JsonElement>();
+                Check(repeatedBootstraps.All(response =>
+                        response.StatusCode == HttpStatusCode.OK) &&
+                    first.GetProperty("familyId").GetGuid() == familyId &&
+                    second.GetProperty("familyId").GetGuid() == familyId &&
+                    app.Services.GetRequiredService<SqliteFamilyStore>()
+                        .CountAudit(familyId, adminId) == bootstrapAuditCount,
+                    "concurrent owner bootstrap reuses one family without duplicate audit entries");
+            }
+
             using (var missingCsrf = new HttpRequestMessage(HttpMethod.Post, "/api/v1/me"))
             {
                 missingCsrf.Headers.TryAddWithoutValidation("Cookie", adminCookie);
@@ -445,6 +483,9 @@ internal static class PrivateApiLoopbackAssertions
                         Guid.NewGuid(), default).GetAwaiter().GetResult(),
                 "host disposal releases the trusted read source");
             ExpectCertificateDisposed(registeredDataProtectionCertificate);
+            using (var reopenedFamilyStore = new SqliteFamilyStore(databasePath, encryptionKey))
+                Check(reopenedFamilyStore.CreateFamilyForBootstrapOwner(adminId) == familyId,
+                    "owner bootstrap remains idempotent after reopening the SQLite database");
             Console.WriteLine("PASS loopback private API signed-cookie, CSRF and membership lifecycle");
         }
         finally
@@ -525,6 +566,15 @@ internal static class PrivateApiLoopbackAssertions
             "private API refuses non-Development hosting");
         ExpectConfigurationFailure(valid, [], Environments.Development,
             "private API requires an OIDC provider");
+        ExpectConfigurationFailure(Replace(valid,
+                "FAMILYTREE_PRIVATE_API_BOOTSTRAP_OWNER_PROVIDER", "google"),
+            [provider], Environments.Development,
+            "private API rejects incomplete bootstrap-owner configuration");
+        var noBootstrapOwner = PrivateApiBootstrapOwner.Read(
+            new ConfigurationBuilder().Build(), [provider]);
+        Check(!noBootstrapOwner.IsConfigured &&
+            !noBootstrapOwner.Authorizes(("google", provider.Authority, "synthetic-owner")),
+            "bootstrap remains unavailable without an explicit owner allowlist");
         ExpectConfigurationFailure(Remove(valid,
                 "FAMILYTREE_PRIVATE_API_DATA_DIRECTORY"), [provider],
             Environments.Development, "private API requires an absolute storage directory");
@@ -753,12 +803,12 @@ internal static class PrivateApiLoopbackAssertions
         return await client.SendAsync(request);
     }
 
-    private static Task<HttpResponseMessage> GetWithCookieAsync(HttpClient client,
+    private static async Task<HttpResponseMessage> GetWithCookieAsync(HttpClient client,
         string path, string sessionCookie)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.TryAddWithoutValidation("Cookie", sessionCookie);
-        return client.SendAsync(request);
+        return await client.SendAsync(request);
     }
 
     private sealed record CsrfContext(string RequestToken, string Cookie)
