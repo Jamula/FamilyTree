@@ -14,7 +14,8 @@ public sealed record TrustedTreeReadSnapshot(
 public interface ITrustedTreeReadSource
 {
     Task<TrustedTreeReadSnapshot?> LoadAsync(
-        Guid viewer, Guid family, Guid branch, CancellationToken cancellationToken);
+        Guid viewer, Guid family, Guid branch, Guid center,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -45,7 +46,7 @@ public sealed class PrivateTreeReadService
             return null;
 
         var snapshot = await _source.LoadAsync(
-            verifiedViewer, family, branch, cancellationToken);
+            verifiedViewer, family, branch, center, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         if (snapshot is null || !snapshot.ActiveMembership ||
             snapshot.ViewerId != verifiedViewer || snapshot.FamilyId != family ||

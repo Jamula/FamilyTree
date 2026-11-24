@@ -8,7 +8,7 @@ internal static class PrivateTreeReadServiceAssertions
         internal TrustedTreeReadSnapshot? Snapshot;
         internal int Calls;
         public Task<TrustedTreeReadSnapshot?> LoadAsync(
-            Guid viewer, Guid family, Guid branch, CancellationToken token)
+            Guid viewer, Guid family, Guid branch, Guid center, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
             Calls++;
