@@ -1,6 +1,21 @@
 # Identity and Membership Contract (Issue #9)
 
-**Design only. Not implemented.** The genealogy Person record is independent of the application User identity and family membership. A relative can remain documented without ever registering.
+**Partial local foundations only; not production-ready.** The genealogy Person record is independent of the application User identity and family membership. A relative can remain documented without ever registering.
+
+The local `VerifiedFamilyMembership` seam reads only a protected, verified OIDC
+cookie, looks up the exact provider/issuer/subject in the durable principal
+registry, and checks current SQLite membership. Registration alone grants no
+membership. Invite acceptance, independent approval and revocation use the
+store's transactions; a fresh invitation and approval are required to rejoin.
+No private HTTP route is enabled by this seam.
+
+For #10, an active-membership check is not a graph grant or a durable
+authorization lease: every private operation must enforce current membership
+and applicable persisted graph grants together with the data access, so that
+revocation cannot race a previously cached check. Trusted administrator
+provisioning, actual provider callbacks, profile claims, the remaining
+membership transitions, and production key/deployment review are still
+required before issue #9 can be accepted.
 
 ## Membership lifecycle and permitted transitions
 
