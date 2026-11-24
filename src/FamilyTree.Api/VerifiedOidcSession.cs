@@ -31,6 +31,7 @@ public static class VerifiedOidcSession
             !string.Equals(verifiedIssuer, provider.Authority, StringComparison.Ordinal) ||
             string.IsNullOrWhiteSpace(verifiedSubject) ||
             verifiedSubject.Length > 256 || verifiedSubject.Any(char.IsControl) ||
+            verifiedSubject != verifiedSubject.Trim() ||
             provider.Name is not ("google" or "microsoft"))
             throw new SecurityException("Verified provider subject binding failed.");
 
@@ -61,7 +62,7 @@ public static class VerifiedOidcSession
         var issuer = Unique(principal, IssuerClaim);
         var subject = Unique(principal, SubjectClaim);
         if (string.IsNullOrWhiteSpace(subject) || subject.Length > 256 ||
-            subject.Any(char.IsControl))
+            subject.Any(char.IsControl) || subject != subject.Trim())
             return false;
         return configuredProviders.Any(provider =>
             string.Equals(provider.Name, providerName, StringComparison.Ordinal) &&
@@ -70,6 +71,10 @@ public static class VerifiedOidcSession
 
     public static async Task<bool> ReadAsync(HttpContext context,
         IReadOnlyList<InteractiveOidc.Provider> configuredProviders)
+        => await ReadBindingAsync(context, configuredProviders) is not null;
+
+    internal static async Task<(string Provider, string Issuer, string Subject)?> ReadBindingAsync(
+        HttpContext context, IReadOnlyList<InteractiveOidc.Provider> configuredProviders)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(configuredProviders);
@@ -77,7 +82,11 @@ public static class VerifiedOidcSession
         // only ASP.NET Core's authenticated, encrypted/signed cookie ticket can.
         var ticket = await context.AuthenticateAsync(
             CookieAuthenticationDefaults.AuthenticationScheme);
-        return ticket.Succeeded &&
-            IsVerifiedOidcCookiePrincipal(ticket.Principal, configuredProviders);
+        if (!ticket.Succeeded || !IsVerifiedOidcCookiePrincipal(ticket.Principal, configuredProviders))
+            return null;
+        var principal = ticket.Principal!;
+        return (principal.FindFirst(ProviderClaim)!.Value,
+            principal.FindFirst(IssuerClaim)!.Value,
+            principal.FindFirst(SubjectClaim)!.Value);
     }
 }
