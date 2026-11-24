@@ -20,16 +20,29 @@ internal static class OtlpDeliveryAssertions
 {
     internal static async Task RunAsync()
     {
-        var payloads = new ConcurrentQueue<byte[]>();
+        var payloads = new ConcurrentQueue<(string Path, byte[] Body)>();
+        var rejectExports = 0;
+        var rejectedExports = 0;
         var collectorBuilder = WebApplication.CreateBuilder();
         collectorBuilder.Logging.ClearProviders();
         collectorBuilder.WebHost.UseKestrel().UseUrls("http://127.0.0.1:0");
         await using var collector = collectorBuilder.Build();
         collector.Run(async context =>
         {
+            if (context.Request.Path != "/collector/v1/traces" && context.Request.Path != "/collector/v1/metrics")
+            {
+                context.Response.StatusCode = 404;
+                return;
+            }
+            if (Volatile.Read(ref rejectExports) != 0)
+            {
+                Interlocked.Increment(ref rejectedExports);
+                context.Response.StatusCode = 503;
+                return;
+            }
             using var body = new MemoryStream();
             await context.Request.Body.CopyToAsync(body);
-            payloads.Enqueue(body.ToArray());
+            payloads.Enqueue((context.Request.Path.Value!, body.ToArray()));
             context.Response.StatusCode = 200;
         });
         await collector.StartAsync();
@@ -42,7 +55,7 @@ internal static class OtlpDeliveryAssertions
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["FAMILYTREE_OTLP_ENABLED"] = "true",
-            ["OTEL_EXPORTER_OTLP_ENDPOINT"] = endpoint,
+            ["OTEL_EXPORTER_OTLP_ENDPOINT"] = endpoint + "/collector/",
             ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/protobuf"
         });
         builder.Services.AddFamilyTreeObservability(builder.Configuration);
@@ -61,7 +74,8 @@ internal static class OtlpDeliveryAssertions
         request.Headers.Add("X-Synthetic", "synthetic-header-marker");
         Check((await client.SendAsync(request)).StatusCode == HttpStatusCode.OK, "success request");
         Check(app.Services.GetRequiredService<TracerProvider>().ForceFlush(10000), "initial trace export");
-        Check(payloads.Any(bytes => Encoding.UTF8.GetString(bytes).Contains("familytree.http", StringComparison.Ordinal)),
+        Check(payloads.Any(payload => payload.Path == "/collector/v1/traces" &&
+            Encoding.UTF8.GetString(payload.Body).Contains("familytree.http", StringComparison.Ordinal)),
             "trace with unsampled server parent");
         using var sensitive = new HttpRequestMessage(HttpMethod.Post, "/submit?name=synthetic-name-marker")
         {
@@ -85,11 +99,11 @@ internal static class OtlpDeliveryAssertions
 
         Check(app.Services.GetRequiredService<TracerProvider>().ForceFlush(10000), "trace export");
         Check(app.Services.GetRequiredService<MeterProvider>().ForceFlush(10000), "metric export");
-        var batches = payloads.Select(Encoding.UTF8.GetString).ToArray();
-        var exported = string.Concat(batches);
-        Check(batches.Any(batch => batch.Contains("familytree.http", StringComparison.Ordinal) &&
-            !batch.Contains("familytree.http.requests", StringComparison.Ordinal)) &&
-            batches.Any(batch => batch.Contains("familytree.http.requests", StringComparison.Ordinal)) &&
+        var batches = payloads.Select(payload => (payload.Path, Body: Encoding.UTF8.GetString(payload.Body))).ToArray();
+        var exported = string.Concat(batches.Select(batch => batch.Body));
+        Check(batches.Any(batch => batch.Path == "/collector/v1/traces" && batch.Body.Contains("familytree.http", StringComparison.Ordinal) &&
+            !batch.Body.Contains("familytree.http.requests", StringComparison.Ordinal)) &&
+            batches.Any(batch => batch.Path == "/collector/v1/metrics" && batch.Body.Contains("familytree.http.requests", StringComparison.Ordinal)) &&
             exported.Contains("familytree.http.requests", StringComparison.Ordinal) &&
             exported.Contains("familytree.http.duration", StringComparison.Ordinal) &&
             exported.Contains("success", StringComparison.Ordinal) &&
@@ -101,12 +115,19 @@ internal static class OtlpDeliveryAssertions
             "synthetic-tracestate-marker" })
             Check(!exported.Contains(marker, StringComparison.Ordinal), "sensitive input excluded from OTLP");
 
-        await collector.StopAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        Volatile.Write(ref rejectExports, 1);
+        Check((await client.GetAsync("/health", timeout.Token)).StatusCode == HttpStatusCode.OK, "request before failed export");
+        _ = app.Services.GetRequiredService<TracerProvider>().ForceFlush(3000);
+        Check(Volatile.Read(ref rejectedExports) > 0, "collector rejected export");
+        Check((await client.GetAsync("/health", timeout.Token)).StatusCode == HttpStatusCode.OK, "request after failed export");
+        await collector.StopAsync();
         Check((await client.GetAsync("/health", timeout.Token)).StatusCode == HttpStatusCode.OK,
             "application remains available with unreachable collector");
         _ = app.Services.GetRequiredService<TracerProvider>().ForceFlush(3000);
         _ = app.Services.GetRequiredService<MeterProvider>().ForceFlush(3000);
+        Check((await client.GetAsync("/health", timeout.Token)).StatusCode == HttpStatusCode.OK,
+            "application remains available after exporter flush failure");
         Check(!timeout.IsCancellationRequested, "unreachable collector bounded");
         Console.WriteLine("PASS loopback OTLP delivery, redaction and unreachable collector");
     }

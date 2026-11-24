@@ -50,19 +50,30 @@ public static class ObservabilityExtensions
                 .AddSource(FamilyTelemetry.SourceName)
                 .AddOtlpExporter(options =>
                 {
-                    options.Endpoint = endpoint;
+                    options.Endpoint = protocol == OtlpExportProtocol.HttpProtobuf
+                        ? SignalEndpoint(endpoint, "traces") : endpoint;
                     options.Protocol = protocol;
                 }))
             .WithMetrics(metrics => metrics
                 .AddMeter(FamilyTelemetry.SourceName)
                 .AddOtlpExporter(options =>
                 {
-                    options.Endpoint = endpoint;
+                    options.Endpoint = protocol == OtlpExportProtocol.HttpProtobuf
+                        ? SignalEndpoint(endpoint, "metrics") : endpoint;
                     options.Protocol = protocol;
                 }));
 
         // Do not export framework/application logs. Their arbitrary text could
         // include names, user-supplied values or path/query contents.
         return services;
+    }
+
+    private static Uri SignalEndpoint(Uri endpoint, string signal)
+    {
+        var builder = new UriBuilder(endpoint)
+        {
+            Path = endpoint.AbsolutePath.TrimEnd('/') + "/v1/" + signal
+        };
+        return builder.Uri;
     }
 }
