@@ -59,15 +59,13 @@ static string ResolveKeyPath(string keyPath, string sourcePath, string targetPat
                  [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                  StringSplitOptions.RemoveEmptyEntries))
     {
-        current = Path.Combine(current, segment);
-        try
-        {
-            var attributes = File.GetAttributes(current);
-            if ((attributes & FileAttributes.ReparsePoint) != 0)
-                throw new IOException();
-        }
-        catch (FileNotFoundException) { }
-        catch (DirectoryNotFoundException) { }
+        current = JoinChildPath(current, segment);
+        var entry = new FileInfo(current);
+        if (entry.LinkTarget is not null)
+            throw new IOException();
+        if ((File.Exists(current) || Directory.Exists(current)) &&
+            (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException();
     }
     if (!File.Exists(fullPath) ||
         (File.GetAttributes(fullPath) & FileAttributes.Directory) != 0)
@@ -79,4 +77,13 @@ static string ResolveKeyPath(string keyPath, string sourcePath, string targetPat
                 StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException();
     return fullPath;
+}
+
+static string JoinChildPath(string directory, string child)
+{
+    if (string.IsNullOrEmpty(child) || child is "." or ".." ||
+        Path.IsPathFullyQualified(child) || Path.GetFileName(child) != child ||
+        child.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        throw new IOException();
+    return Path.Join(directory, child);
 }

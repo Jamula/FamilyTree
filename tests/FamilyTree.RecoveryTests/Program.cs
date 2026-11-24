@@ -372,6 +372,16 @@ static void TestCliIntegration(
     using (var restored = new SqliteFamilyStore(restoredPath, familyKey))
         Check(restored.ReadPeople(family, member).Single() == person,
             "CLI-restored database reopens with application key");
+    var missingArguments = RunCli(cliPath);
+    Check(missingArguments.ExitCode == 2 &&
+          missingArguments.Error.Contains("Usage: backup", StringComparison.Ordinal) &&
+          missingArguments.Error.Contains("or: restore", StringComparison.Ordinal),
+        "CLI reports both valid command forms for missing arguments");
+    var invalidCommand = RunCli(cliPath, "delete", "--database", databasePath,
+        "--output", backupPath, "--key-file", keyPath);
+    Check(invalidCommand.ExitCode == 2 &&
+          invalidCommand.Error.Contains("Usage:", StringComparison.Ordinal),
+        "CLI rejects unsupported command names");
 
     var wrongKeyPath = Path.Combine(Path.GetDirectoryName(databasePath)!, "wrong-cli.key");
     var wrongKey = RandomNumberGenerator.GetBytes(32);
@@ -401,6 +411,23 @@ static void TestCliIntegration(
             "--output", unicodeAliasPath, "--key-file", unicodeKeyPath);
         Check(unicodeConflict.ExitCode != 0,
             "CLI rejects a canonically equivalent Unicode alias of its external key");
+        var shortKeyPath = Path.Combine(Path.GetDirectoryName(databasePath)!, "short-cli.key");
+        File.WriteAllBytes(shortKeyPath, new byte[16]);
+        var shortKey = RunCli(cliPath, "backup", "--database", databasePath,
+            "--output", backupPath, "--key-file", shortKeyPath);
+        Check(shortKey.ExitCode != 0 &&
+              shortKey.Error.Contains("Recovery failed;", StringComparison.Ordinal),
+            "CLI rejects a key file with the wrong length without revealing details");
+        var relativeKey = RunCli(cliPath, "backup", "--database", databasePath,
+            "--output", backupPath, "--key-file", "relative.key");
+        Check(relativeKey.ExitCode != 0 &&
+              relativeKey.Error.Contains("Recovery failed;", StringComparison.Ordinal),
+            "CLI rejects relative key paths without revealing details");
+        var wrongOptions = RunCli(cliPath, "backup", "--backup", databasePath,
+            "--database", backupPath, "--key-file", keyPath);
+        Check(wrongOptions.ExitCode == 2 &&
+              wrongOptions.Error.Contains("Usage:", StringComparison.Ordinal),
+            "CLI rejects mismatched argument names");
     }
     finally
     {

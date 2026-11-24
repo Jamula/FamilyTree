@@ -75,7 +75,7 @@ public static class SqliteRecovery
 
     private static void RestoreDatabase(byte[] database, string targetPath)
     {
-        var stagedPath = Path.Combine(Path.GetDirectoryName(targetPath)!,
+        var stagedPath = JoinChildPath(Path.GetDirectoryName(targetPath)!,
             ".ft-recovery-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
@@ -245,7 +245,7 @@ public static class SqliteRecovery
 
     private static void WriteAtomically(string targetPath, byte[] content, bool overwrite)
     {
-        var temporaryPath = Path.Combine(Path.GetDirectoryName(targetPath)!,
+        var temporaryPath = JoinChildPath(Path.GetDirectoryName(targetPath)!,
             ".ft-recovery-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
@@ -316,15 +316,23 @@ public static class SqliteRecovery
                      [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                      StringSplitOptions.RemoveEmptyEntries))
         {
-            current = Path.Combine(current, segment);
-            try
-            {
-                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                    throw new IOException("Recovery paths cannot contain symbolic links.");
-            }
-            catch (FileNotFoundException) { }
-            catch (DirectoryNotFoundException) { }
+            current = JoinChildPath(current, segment);
+            var entry = new FileInfo(current);
+            if (entry.LinkTarget is not null)
+                throw new IOException("Recovery paths cannot contain symbolic links.");
+            if ((File.Exists(current) || Directory.Exists(current)) &&
+                (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("Recovery paths cannot contain symbolic links.");
         }
+    }
+
+    private static string JoinChildPath(string directory, string child)
+    {
+        if (string.IsNullOrEmpty(child) || child is "." or ".." ||
+            Path.IsPathFullyQualified(child) || Path.GetFileName(child) != child ||
+            child.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            throw new IOException("Recovery path component is invalid.");
+        return Path.Join(directory, child);
     }
 
     private static void RequireExistingFile(string path)
@@ -372,10 +380,6 @@ public static class SqliteRecovery
 
     private static void DeleteIfExists(string path)
     {
-        try
-        {
-            File.Delete(path);
-        }
-        catch (FileNotFoundException) { }
+        File.Delete(path);
     }
 }
