@@ -38,5 +38,8 @@ await AuthorizedTreeExplorerHttpAssertions.RunAsync();
 await ApiLoopbackIntegrationAssertions.RunAsync();
 
 await VerifiedCookieHandlerAssertions.RunAsync();
+
+await SqliteRelationshipConcurrencyAssertions.RunAsync();
+await SqliteSchemaMigrationConcurrencyAssertions.RunAsync();
 await SqliteInvitationRaceAssertions.RunAsync();
 await VerifiedFamilyMembershipAssertions.RunAsync();
