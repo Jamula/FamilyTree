@@ -61,6 +61,14 @@ internal static class SqliteTreeReadSourceAssertions
             Check(result is not null && result.Nodes.Count == 1 &&
                 result.Nodes[0].DisplayName == person.DisplayName && result.Edges.Count == 0,
                 "explicit grants allow only isolated redacted person");
+            using (var db = new SqliteConnection(new SqliteConnectionStringBuilder
+                { DataSource = path, Pooling = false }.ToString()))
+            {
+                db.Open();
+                using var writer = db.BeginTransaction();
+                Check(Read(member, family, branch, person.Id)?.Nodes.Single().DisplayName == person.DisplayName,
+                    "tree read does not compete for a write reservation");
+            }
             Check(Get(member, family, branch, person.Id)?.DisplayName == person.DisplayName &&
                 Search(member, family, branch, "fictional").Single().PersonId == person.Id,
                 "lookup and search require and use persisted grants");

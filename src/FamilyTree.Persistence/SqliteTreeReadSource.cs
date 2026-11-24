@@ -43,7 +43,7 @@ public sealed partial class SqliteFamilyStore
             return Task.FromResult<TrustedTreeReadSnapshot?>(null);
 
         using var con = Open();
-        using var tx = con.BeginTransaction();
+        using var tx = con.BeginTransaction(deferred: true);
         var parameters = new[] { ("$f", (object)family.ToString("D")),
             ("$p", (object)viewer.ToString("D")), ("$b", (object)branch.ToString("D")) };
         if (Scalar<long>(con, tx, """

@@ -47,6 +47,7 @@ CodeCoverage/
 coverage/
 __pycache__/
 *.pyc
+src/FamilyTree.AppHost/aspire.config.json
 
 # MSBuild Binary and Structured Log
 *.binlog
