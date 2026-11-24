@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Diagnostics;
 using FamilyTree.Domain;
 internal static class FieldPrivacyAssertions
 {
@@ -22,6 +23,16 @@ internal static class FieldPrivacyAssertions
         Check(!new FieldPrivacyPolicy(family, new[] { grant with {
                 State = MembershipState.Paused } })
                 .CanRead(member, person, ProfileField.DisplayName), "paused membership denied");
+        var ids = Enumerable.Range(0, 10_000).Select(_ => Guid.NewGuid()).ToArray();
+        var large = new FieldPrivacyPolicy(family, ids.Select(id =>
+            new FamilyFieldGrant(member, family, id, MembershipState.Active,
+                new HashSet<ProfileField> { ProfileField.DisplayName })));
+        var stopwatch = Stopwatch.StartNew();
+        for (var pass = 0; pass < 5; pass++)
+            foreach (var id in ids)
+                Check(large.CanRead(member, id, ProfileField.DisplayName) &&
+                    !large.CanRead(member, id, ProfileField.Contact), "indexed independent field checks");
+        Check(stopwatch.Elapsed < TimeSpan.FromSeconds(10), "field checks scale with people");
         Console.WriteLine("PASS field and minor-data default privacy checks");
     }
     static void Check(bool x, string msg) { if (!x) throw new Exception(msg); }
