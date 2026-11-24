@@ -45,7 +45,14 @@ jobs:
           FAMILYTREE_REMOTE_OTLP_APPROVED: 'true'
           OTEL_EXPORTER_OTLP_ENDPOINT: 'not-a-valid-otlp-endpoint'
           OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf'
-        run: dotnet run --project tests/FamilyTree.AcceptanceHarness/FamilyTree.AcceptanceHarness.csproj --configuration Release
+        run: |
+          dotnet build tests/FamilyTree.AcceptanceHarness/FamilyTree.AcceptanceHarness.csproj --configuration Release
+          for prefix in '' ASPNETCORE_ DOTNET_ aspnetcore_; do
+            env "${prefix}Kestrel__Endpoints__Hostile__Url=http://0.0.0.0:0" \
+              "${prefix}familytree_oidc_google_client_id=fictional-client" \
+              "${prefix}FAMILYTREE_PRIVATE_API_ENABLED=true" \
+              dotnet run --project tests/FamilyTree.AcceptanceHarness/FamilyTree.AcceptanceHarness.csproj --configuration Release --no-build
+          done
       - name: Restore local tools
         run: dotnet tool restore
       - name: Domain assertions and local coverage

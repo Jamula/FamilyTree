@@ -18,31 +18,19 @@ startInfo.ArgumentList.Add(apiProject);
 startInfo.ArgumentList.Add("--configuration");
 startInfo.ArgumentList.Add("Release");
 startInfo.ArgumentList.Add("--no-build");
+startInfo.ArgumentList.Add("--no-launch-profile");
 startInfo.ArgumentList.Add("--urls");
 startInfo.ArgumentList.Add(apiAddress.ToString());
+foreach (var key in startInfo.Environment.Keys.Where(IsInheritedConfiguration).ToArray())
+    startInfo.Environment.Remove(key);
 startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
 startInfo.Environment["DOTNET_ENVIRONMENT"] = "Production";
 startInfo.Environment["Logging__LogLevel__Default"] = "Warning";
 startInfo.Environment["FAMILYTREE_OTLP_ENABLED"] = "false";
-startInfo.Environment.Remove("FAMILYTREE_REMOTE_OTLP_APPROVED");
-foreach (var key in startInfo.Environment.Keys
-             .Where(key => key.StartsWith("OTEL_", StringComparison.OrdinalIgnoreCase)).ToArray())
-    startInfo.Environment.Remove(key);
 startInfo.Environment["HOME"] = isolatedHome.FullName;
 startInfo.Environment["USERPROFILE"] = isolatedHome.FullName;
 startInfo.Environment["APPDATA"] = Path.Combine(isolatedHome.FullName, "AppData", "Roaming");
 startInfo.Environment["LOCALAPPDATA"] = Path.Combine(isolatedHome.FullName, "AppData", "Local");
-startInfo.Environment.Remove("ASPNETCORE_HTTP_PORTS");
-startInfo.Environment.Remove("ASPNETCORE_HTTPS_PORTS");
-foreach (var key in new[]
-{
-    "FAMILYTREE_OIDC_GOOGLE_CLIENT_ID",
-    "FAMILYTREE_OIDC_GOOGLE_CLIENT_SECRET",
-    "FAMILYTREE_OIDC_MICROSOFT_TENANT_ID",
-    "FAMILYTREE_OIDC_MICROSOFT_CLIENT_ID",
-    "FAMILYTREE_OIDC_MICROSOFT_CLIENT_SECRET"
-})
-    startInfo.Environment.Remove(key);
 
 Process? apiProcess = null;
 try
@@ -166,6 +154,30 @@ finally
         apiProcess.Dispose();
     }
     Directory.Delete(isolatedHome.FullName, recursive: true);
+}
+
+static bool IsInheritedConfiguration(string key)
+{
+    var hostPrefixed = false;
+    foreach (var prefix in new[] { "ASPNETCORE_", "DOTNET_" })
+    {
+        if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            key = key[prefix.Length..];
+            hostPrefixed = true;
+            break;
+        }
+    }
+
+    return key.StartsWith("FAMILYTREE_", StringComparison.OrdinalIgnoreCase) ||
+           key.StartsWith("OTEL_", StringComparison.OrdinalIgnoreCase) ||
+           key.Equals("Kestrel", StringComparison.OrdinalIgnoreCase) ||
+           key.StartsWith("Kestrel__", StringComparison.OrdinalIgnoreCase) ||
+           key.StartsWith("Kestrel:", StringComparison.OrdinalIgnoreCase) ||
+           key.Equals("URLS", StringComparison.OrdinalIgnoreCase) ||
+           key.Equals("HTTP_PORTS", StringComparison.OrdinalIgnoreCase) ||
+           key.Equals("HTTPS_PORTS", StringComparison.OrdinalIgnoreCase) ||
+           (hostPrefixed && key.Equals("ENVIRONMENT", StringComparison.OrdinalIgnoreCase));
 }
 
 static string FindRepositoryRoot()
