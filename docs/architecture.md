@@ -79,4 +79,4 @@ The private MVP cannot be called complete until integration testing proves tenan
 
 GDPR lawful basis, rights handling, retention, incident response, minors and jurisdiction-specific requirements need qualified review before public hosting. In-app feedback must exclude private data from GitHub issues. Managed telemetry and paid hosting require explicit owner approval.
 
-See [M0 architecture decisions](architecture_decisions_m0.md), [identity design](identity_and_membership_design.md), [security boundary](private_api_security_boundary.md), and [cost policy](cost_policy.md).
+See [M01 (legacy M0) architecture decisions](architecture_decisions_m0.md), [identity design](identity_and_membership_design.md), [security boundary](private_api_security_boundary.md), and [cost policy](cost_policy.md).

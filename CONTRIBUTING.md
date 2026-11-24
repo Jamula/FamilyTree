@@ -4,10 +4,11 @@ Thanks for helping build a privacy-first, open, standards-based family heritage 
 
 ## Workflow
 1. Find or create a GitHub issue with a user story and testable acceptance criteria.
-2. Keep one concern per branch and pull request; refer to the issue number.
-3. Add or update tests, documentation, and privacy review notes.
-4. Install the SDK selected by `global.json` when present (otherwise use the SDK matching the target frameworks); run `dotnet restore FamilyTree.slnx`, `dotnet build FamilyTree.slnx -c Release`, and `dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj -c Release`.
-5. Submit a PR; do not bypass required review or checks.
+2. Use the canonical milestone IDs in the [roadmap](docs/roadmap.md): M01 Foundation, M02 Private Family MVP, M03 Collaboration and AI, M04 Mobile and expansion; sub-milestones use `MNN.NN`.
+3. Keep one concern per branch and pull request; refer to the issue number.
+4. Add or update tests, documentation, and privacy review notes.
+5. Install the SDK selected by `global.json` when present (otherwise use the SDK matching the target frameworks); run `dotnet restore FamilyTree.slnx`, `dotnet build FamilyTree.slnx -c Release`, and `dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj -c Release`.
+6. Submit a PR; do not bypass required review or checks.
 
 ## Data policy
 Never upload real genealogy records, living people's dates, photos, email addresses, or confidential details. Use synthetic individuals and generic fixtures. Do not include customer or family data in bug reports or AI prompts.

@@ -2,6 +2,8 @@
 
 Every P0 requirement must become an executable test before release. The following links are a starting map, **not a claim of implementation**.
 
+See the [roadmap](roadmap.md) for canonical M01–M04 numbering, M02 sub-milestone groupings and forecast status. Stable GitHub issue links remain the source of acceptance criteria.
+
 | Requirement | Issue | Acceptance gestures / tests | Status |
 |---|---|---|---|
 | Secure CI and policy | [#6](https://github.com/Jamula/FamilyTree/issues/6) | Restore/build, pinned action SHA, required checks | In progress |
@@ -22,7 +24,7 @@ Every P0 requirement must become an executable test before release. The followin
 | Zero-cost approval | [#25](https://github.com/Jamula/FamilyTree/issues/25) | C01, workflow guard without paid cloud resources | In progress |
 | Protected auto-merge | [#26](https://github.com/Jamula/FamilyTree/issues/26) | C02, required CI + squash + review resolution | In progress |
 
-## Executable M0 tests
+## Executable M01 tests (legacy M0)
 - T01: `TelemetryAssertions` ensures sanitized trace/meter vocabulary.
 - T02: `TreeProjectionAssertions` ensures hidden nodes/edges are removed.
 - T03: GEDCOM synthetic fixture smoke tests, not GEDCOM standards conformance.
@@ -32,7 +34,7 @@ Every P0 requirement must become an executable test before release. The followin
 
 | MCP tool gateway and safe agent discovery | [#44](https://github.com/Jamula/FamilyTree/issues/44) | Synthetic stdio handshake, bounded read tools, no approved writes | In progress |
 | Fictional multi-generation demo data | [#45](https://github.com/Jamula/FamilyTree/issues/45) | 32 fictional people, deterministic IDs, all relationships valid | In progress |
-| Agent proposals and real-data approval | [#46](https://github.com/Jamula/FamilyTree/issues/46) | No production access or automatic publication until M1 policies tested | Planned |
+| Agent proposals and real-data approval | [#46](https://github.com/Jamula/FamilyTree/issues/46) | No production access or automatic publication until M02 policies tested | Planned |
 
 ## Engineering acceptance
 - Each pull request references its issue and adds tests, or documents why automated coverage is not appropriate.

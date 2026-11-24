@@ -1,4 +1,4 @@
-# SQLite persistence integration slice (M1 #9, #12, #90)
+# SQLite persistence integration slice (M02 #9, #12, #90)
 
 This is a **testable persistence component**, not a private-family deployment. It stores family and membership state, single-use invitations, reviewed Person proposals, and content-free audit events across process restarts using transactional SQLite. Person display names are AES-256-GCM encrypted with family/person AAD; the caller supplies a 256-bit key via a private OS secret source. No keys or private data are committed.
 
