@@ -74,11 +74,16 @@ internal static class SqliteRelationshipConcurrencyAssertions
                 Check(reviews.Count(x => x.Error is not null && ExpectedConflict(x.Error)) == 1,
                     "losing review rejected or retried without double publishing");
                 var reviewActor = reviews[0].Error is null ? admin : moderator;
+                var losingReviewer = reviewActor == admin ? moderator : admin;
                 using var checkedAgain = new SqliteFamilyStore(path, key);
-                Check(checkedAgain.ReadRelationships(family, actor).Count == 1 &&
-                      VerifyAuditDelta(auditBefore, ReadAudit(path, family),
-                          (winner, reviewActor, "relationship-approved")),
-                    "competing approval persists one exact actor/subject/action audit");
+                Check(checkedAgain.ReadRelationships(family, actor).Count == 1,
+                    "competing approval publishes one relationship");
+                Expect<InvalidOperationException>(() => checkedAgain.ReviewRelationship(
+                    family, losingReviewer, winner, true),
+                    "losing moderator cannot replay the competing review after reopen");
+                Check(VerifyAuditDelta(auditBefore, ReadAudit(path, family),
+                        (winner, reviewActor, "relationship-approved")),
+                    "competing approval persists one exact audit and replay adds none");
             }
 
             var racedEdge = Relationship.Create(first.Id, second.Id, RelationKind.Neighbor,
