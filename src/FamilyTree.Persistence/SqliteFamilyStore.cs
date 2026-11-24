@@ -12,7 +12,7 @@ namespace FamilyTree.Persistence;
 /// This is not a production data store until key lifecycle, backup and
 /// deployment access controls are reviewed. Tests use fictional names only.
 /// </summary>
-public sealed class SqliteFamilyStore : IDisposable
+public sealed partial class SqliteFamilyStore : IDisposable
 {
     private readonly string _path;
     private readonly byte[] _key;
