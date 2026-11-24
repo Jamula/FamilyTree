@@ -53,6 +53,8 @@ public sealed partial class SqliteFamilyStore
             );
             CREATE UNIQUE INDEX IF NOT EXISTS scoped_person_pending_id
                 ON scoped_person_proposals(family_id,person_id) WHERE state='Pending';
+            CREATE INDEX IF NOT EXISTS scoped_person_family_person
+                ON scoped_person_proposals(family_id,person_id);
             CREATE TRIGGER IF NOT EXISTS scoped_person_legacy_pending_conflict
             BEFORE INSERT ON person_proposals
             WHEN NEW.state='Pending' AND EXISTS (

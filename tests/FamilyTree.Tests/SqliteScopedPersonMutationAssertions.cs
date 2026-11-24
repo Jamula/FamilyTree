@@ -174,10 +174,35 @@ internal static class SqliteScopedPersonMutationAssertions
                 firstPage.Concat(nextPage).Select(x => x.ProposalId).Distinct().Count() == 101,
                 "keyset pagination excludes own proposals before limit");
             store.RevokeScopedPersonPermission(family, branch, admin, author, Permission.CreatePerson);
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = "DROP INDEX scoped_person_family_person;";
+                cmd.ExecuteNonQuery();
+            }
             using (var reopened = new SqliteFamilyStore(path, key))
             {
                 Expect<UnauthorizedAccessException>(() => reopened.ProposeScopedPerson(family, branch, author, "Synthetic Restart"));
                 Check(!reopened.ReadPeople(family, admin).Any(x => x.Id == replaced.Id), "restart preserves legacy isolation");
+                // A successful scoped operation upgrades previously installed schemas.
+                _ = reopened.ListScopedPendingPeople(family, branch, reviewer);
+            }
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = """
+                    EXPLAIN QUERY PLAN SELECT id, encrypted_name, living FROM people
+                    WHERE family_id=$f AND NOT EXISTS (
+                      SELECT 1 FROM scoped_person_proposals s
+                      WHERE s.family_id=people.family_id AND s.person_id=people.id)
+                    ORDER BY id;
+                    """;
+                cmd.Parameters.AddWithValue("$f", family.ToString("D"));
+                using var reader = cmd.ExecuteReader();
+                var usesIndex = false;
+                while (reader.Read())
+                    usesIndex |= reader.GetString(3).Contains("scoped_person_family_person", StringComparison.Ordinal);
+                Check(usesIndex, "legacy reader uses non-partial family/person index after schema upgrade");
             }
             using (var db = Connect(path))
             using (var cmd = db.CreateCommand())
