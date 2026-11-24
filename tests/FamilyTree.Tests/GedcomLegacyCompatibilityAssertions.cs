@@ -137,6 +137,17 @@ internal static class GedcomLegacyCompatibilityAssertions
             "1 NAME Alex /Example/", "1 NAME " + new string('X',1025),
             StringComparison.Ordinal)).Valid,
             "huge line rejected");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "0 TRLR", "0 @X@ HEAD\\n0 TRLR", StringComparison.Ordinal)
+            .Replace("\\n", "\n", StringComparison.Ordinal)).Valid,
+            "spoofed level-zero HEAD with cross-reference denied");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "0 TRLR", "0 @X@ TRLR\\n0 TRLR", StringComparison.Ordinal)
+            .Replace("\\n", "\n", StringComparison.Ordinal)).Valid,
+            "spoofed level-zero TRLR with cross-reference denied");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 FAMC @F1@", "1 @X@ FAMC @I1@", StringComparison.Ordinal)).Valid,
+            "level-one cross-reference cannot disguise a relationship pointer");
         Console.WriteLine("PASS GEDCOM 5.5.1 UTF8 bounded preview, round-trip and invalid-input tests");
     }
     private static void Check(bool condition, string message)
