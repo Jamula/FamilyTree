@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Data.Sqlite;
 
 internal static class ProfileClaimPersistenceAssertions
 {
@@ -27,7 +28,7 @@ internal static class ProfileClaimPersistenceAssertions
         services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
             .AddCookie(InteractiveOidc.ConfigureCookieOptions);
         using var root = services.BuildServiceProvider();
-        var scopes = new List<IServiceScope>();
+        using var scopes = new ScopeLifetime();
 
         DefaultHttpContext Context(string? cookie = null)
         {
@@ -69,6 +70,7 @@ internal static class ProfileClaimPersistenceAssertions
             var claimantId = Guid.Empty;
             var reviewerId = Guid.Empty;
             var adminId = Guid.Empty;
+            var noViewId = Guid.Empty;
             var personId = Guid.NewGuid();
             var secondPersonId = Guid.NewGuid();
             SqliteFamilyStore.StoredProfileClaim? approvedClaim = null;
@@ -82,7 +84,7 @@ internal static class ProfileClaimPersistenceAssertions
                 claimantId = (await bridge.RegisterAsync(Context(claimantCookie)))!.Value;
                 reviewerId = (await bridge.RegisterAsync(Context(reviewerCookie)))!.Value;
                 var pendingId = (await bridge.RegisterAsync(Context(pendingCookie)))!.Value;
-                var noViewId = (await bridge.RegisterAsync(Context(noViewCookie)))!.Value;
+                noViewId = (await bridge.RegisterAsync(Context(noViewCookie)))!.Value;
                 var otherAdminId = (await bridge.RegisterAsync(Context(otherAdminCookie)))!.Value;
                 store.CreateFictionalFamily(familyId, adminId);
                 store.CreateFictionalFamily(otherFamilyId, otherAdminId);
@@ -105,6 +107,7 @@ internal static class ProfileClaimPersistenceAssertions
                 grants.GrantPerson(familyId, branchId, adminId, claimantId, secondPersonId);
                 grants.GrantPerson(familyId, branchId, adminId, reviewerId, personId);
                 grants.GrantPerson(familyId, branchId, adminId, reviewerId, secondPersonId);
+                grants.GrantPerson(familyId, branchId, adminId, noViewId, secondPersonId);
 
                 var service = new ProfileClaimService(bridge, store);
                 var race = await Task.WhenAll(Enumerable.Range(0, 2).Select(async _ =>
@@ -124,7 +127,8 @@ internal static class ProfileClaimPersistenceAssertions
                 var claim = race.Single(item => item is not null)!;
                 Check(claim.State == ProfileClaimState.Pending &&
                       claim.PrincipalId == claimantId && claim.PersonId == personId &&
-                      claim.FamilyId == familyId && claim.PersonId != claim.PrincipalId,
+                      claim.FamilyId == familyId && claim.BranchId == branchId &&
+                      claim.PersonId != claim.PrincipalId,
                     "claim keeps the verified login separate from the genealogical Person");
 
                 await Expect<InvalidOperationException>(() => service.ProposeAsync(
@@ -191,6 +195,17 @@ internal static class ProfileClaimPersistenceAssertions
                 var pending = await service.ListPendingAsync(Context(adminCookie), familyId);
                 Check(pending.Select(item => item.Id).SequenceEqual([restartPendingClaim!.Id]),
                     "pending claim survives database restart");
+                var originalEnvelope = ReadClaimEnvelope(path, restartPendingClaim.Id);
+                var tamperedEnvelope = (byte[])originalEnvelope.Clone();
+                tamperedEnvelope[0] ^= 0xFF;
+                WriteClaimEnvelope(path, restartPendingClaim.Id, tamperedEnvelope);
+                await Expect<InvalidDataException>(() => service.ListPendingAsync(
+                    Context(adminCookie), familyId),
+                    "tampered claim identity is rejected");
+                WriteClaimEnvelope(path, restartPendingClaim.Id, originalEnvelope);
+                Check((await service.ListPendingAsync(Context(adminCookie), familyId))
+                    .Single().Id == restartPendingClaim.Id,
+                    "restoring the authenticated claim envelope preserves the pending claim");
                 var approvedAudit = await service.ReadAuditAsync(
                     Context(adminCookie), familyId, approvedClaim!.Id);
                 Check(approvedAudit.Select(entry => (entry.ActorId, entry.Action))
@@ -205,6 +220,16 @@ internal static class ProfileClaimPersistenceAssertions
                     familyId, restartPendingClaim.Id);
                 Check(withdrawn.State == ProfileClaimState.Withdrawn,
                     "claim owner can withdraw a pending claim");
+                var revokedPendingClaim = await service.ProposeAsync(
+                    Context(noViewCookie), familyId, branchId, secondPersonId);
+                store.RevokeMember(familyId, adminId, noViewId);
+                await Expect<UnauthorizedAccessException>(() => service.ReviewAsync(
+                    Context(adminCookie), familyId, revokedPendingClaim.Id, approve: true),
+                    "a revoked claimant's pending claim cannot be approved");
+                Check((await service.ReadAuditAsync(Context(adminCookie), familyId,
+                    revokedPendingClaim.Id)).Select(entry => entry.Action)
+                    .SequenceEqual(["profile-claim-proposed"]),
+                    "denied review after revocation writes no decision audit");
                 store.RevokeMember(familyId, adminId, claimantId);
                 await Expect<UnauthorizedAccessException>(() => service.ProposeAsync(
                     Context(claimantCookie), familyId, branchId, secondPersonId),
@@ -226,7 +251,6 @@ internal static class ProfileClaimPersistenceAssertions
         }
         finally
         {
-            foreach (var scope in scopes) scope.Dispose();
             CryptographicOperations.ZeroMemory(key);
             CryptographicOperations.ZeroMemory(identityKey);
             Directory.Delete(directory, recursive: true);
@@ -247,11 +271,59 @@ internal static class ProfileClaimPersistenceAssertions
         if (!condition) throw new InvalidOperationException(message);
     }
 
+    private static byte[] ReadClaimEnvelope(string path, Guid claimId)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadOnly,
+            Pooling = false
+        }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT identity_envelope FROM profile_claims WHERE id=$id;";
+        command.Parameters.AddWithValue("$id", claimId.ToString("D"));
+        return (byte[])command.ExecuteScalar()!;
+    }
+
+    private static void WriteClaimEnvelope(string path, Guid claimId, byte[] envelope)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadWrite,
+            Pooling = false
+        }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE profile_claims SET identity_envelope=$envelope WHERE id=$id;
+            """;
+        command.Parameters.AddWithValue("$envelope", envelope);
+        command.Parameters.AddWithValue("$id", claimId.ToString("D"));
+        if (command.ExecuteNonQuery() != 1)
+            throw new InvalidOperationException("Profile claim fixture unavailable.");
+    }
+
     private static async Task Expect<T>(Func<Task> action, string message)
         where T : Exception
     {
         try { await action(); }
         catch (T) { return; }
         throw new InvalidOperationException(message);
+    }
+
+    private sealed class ScopeLifetime : IDisposable
+    {
+        private readonly List<IServiceScope> _scopes = [];
+
+        internal void Add(IServiceScope scope) => _scopes.Add(scope);
+
+        public void Dispose()
+        {
+            foreach (var scope in _scopes)
+                scope.Dispose();
+            _scopes.Clear();
+        }
     }
 }

@@ -6,7 +6,7 @@ namespace FamilyTree.Persistence;
 public sealed partial class SqliteFamilyStore
 {
     public sealed record StoredProfileClaim(
-        Guid Id, Guid FamilyId, Guid PersonId, Guid PrincipalId,
+        Guid Id, Guid FamilyId, Guid BranchId, Guid PersonId, Guid PrincipalId,
         ProfileClaimState State, Guid? ReviewedBy);
 
     public sealed record ProfileClaimAuditEntry(
@@ -32,11 +32,16 @@ public sealed partial class SqliteFamilyStore
 
         try
         {
+            var identityEnvelope = Encrypt(familyId, claim.Id,
+                $"{personId:D}\0{principalId:D}\0{branchId:D}", principalId.ToByteArray());
             Exec(con, tx, """
-                INSERT INTO profile_claims(id,family_id,person_id,principal_id,state)
-                VALUES($id,$f,$person,$principal,'Pending');
+                INSERT INTO profile_claims
+                  (id,family_id,branch_id,person_id,principal_id,identity_envelope,state)
+                VALUES($id,$f,$branch,$person,$principal,$identity,'Pending');
                 """, ("$id", claim.Id.ToString("D")), ("$f", familyId.ToString("D")),
-                ("$person", personId.ToString("D")), ("$principal", principalId.ToString("D")));
+                ("$branch", branchId.ToString("D")), ("$person", personId.ToString("D")),
+                ("$principal", principalId.ToString("D")),
+                ("$identity", identityEnvelope));
         }
         catch (SqliteException ex) when (
             ex.SqliteExtendedErrorCode is 1555 or 2067)
@@ -46,7 +51,7 @@ public sealed partial class SqliteFamilyStore
 
         Audit(con, tx, familyId, claim.Id, principalId, "profile-claim-proposed");
         tx.Commit();
-        return new StoredProfileClaim(claim.Id, familyId, personId, principalId,
+        return new StoredProfileClaim(claim.Id, familyId, branchId, personId, principalId,
             claim.State, null);
     }
 
@@ -59,6 +64,13 @@ public sealed partial class SqliteFamilyStore
         EnsureProfileClaimSchema(con, tx);
         RequireMember(con, tx, familyId, reviewerId, administrator: true);
         var claim = FindPendingProfileClaim(con, tx, familyId, claimId);
+        RequireMember(con, tx, familyId, claim.PrincipalId, administrator: false);
+        if (Scalar<long>(con, tx, """
+            SELECT COUNT(*) FROM person_visibility
+            WHERE family_id=$f AND branch_id=$b AND principal_id=$p AND person_id=$person;
+            """, ("$f", familyId.ToString("D")), ("$b", claim.BranchId.ToString("D")),
+            ("$p", claim.PrincipalId.ToString("D")), ("$person", claim.PersonId.ToString("D"))) != 1)
+            throw new UnauthorizedAccessException("Access denied.");
         var reviewed = ProfileClaim.Submit(familyId, claim.PrincipalId, claim.PersonId,
             activeFamilyMember: true, canViewPerson: true)
             .Review(reviewerId, familyId, canApproveClaims: true, approve);
@@ -109,16 +121,24 @@ public sealed partial class SqliteFamilyStore
         RequireMember(con, tx, familyId, administratorId, administrator: true);
         var claims = new List<StoredProfileClaim>();
         using (var query = Cmd(con, tx, """
-            SELECT id,person_id,principal_id,reviewed_by
+            SELECT id,person_id,principal_id,branch_id,reviewed_by,identity_envelope
             FROM profile_claims WHERE family_id=$f AND state='Pending'
             ORDER BY id LIMIT 100;
             """, ("$f", familyId.ToString("D"))))
         using (var reader = query.ExecuteReader())
             while (reader.Read())
+            {
+                var claimId = Guid.Parse(reader.GetString(0));
+                var personId = Guid.Parse(reader.GetString(1));
+                var principalId = Guid.Parse(reader.GetString(2));
+                var branchId = Guid.Parse(reader.GetString(3));
+                VerifyProfileClaimIdentity(familyId, claimId, branchId, personId, principalId,
+                    reader.GetFieldValue<byte[]>(5));
                 claims.Add(new StoredProfileClaim(Guid.Parse(reader.GetString(0)), familyId,
-                    Guid.Parse(reader.GetString(1)), Guid.Parse(reader.GetString(2)),
+                    branchId, personId, principalId,
                     ProfileClaimState.Pending,
-                    reader.IsDBNull(3) ? null : Guid.Parse(reader.GetString(3))));
+                    reader.IsDBNull(4) ? null : Guid.Parse(reader.GetString(4))));
+            }
         tx.Commit();
         return claims;
     }
@@ -146,19 +166,33 @@ public sealed partial class SqliteFamilyStore
         return entries;
     }
 
-    private static StoredProfileClaim FindPendingProfileClaim(
+    private StoredProfileClaim FindPendingProfileClaim(
         SqliteConnection con, SqliteTransaction tx, Guid familyId, Guid claimId)
     {
         using var query = Cmd(con, tx, """
-            SELECT person_id,principal_id FROM profile_claims
+            SELECT branch_id,person_id,principal_id,identity_envelope FROM profile_claims
             WHERE family_id=$f AND id=$id AND state='Pending';
             """, ("$f", familyId.ToString("D")), ("$id", claimId.ToString("D")));
         using var reader = query.ExecuteReader();
         if (!reader.Read())
             throw new InvalidOperationException("Pending profile claim unavailable.");
-        return new StoredProfileClaim(claimId, familyId,
-            Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)),
+        var branchId = Guid.Parse(reader.GetString(0));
+        var personId = Guid.Parse(reader.GetString(1));
+        var principalId = Guid.Parse(reader.GetString(2));
+        VerifyProfileClaimIdentity(familyId, claimId, branchId, personId, principalId,
+            reader.GetFieldValue<byte[]>(3));
+        return new StoredProfileClaim(claimId, familyId, branchId, personId, principalId,
             ProfileClaimState.Pending, null);
+    }
+
+    private void VerifyProfileClaimIdentity(
+        Guid familyId, Guid claimId, Guid branchId, Guid personId,
+        Guid principalId, byte[] envelope)
+    {
+        var identity = Decrypt(familyId, claimId, envelope, principalId.ToByteArray());
+        var expected = $"{personId:D}\0{principalId:D}\0{branchId:D}";
+        if (!string.Equals(identity, expected, StringComparison.Ordinal))
+            throw new InvalidDataException("Profile claim identity integrity check failed.");
     }
 
     private static void EnsureProfileClaimSchema(SqliteConnection con, SqliteTransaction tx)
@@ -169,8 +203,10 @@ public sealed partial class SqliteFamilyStore
             CREATE TABLE IF NOT EXISTS profile_claims (
                 id TEXT PRIMARY KEY NOT NULL,
                 family_id TEXT NOT NULL,
+                branch_id TEXT NOT NULL,
                 person_id TEXT NOT NULL,
                 principal_id TEXT NOT NULL,
+                identity_envelope BLOB NOT NULL,
                 state TEXT NOT NULL CHECK(state IN ('Pending','Approved','Rejected','Withdrawn')),
                 reviewed_by TEXT NULL,
                 FOREIGN KEY(family_id,person_id) REFERENCES people(family_id,id),
