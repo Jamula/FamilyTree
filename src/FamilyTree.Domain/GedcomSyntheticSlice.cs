@@ -220,9 +220,14 @@ public static partial class GedcomSyntheticSlice
     }
 
     private static bool IsPointer(string text) => Pointer.IsMatch(text);
-    private static bool SafeText(string? text) => !string.IsNullOrWhiteSpace(text) &&
-        text.Length <= 500 && !text.Contains('@') && !text.Any(char.IsControl) &&
-        !text.Any(char.IsSurrogate);
+    private static bool SafeText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Length > 500 ||
+            text.Contains('@') || text.Any(char.IsControl))
+            return false;
+        try { _ = Utf8.GetByteCount(text); return true; }
+        catch (EncoderFallbackException) { return false; }
+    }
     private static bool SafeName(string? text) => SafeText(text) &&
         !string.IsNullOrWhiteSpace(text!.Replace("/", "", StringComparison.Ordinal));
 

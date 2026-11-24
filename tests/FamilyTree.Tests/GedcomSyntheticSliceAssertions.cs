@@ -63,6 +63,12 @@ internal static class GedcomSyntheticSliceAssertions
             roundTrip.Sources.Single() == proposal.Graph.Sources.Single(), "subset graph round trip");
         Check(exported.Warnings.Single().Contains("SEX", StringComparison.Ordinal) &&
             proposal.Warnings.Count > 0, "loss warnings explicit");
+        var supplementary = Fixture.Replace("Avery", "Avery 𠮷", StringComparison.Ordinal)
+            .Replace("Imaginary register", "Imaginary 𠮷", StringComparison.Ordinal);
+        var unicodeGraph = Parse(supplementary, [new("candidate", "Avery 𠮷 Fiction", null)]).Proposal!;
+        Check(unicodeGraph.Matches.Count == 1 &&
+            Parse(GedcomSyntheticSlice.Export(new(unicodeGraph.Graph)).Text).Proposal!.Graph.Sources.Single().Title ==
+            "Imaginary 𠮷", "supplementary Unicode preview, reconciliation and export");
 
         var filtered = new SyntheticGedcomGraph([proposal.Graph.People[1] with { Events = [] }], [], []);
         var safe = GedcomSyntheticSlice.Export(new(filtered)).Text;
@@ -82,6 +88,8 @@ internal static class GedcomSyntheticSliceAssertions
             filtered with { People = [proposal.Graph.People[0]] })), "dangling source fails closed");
         Throws<InvalidOperationException>(() => GedcomSyntheticSlice.Export(new(
             filtered with { People = [filtered.People[0] with { Name = "x\n0 TRLR" }] })), "line injection");
+        Throws<InvalidOperationException>(() => GedcomSyntheticSlice.Export(new(
+            filtered with { People = [filtered.People[0] with { Name = "x\uD800" }] })), "unpaired surrogate rejected");
         Throws<InvalidOperationException>(() => GedcomSyntheticSlice.Export(new(
             filtered with { People = [filtered.People[0], filtered.People[0]] })), "duplicate IDs export");
         Throws<InvalidOperationException>(() => GedcomSyntheticSlice.Export(new(
