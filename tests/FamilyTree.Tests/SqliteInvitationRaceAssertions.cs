@@ -26,15 +26,26 @@ internal static class SqliteInvitationRaceAssertions
             }
 
             using var ready = new CountdownEvent(2);
-            using var attempting = new CountdownEvent(2);
+            using var blocked = new CountdownEvent(2);
             using var start = new ManualResetEventSlim();
+            using var retry = new ManualResetEventSlim();
             Task<bool> Accept(Guid invitation) => Task.Factory.StartNew(() =>
             {
                 using var store = new SqliteFamilyStore(path, key);
                 ready.Signal();
                 if (!start.Wait(TimeSpan.FromSeconds(30)))
                     throw new InvalidOperationException("Invitation race did not start.");
-                attempting.Signal();
+                try
+                {
+                    store.AcceptInvitation(family, member, invitation, now);
+                    throw new InvalidOperationException("Acceptance unexpectedly bypassed the SQLite write lock.");
+                }
+                catch (SqliteException ex) when (ex.SqliteErrorCode == 5)
+                {
+                    blocked.Signal();
+                }
+                if (!retry.Wait(TimeSpan.FromSeconds(30)))
+                    throw new InvalidOperationException("Invitation retry did not start.");
                 try
                 {
                     store.AcceptInvitation(family, member, invitation, now);
@@ -48,8 +59,7 @@ internal static class SqliteInvitationRaceAssertions
 
             var attempts = new[] { Accept(first), Accept(second) };
             bool bothReady;
-            bool bothAttempting = false;
-            bool neitherCompleted = false;
+            bool bothBlocked = false;
             try
             {
                 bothReady = ready.Wait(TimeSpan.FromSeconds(30));
@@ -62,20 +72,20 @@ internal static class SqliteInvitationRaceAssertions
                         Pooling = false
                     }.ToString());
                     connection.Open();
-                    using var transaction = connection.BeginTransaction();
+                    using var transaction = connection.BeginTransaction(deferred: false);
                     start.Set();
-                    bothAttempting = attempting.Wait(TimeSpan.FromSeconds(4));
-                    neitherCompleted = attempts.All(x => !x.IsCompleted);
+                    bothBlocked = blocked.Wait(TimeSpan.FromSeconds(20));
                     transaction.Rollback();
                 }
             }
             finally
             {
                 start.Set();
+                retry.Set();
             }
             var outcomes = await Task.WhenAll(attempts);
             Check(bothReady, "Invitation racers did not become ready.");
-            Check(bothAttempting && neitherCompleted, "Both attempts must start while the database write lock is held.");
+            Check(bothBlocked, "Both acceptance calls must encounter SQLITE_BUSY while the write lock is held.");
             Check(outcomes.Count(x => x) == 1, "Exactly one invitation may create pending membership.");
             var winner = outcomes[0] ? first : second;
             var loser = outcomes[0] ? second : first;
