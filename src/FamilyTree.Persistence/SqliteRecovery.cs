@@ -114,15 +114,17 @@ public static class SqliteRecovery
     {
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA journal_mode=DELETE;";
-        if (!string.Equals(command.ExecuteScalar() as string, "delete",
-                StringComparison.OrdinalIgnoreCase))
+        if (!IsDeleteJournalMode(command.ExecuteScalar() as string))
             throw new InvalidDataException("SQLite snapshot journal mode is invalid.");
     }
+
+    internal static bool IsDeleteJournalMode(string? journalMode) =>
+        string.Equals(journalMode, "delete", StringComparison.OrdinalIgnoreCase);
 
     private static byte[] Serialize(SqliteConnection connection)
     {
         var pointer = SQLitePCL.raw.sqlite3_serialize(connection.Handle, "main", out var length, 0);
-        if (pointer == IntPtr.Zero || length <= 0 || length > MaximumSnapshotLength)
+        if (!IsSerializedBufferValid(pointer, length))
         {
             if (pointer != IntPtr.Zero)
                 SQLitePCL.raw.sqlite3_free(pointer);
@@ -141,9 +143,12 @@ public static class SqliteRecovery
         }
     }
 
+    internal static bool IsSerializedBufferValid(IntPtr pointer, long length) =>
+        pointer != IntPtr.Zero && length > 0 && length <= MaximumSnapshotLength;
+
     private static byte[] Encrypt(byte[] database, byte[] key)
     {
-        if (database.Length == 0 || database.Length > MaximumSnapshotLength)
+        if (!IsSnapshotSizeValid(database.Length))
             throw new InvalidDataException("SQLite snapshot size is invalid.");
 
         var envelope = new byte[checked(HeaderLength + database.Length)];
@@ -156,6 +161,9 @@ public static class SqliteRecovery
         cipher.Encrypt(nonce, database, ciphertext, tag, Magic);
         return envelope;
     }
+
+    internal static bool IsSnapshotSizeValid(int length) =>
+        length > 0 && length <= MaximumSnapshotLength;
 
     private static byte[] Decrypt(byte[] envelope, byte[] key)
     {
@@ -189,8 +197,10 @@ public static class SqliteRecovery
         {
             check.CommandText = "PRAGMA integrity_check;";
             using var reader = check.ExecuteReader();
-            if (!reader.Read() || !string.Equals(reader.GetString(0), "ok",
-                    StringComparison.OrdinalIgnoreCase) || reader.Read())
+            var hasFirstRow = reader.Read();
+            var firstResult = hasFirstRow ? reader.GetString(0) : null;
+            var hasAdditionalRows = hasFirstRow && reader.Read();
+            if (!IsIntegrityCheckValid(hasFirstRow, firstResult, hasAdditionalRows))
                 throw new InvalidDataException("SQLite snapshot integrity check failed.");
         }
 
@@ -198,7 +208,7 @@ public static class SqliteRecovery
         {
             check.CommandText = "PRAGMA foreign_key_check;";
             using var reader = check.ExecuteReader();
-            if (reader.Read())
+            if (!IsForeignKeyCheckClean(reader.Read()))
                 throw new InvalidDataException("SQLite snapshot relationship check failed.");
         }
 
@@ -210,10 +220,20 @@ public static class SqliteRecovery
                     ('families','memberships','invitations','people',
                      'person_proposals','audit','key_verifier');
                 """;
-            if (Convert.ToInt32(check.ExecuteScalar()) != 7)
+            if (!HasRequiredSchema(Convert.ToInt32(check.ExecuteScalar())))
                 throw new InvalidDataException("SQLite snapshot schema is incomplete.");
         }
     }
+
+    internal static bool IsIntegrityCheckValid(
+        bool hasFirstRow, string? firstResult, bool hasAdditionalRows) =>
+        hasFirstRow &&
+        string.Equals(firstResult, "ok", StringComparison.OrdinalIgnoreCase) &&
+        !hasAdditionalRows;
+
+    internal static bool IsForeignKeyCheckClean(bool hasViolations) => !hasViolations;
+
+    internal static bool HasRequiredSchema(int tableCount) => tableCount == 7;
 
     private static SqliteConnection OpenMemory()
     {
@@ -243,7 +263,7 @@ public static class SqliteRecovery
         return connection;
     }
 
-    private static void WriteAtomically(string targetPath, byte[] content, bool overwrite)
+    private static void WriteAtomically(string targetPath, byte[] content)
     {
         var temporaryPath = JoinChildPath(Path.GetDirectoryName(targetPath)!,
             ".ft-recovery-" + Guid.NewGuid().ToString("N") + ".tmp");
@@ -254,10 +274,7 @@ public static class SqliteRecovery
                 stream.Write(content);
                 stream.Flush(flushToDisk: true);
             }
-            if (overwrite)
-                File.Move(temporaryPath, targetPath, overwrite: true);
-            else
-                File.Move(temporaryPath, targetPath);
+            File.Move(temporaryPath, targetPath, overwrite: true);
         }
         finally
         {
@@ -326,7 +343,7 @@ public static class SqliteRecovery
         }
     }
 
-    private static string JoinChildPath(string directory, string child)
+    internal static string JoinChildPath(string directory, string child)
     {
         if (string.IsNullOrEmpty(child) || child is "." or ".." ||
             Path.IsPathFullyQualified(child) || Path.GetFileName(child) != child ||

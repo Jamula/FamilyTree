@@ -6,13 +6,13 @@ internal static class RecoverySuiteAssertions
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null &&
-               !File.Exists(Path.Combine(root.FullName, "tests", "FamilyTree.RecoveryTests",
+               !File.Exists(JoinChildPath(root.FullName, "tests", "FamilyTree.RecoveryTests",
                    "FamilyTree.RecoveryTests.csproj")))
             root = root.Parent;
         if (root is null)
             throw new DirectoryNotFoundException("Recovery test project not found.");
 
-        var project = Path.Combine(root.FullName, "tests", "FamilyTree.RecoveryTests",
+        var project = JoinChildPath(root.FullName, "tests", "FamilyTree.RecoveryTests",
             "FamilyTree.RecoveryTests.csproj");
         var start = new ProcessStartInfo("dotnet")
         {
@@ -40,5 +40,18 @@ internal static class RecoverySuiteAssertions
             throw new InvalidOperationException(
                 $"Recovery assertions failed (exit code {process.ExitCode}).{Environment.NewLine}{output}{error}");
         Console.Write(output);
+    }
+
+    private static string JoinChildPath(string parent, params string[] children)
+    {
+        var path = parent;
+        foreach (var child in children)
+        {
+            if (string.IsNullOrEmpty(child) || child is "." or ".." ||
+                Path.IsPathFullyQualified(child) || Path.GetFileName(child) != child)
+                throw new IOException("Recovery test path component is invalid.");
+            path = Path.Join(path, child);
+        }
+        return path;
     }
 }
