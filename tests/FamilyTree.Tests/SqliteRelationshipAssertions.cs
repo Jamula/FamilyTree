@@ -530,6 +530,42 @@ internal static class SqliteRelationshipAssertions
                     Check(change.ExecuteNonQuery() == 1,
                         "restore original authenticated proposal envelope");
                 }
+                var graphBeforeSubmitterUndoTamper = store.ReadRelationships(
+                    family, admin);
+                var auditBeforeSubmitterUndoTamper = store.CountAudit(family, admin);
+                using (var connection = new SqliteConnection(
+                    new SqliteConnectionStringBuilder {
+                        DataSource = database, Pooling = false }.ToString()))
+                {
+                    connection.Open();
+                    using var change = connection.CreateCommand();
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET submitter=$forged
+                        WHERE family_id=$f AND id=$id;
+                        """;
+                    change.Parameters.AddWithValue("$forged", other.ToString("D"));
+                    change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$id", originalProposal.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1,
+                        "tamper only approved proposal submitter");
+                    Expect<InvalidDataException>(() => store.UndoRelationship(
+                        family, admin, originalProposal),
+                        "submitter-only substitution fails authenticated identity before undo");
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET submitter=$original
+                        WHERE family_id=$f AND id=$id;
+                        """;
+                    change.Parameters.AddWithValue("$original", actor.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1,
+                        "restore authenticated approved submitter");
+                }
+                Check(store.ReadRelationships(family, admin)
+                        .SequenceEqual(graphBeforeSubmitterUndoTamper) &&
+                      store.CountAudit(family, admin) == auditBeforeSubmitterUndoTamper &&
+                      store.ListApprovedRelationshipsForUndo(family, admin)
+                          .Any(x => x.ProposalId == originalProposal &&
+                              !x.ContentUnreadable),
+                    "submitter-only undo tampering preserves approved graph, state and audit");
                 var undoInbox = store.ListApprovedRelationshipsForUndo(family, admin);
                 Check(undoInbox.Count == 2 &&
                     undoInbox.All(x => x.Relationship is not null &&
