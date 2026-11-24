@@ -36,7 +36,7 @@ uniform empty 501 responses for reserved private paths. It also prints
 | Acceptance area | Status | Evidence / limitation |
 | --- | --- | --- |
 | Actual API process and HTTP startup | Verified locally and in CI | `tests/FamilyTree.AcceptanceHarness/Program.cs`; PR #103 run 45330602101 passed the process-level acceptance step. |
-| Child-process telemetry isolation | Verified locally; updated CI pending | The real API baseline passes with inherited `FAMILYTREE_OTLP_ENABLED=true`, remote approval, and an invalid OTLP endpoint; the CI harness step injects these settings without changing #115's coverage gates. |
+| Child-process telemetry isolation | Verified locally and in CI | The real API baseline passes with inherited `FAMILYTREE_OTLP_ENABLED=true`, remote approval, and an invalid OTLP endpoint; PR #103 run 45488727184 passes the hostile-environment harness step without changing #115's coverage gates. |
 | Anonymous and malformed/forged session denial | Verified baseline | `/auth/session` returns 401 without a cookie and for invalid cookie values. |
 | Valid expired or revoked session-cookie denial | **Unaccepted** | A real trusted session and revocation path are not available; invalid cookie text is not an expired/revoked-session test. |
 | Private GET/search/tree/export and write behavior | Verified fail-closed baseline only | Reserved paths and POST return uniform empty 501 responses; no handler is claimed to work. |
@@ -59,6 +59,14 @@ aggregate line coverage, 78.0% aggregate branch coverage, and component line
 coverage above 90% for each measured component. These green CI results are not
 proof that the private-family MVP is complete; the remaining gates above stay
 unaccepted.
+
+After merging #100 into this branch, PR #103 build/test
+([run 45488727184](https://github.com/Jamula/FamilyTree/actions/runs/45488727184))
+passed on commit `090904e`, including the hostile inherited-OTLP regression.
+Independent review found no significant issue; local CodeQL reported zero
+Actions and C# alerts. The local full-solution build was blocked by the
+uninstalled Aspire CLI bundle (`ASPIRE009`); the targeted API/harness build,
+both real-process baselines, and the existing .NET assertion suite passed.
 
 ## Expansion rule
 
