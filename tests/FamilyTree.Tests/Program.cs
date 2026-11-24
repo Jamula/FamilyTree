@@ -37,3 +37,5 @@ await FictionalWorkbenchHttpAssertions.RunAsync();
 await ApiLoopbackIntegrationAssertions.RunAsync();
 
 await VerifiedCookieHandlerAssertions.RunAsync();
+
+await VerifiedFamilyMembershipAssertions.RunAsync();
