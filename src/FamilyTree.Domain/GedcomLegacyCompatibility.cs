@@ -44,12 +44,20 @@ public static class GedcomLegacyCompatibility
             if (line.Length > 1024 || line.Any(char.IsControl) ||
                 Regex.IsMatch(line, @"^0[0-9]+ "))
                 return Reject("Malformed GEDCOM line");
+            // A cross-reference ID belongs only on a level-zero record. Otherwise
+            // a spoofed tag (e.g. "1 @X@ FAMC @I1@") could evade pointer checks.
+            var tokens = line.Split(' ', 3);
+            if (tokens.Length > 1 && tokens[0] != "0" &&
+                tokens[1].StartsWith('@'))
+                return Reject("Cross-reference ID outside a level-zero record");
             if (line.StartsWith("0 ", StringComparison.Ordinal))
             {
-                var record = line.Split(' ', 3);
+                var record = tokens;
                 if (record.Length > 1 &&
                     (record[1] == "HEAD" ||
-                     (record[1] == "TRLR" && i != lines.Length - 1)))
+                     (record[1] == "TRLR" && i != lines.Length - 1) ||
+                     (record.Length == 3 && record[1].StartsWith('@') &&
+                      (record[2] is "HEAD" or "TRLR"))))
                     return Reject("Repeated GEDCOM boundary record");
                 inHeader = false;
                 currentRecordKind = record.Length == 3 ? record[2] : "";
