@@ -15,6 +15,7 @@ internal static class PrivateTreeModeAssertions
     {
         public int Requests { get; private set; }
         public string? SessionCookie { get; private set; }
+        public List<string?> SessionCookies { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
@@ -28,6 +29,7 @@ internal static class PrivateTreeModeAssertions
                 SessionCookie = request.Headers.TryGetValues("Cookie", out var values)
                     ? values.Single()
                     : null;
+                SessionCookies.Add(SessionCookie);
                 return Task.FromResult(Json(HttpStatusCode.Unauthorized, ""));
             }
             throw new InvalidOperationException("Unexpected API route.");
@@ -63,23 +65,19 @@ internal static class PrivateTreeModeAssertions
             "https://user@localhost:5043",
             "https://localhost:5043/path"
         };
-        foreach (var value in invalidValues)
+        foreach (var configuration in invalidValues.Select(CreateUnsafeApiConfiguration))
         {
-            var configuration = new ConfigurationBuilder().AddInMemoryCollection(
-                new Dictionary<string, string?>
-                {
-                    [PrivateTreeModeOptions.EnabledSetting] = "true",
-                    [PrivateTreeModeOptions.ApiBaseUrlSetting] = value
-                }).Build();
+            var rejected = false;
             try
             {
                 PrivateTreeModeOptions.FromConfiguration(configuration);
-                throw new InvalidOperationException("Unsafe API base URL was accepted.");
             }
             catch (InvalidOperationException exception) when (
                 exception.Message.Contains("FAMILYTREE_API_BASE_URL", StringComparison.Ordinal))
             {
+                rejected = true;
             }
+            Ensure(rejected, "unsafe API base URL is rejected");
         }
 
         await VerifyPrivateRouteAsync();
@@ -90,6 +88,7 @@ internal static class PrivateTreeModeAssertions
     private static async Task VerifyPrivateRouteAsync()
     {
         var handler = new LocalApiHandler();
+        using var apiHttpClient = new HttpClient(handler);
         var options = new PrivateTreeModeOptions(true, new Uri("https://localhost:5043/"));
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -97,7 +96,7 @@ internal static class PrivateTreeModeAssertions
         });
         builder.WebHost.UseTestServer();
         builder.Services.AddSingleton(options);
-        builder.Services.AddSingleton(new HttpClient(handler));
+        builder.Services.AddSingleton(apiHttpClient);
         builder.Services.AddSingleton<PrivateTreeApiClient>();
         var app = builder.Build();
         app.Use(async (context, next) =>
@@ -130,7 +129,7 @@ internal static class PrivateTreeModeAssertions
             using var rejected = await client.SendAsync(spoofed);
             var rejectedHtml = await rejected.Content.ReadAsStringAsync();
             Ensure(rejected.StatusCode == HttpStatusCode.OK &&
-                handler.SessionCookie == "__Host-FamilyTreeSession=not-a-real-ticket" &&
+                handler.SessionCookies.LastOrDefault() == "__Host-FamilyTreeSession=not-a-real-ticket" &&
                 rejectedHtml.Contains("Sign in with Google", StringComparison.Ordinal),
                 "an arbitrary browser cookie is forwarded only to the API and cannot create an authenticated session");
 
@@ -156,8 +155,9 @@ internal static class PrivateTreeModeAssertions
 
         var disabledBuilder = WebApplication.CreateBuilder();
         disabledBuilder.WebHost.UseTestServer();
+        using var disabledApiHttpClient = new HttpClient(new LocalApiHandler());
         disabledBuilder.Services.AddSingleton(new PrivateTreeModeOptions(false, null));
-        disabledBuilder.Services.AddSingleton(new HttpClient(new LocalApiHandler()));
+        disabledBuilder.Services.AddSingleton(disabledApiHttpClient);
         disabledBuilder.Services.AddSingleton<PrivateTreeApiClient>();
         var disabledApp = disabledBuilder.Build();
         disabledApp.Use(async (context, next) =>
@@ -204,19 +204,31 @@ internal static class PrivateTreeModeAssertions
         var depthOne = PersonTreeProjector.ProjectAsync(Guid.NewGuid(), center.Id,
             people, relationships, new TreeOptions(1, 1, false, false, false),
             authorization).GetAwaiter().GetResult();
-        Ensure(depthOne?.Nodes.Count == 3 &&
-            depthOne.Nodes.Min(x => x.Generation) == -1 &&
-            depthOne.Nodes.Max(x => x.Generation) == 1,
+        var verifiedDepthOne = depthOne ??
+            throw new InvalidOperationException("depth one projection should include the center");
+        Ensure(verifiedDepthOne.Nodes.Count == 3 &&
+            verifiedDepthOne.Nodes.Min(x => x.Generation) == -1 &&
+            verifiedDepthOne.Nodes.Max(x => x.Generation) == 1,
             "depth one includes one ancestor and descendant");
 
         var depthEight = PersonTreeProjector.ProjectAsync(Guid.NewGuid(), center.Id,
             people, relationships, new TreeOptions(8, 8, false, false, false),
             authorization).GetAwaiter().GetResult();
-        Ensure(depthEight?.Nodes.Count == 17 &&
-            depthEight.Nodes.Min(x => x.Generation) == -8 &&
-            depthEight.Nodes.Max(x => x.Generation) == 8,
+        var verifiedDepthEight = depthEight ??
+            throw new InvalidOperationException("depth eight projection should include the center");
+        Ensure(verifiedDepthEight.Nodes.Count == 17 &&
+            verifiedDepthEight.Nodes.Min(x => x.Generation) == -8 &&
+            verifiedDepthEight.Nodes.Max(x => x.Generation) == 8,
             "depth eight traverses the complete synthetic graph without truncation");
     }
+
+    private static IConfiguration CreateUnsafeApiConfiguration(string value) =>
+        new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?>
+            {
+                [PrivateTreeModeOptions.EnabledSetting] = "true",
+                [PrivateTreeModeOptions.ApiBaseUrlSetting] = value
+            }).Build();
 
     private static void Ensure(bool condition, string message)
     {
