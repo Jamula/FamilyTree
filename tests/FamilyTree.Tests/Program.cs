@@ -41,5 +41,8 @@ if (OperatingSystem.IsLinux())
     await PrivateApiLoopbackAssertions.RunAsync();
 
 await VerifiedCookieHandlerAssertions.RunAsync();
+
+await SqliteRelationshipConcurrencyAssertions.RunAsync();
+await SqliteSchemaMigrationConcurrencyAssertions.RunAsync();
 await SqliteInvitationRaceAssertions.RunAsync();
 await VerifiedFamilyMembershipAssertions.RunAsync();
