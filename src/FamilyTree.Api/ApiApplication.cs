@@ -25,6 +25,7 @@ public static class ApiApplication
             // lifetime even when no private request reaches the endpoint layer.
             _ = app.Services.GetRequiredService<SqliteFamilyStore>();
             _ = app.Services.GetRequiredService<SqlitePrincipalRegistry>();
+            _ = app.Services.GetRequiredService<SqliteTreeReadSource>();
             _ = app.Services.GetRequiredService<X509Certificate2>();
         }
         

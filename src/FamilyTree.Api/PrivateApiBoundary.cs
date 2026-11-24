@@ -41,6 +41,7 @@ public static class PrivateApiBoundary
                 var endpoint = context.GetEndpoint();
                 if (!privateApiEnabled ||
                     endpoint?.Metadata.GetMetadata<EnabledPrivateEndpoint>() is null ||
+                    !context.Request.IsHttps ||
                     !IsLoopbackRequest(context))
                 {
                     // Identical status and empty response for every reserved path,

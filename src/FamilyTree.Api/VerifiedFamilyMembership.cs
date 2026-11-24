@@ -32,6 +32,9 @@ public sealed class VerifiedFamilyMembership(
         return principal is { } id && familyId != Guid.Empty && _families.IsActiveMember(familyId, id);
     }
 
+    public Task<Guid?> FindRegisteredPrincipalAsync(HttpContext context) =>
+        FindPrincipalAsync(context);
+
     public async Task<Guid> IssueInvitationAsync(HttpContext context, Guid familyId,
         Guid intendedPrincipalId, DateTimeOffset expiry)
     {

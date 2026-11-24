@@ -1,12 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Runtime.Versioning;
+using System.Security.AccessControl;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.Principal;
 using System.Text.Json;
 using FamilyTree.Api;
+using FamilyTree.Domain;
 using FamilyTree.Persistence;
+using Microsoft.Data.Sqlite;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Builder;
@@ -21,24 +24,51 @@ using Microsoft.Extensions.Hosting;
 
 internal static class PrivateApiLoopbackAssertions
 {
-    internal static void AssertWindowsOptInBlocked()
+    internal static void AssertWindowsConfiguration()
     {
         Check(PrivateApiComposition.EnvironmentBlocker(
-                isDevelopment: true, isLinux: false).Contains("Windows",
-                StringComparison.Ordinal),
-            "Windows opt-in remains blocked until secure ACL support is available");
-        Console.WriteLine("PASS Windows private API opt-in blocker");
+                isDevelopment: true, isLinux: false, isWindows: true).Length == 0 &&
+            PrivateApiComposition.EnvironmentBlocker(
+                isDevelopment: false, isLinux: false, isWindows: true).Length > 0,
+            "Windows private API is limited to Development");
+        if (OperatingSystem.IsWindows())
+        {
+            var directory = Path.Join(Path.GetTempPath(), "familytree-private-acl-" +
+                Guid.NewGuid().ToString("N"));
+            try
+            {
+                PrivateApiComposition.EnsurePrivateDirectory(directory);
+                var file = Path.Join(directory, "synthetic.pfx");
+                File.WriteAllBytes(file, [1]);
+                var permissive = new FileSecurity();
+                permissive.AddAccessRule(new FileSystemAccessRule(
+                    new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+                    FileSystemRights.Read, AccessControlType.Allow));
+                new FileInfo(file).SetAccessControl(permissive);
+                PrivateApiComposition.SetPrivateWindowsFilePermissions(file);
+                PrivateApiComposition.EnsureNoReparsePointAncestors(file);
+            }
+            finally
+            {
+                if (Directory.Exists(directory))
+                    Directory.Delete(directory, recursive: true);
+            }
+        }
+        Console.WriteLine("PASS Windows private API environment gate");
     }
 
-    [SupportedOSPlatform("linux")]
     internal static async Task RunAsync()
     {
         var directory = Path.Join(Path.GetTempPath(), "familytree-private-api-" +
             Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory,
-            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        File.SetUnixFileMode(directory,
-            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        Directory.CreateDirectory(directory);
+        if (OperatingSystem.IsLinux())
+        {
+            File.SetUnixFileMode(directory,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        else if (OperatingSystem.IsWindows())
+            PrivateApiComposition.EnsurePrivateDirectory(directory);
         var databasePath = Path.Join(directory, "familytree.sqlite");
         var encryptionKey = RandomNumberGenerator.GetBytes(32);
         var identityKey = RandomNumberGenerator.GetBytes(32);
@@ -51,9 +81,11 @@ internal static class PrivateApiLoopbackAssertions
         var provider = new InteractiveOidc.Provider("google", "GoogleOidc",
             authority, "synthetic-client", "synthetic-secret", "/auth/callback/google");
         var familyId = Guid.NewGuid();
+        var branchId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         Guid adminId;
         Guid memberId;
         SqliteFamilyStore? registeredFamilyStore = null;
+        SqliteTreeReadSource? registeredTreeReadSource = null;
         X509Certificate2? registeredDataProtectionCertificate = null;
 
         try
@@ -64,14 +96,17 @@ internal static class PrivateApiLoopbackAssertions
             Expect<ArgumentException>(() =>
                     PrivateApiComposition.ResolvePrivateChildPath(directory, "/outside.sqlite"),
                 "absolute child paths cannot replace the configured storage directory");
-            var linkedDirectory = Path.Join(directory, "linked-directory");
-            Directory.CreateDirectory(linkedDirectory);
-            var directoryLink = Path.Join(directory, "storage-link");
-            Directory.CreateSymbolicLink(directoryLink, linkedDirectory);
-            Expect<InvalidOperationException>(() =>
-                    PrivateApiComposition.EnsureNoReparsePointAncestors(
-                        Path.Join(directoryLink, "familytree.sqlite")),
-                "private storage rejects symlinked path components");
+            if (OperatingSystem.IsLinux())
+            {
+                var linkedDirectory = Path.Join(directory, "linked-directory");
+                Directory.CreateDirectory(linkedDirectory);
+                var directoryLink = Path.Join(directory, "storage-link");
+                Directory.CreateSymbolicLink(directoryLink, linkedDirectory);
+                Expect<InvalidOperationException>(() =>
+                        PrivateApiComposition.EnsureNoReparsePointAncestors(
+                            Path.Join(directoryLink, "familytree.sqlite")),
+                    "private storage rejects symlinked path components");
+            }
 
             CreateSyntheticCertificate(certificatePath, certificatePassword);
             using (var registry = new SqlitePrincipalRegistry(databasePath, identityKey))
@@ -102,11 +137,15 @@ internal static class PrivateApiLoopbackAssertions
                 ["FAMILYTREE_OIDC_GOOGLE_CLIENT_SECRET"] = "synthetic-secret"
             });
             builder.WebHost.ConfigureKestrel(options =>
+            {
+                options.Listen(IPAddress.Loopback, 0);
                 options.Listen(IPAddress.Loopback, 0,
-                    listen => listen.UseHttps(certificatePath, certificatePassword)));
+                    listen => listen.UseHttps(certificatePath, certificatePassword));
+            });
             await using var app = ApiApplication.Build(builder);
             await app.StartAsync();
             registeredFamilyStore = app.Services.GetRequiredService<SqliteFamilyStore>();
+            registeredTreeReadSource = app.Services.GetRequiredService<SqliteTreeReadSource>();
             registeredDataProtectionCertificate =
                 app.Services.GetRequiredService<X509Certificate2>();
             Check(registeredDataProtectionCertificate.HasPrivateKey,
@@ -116,6 +155,8 @@ internal static class PrivateApiLoopbackAssertions
             Check(addresses is { Count: > 0 }, "private API binds loopback");
             var baseAddress = new Uri(addresses!.Single(
                 address => address.StartsWith("https://127.0.0.1:", StringComparison.Ordinal)));
+            var httpAddress = new Uri(addresses!.Single(
+                address => address.StartsWith("http://127.0.0.1:", StringComparison.Ordinal)));
             using var client = new HttpClient(new HttpClientHandler
             {
                 AllowAutoRedirect = false,
@@ -127,6 +168,21 @@ internal static class PrivateApiLoopbackAssertions
 
             var adminCookie = await CreateCookieAsync(app, provider, adminSubject);
             var memberCookie = await CreateCookieAsync(app, provider, memberSubject);
+            using (var httpClient = new HttpClient(new HttpClientHandler
+                   {
+                       AllowAutoRedirect = false,
+                       UseProxy = false,
+                       UseCookies = false
+                   }) { BaseAddress = httpAddress })
+            using (var httpRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/csrf"))
+            {
+                httpRequest.Headers.TryAddWithoutValidation("Cookie", adminCookie);
+                using var response = await httpClient.SendAsync(httpRequest);
+                Check(response.StatusCode == HttpStatusCode.NotImplemented &&
+                    response.Headers.CacheControl?.NoStore == true &&
+                    response.Content.Headers.ContentLength == 0,
+                    "private API is unavailable over HTTP even from loopback");
+            }
 
             using (var invalidHost = new HttpRequestMessage(HttpMethod.Get, "/api/v1/csrf"))
             {
@@ -207,6 +263,52 @@ internal static class PrivateApiLoopbackAssertions
             Check(app.Services.GetRequiredService<SqliteFamilyStore>()
                 .IsActiveMember(familyId, memberId), "approval activates membership");
 
+            var store = app.Services.GetRequiredService<SqliteFamilyStore>();
+            var person = new Person(Guid.NewGuid(), "Synthetic HTTP Read Person");
+            var proposalId = store.ProposePerson(familyId, memberId, person);
+            store.ReviewPerson(familyId, adminId, proposalId, approve: true);
+            var grants = new SqliteGraphGrantStore(databasePath);
+            grants.GrantPerson(familyId, branchId, adminId, memberId, person.Id);
+            grants.GrantDisplayName(familyId, branchId, adminId, memberId, person.Id);
+            var personPath = $"/api/v1/families/{familyId:D}/branches/{branchId:D}/people/{person.Id:D}";
+            using (var personResponse = await GetWithCookieAsync(client, personPath, memberCookie))
+            {
+                var json = await personResponse.Content.ReadFromJsonAsync<JsonElement>();
+                Check(personResponse.StatusCode == HttpStatusCode.OK &&
+                    json.GetProperty("displayName").GetString() == person.DisplayName &&
+                    personResponse.Headers.CacheControl?.NoStore == true,
+                    "verified member reads a person only after explicit persisted grants");
+            }
+            var searchPath = $"/api/v1/families/{familyId:D}/branches/{branchId:D}/search?q=Synthetic";
+            using (var searchResponse = await GetWithCookieAsync(client, searchPath, memberCookie))
+            {
+                var results = await searchResponse.Content.ReadFromJsonAsync<JsonElement>();
+                Check(searchResponse.StatusCode == HttpStatusCode.OK &&
+                    results.GetArrayLength() == 1 &&
+                    results[0].GetProperty("displayName").GetString() == person.DisplayName,
+                    "authorized person search returns only granted fields");
+            }
+            var treePath = $"/api/v1/families/{familyId:D}/branches/{branchId:D}/tree/{person.Id:D}";
+            using (var treeResponse = await GetWithCookieAsync(client, treePath, memberCookie))
+            {
+                var tree = await treeResponse.Content.ReadFromJsonAsync<JsonElement>();
+                Check(treeResponse.StatusCode == HttpStatusCode.OK &&
+                    tree.GetProperty("nodes").GetArrayLength() == 1 &&
+                    tree.GetProperty("edges").GetArrayLength() == 0,
+                    "authorized tree read contains only its transactionally granted center");
+            }
+            using (var forbidden = await GetWithCookieAsync(client,
+                       $"/api/v1/families/{familyId:D}/branches/{Guid.NewGuid():D}/people/{person.Id:D}",
+                       memberCookie))
+            using (var unknown = await GetWithCookieAsync(client,
+                       $"/api/v1/families/{familyId:D}/branches/{branchId:D}/people/{Guid.NewGuid():D}",
+                       memberCookie))
+                Check(forbidden.StatusCode == HttpStatusCode.NotFound &&
+                    unknown.StatusCode == forbidden.StatusCode &&
+                    await forbidden.Content.ReadAsStringAsync() ==
+                    await unknown.Content.ReadAsStringAsync(),
+                    "hidden and unknown person responses are empty and indistinguishable");
+
             var revokePath = $"/api/v1/families/{familyId:D}/members/{memberId:D}";
             using (var revoked = await SendWriteAsync(client, HttpMethod.Delete,
                        revokePath, adminCsrf, adminCookie))
@@ -214,6 +316,35 @@ internal static class PrivateApiLoopbackAssertions
                     "active administrator can revoke a member");
             Check(!app.Services.GetRequiredService<SqliteFamilyStore>()
                 .IsActiveMember(familyId, memberId), "revocation takes effect immediately");
+            using (var revokedRead = await GetWithCookieAsync(client, personPath, memberCookie))
+                Check(revokedRead.StatusCode == HttpStatusCode.NotFound &&
+                    revokedRead.Content.Headers.ContentLength == 0,
+                    "revoked member loses HTTP read access immediately");
+
+            grants.GrantPerson(familyId, branchId, adminId, adminId, person.Id);
+            grants.GrantDisplayName(familyId, branchId, adminId, adminId, person.Id);
+            using (var db = new SqliteConnection(new SqliteConnectionStringBuilder
+                       { DataSource = databasePath, Pooling = false }.ToString()))
+            {
+                db.Open();
+                using var command = db.CreateCommand();
+                command.CommandText = "UPDATE people SET encrypted_name = X'00' WHERE family_id=$family AND id=$person;";
+                command.Parameters.AddWithValue("$family", familyId.ToString("D"));
+                command.Parameters.AddWithValue("$person", person.Id.ToString("D"));
+                command.ExecuteNonQuery();
+            }
+            using (var failedRead = await GetWithCookieAsync(client,
+                       $"/api/v1/families/{familyId:D}/branches/{branchId:D}/people/{person.Id:D}",
+                       adminCookie))
+            using (var unknownRead = await GetWithCookieAsync(client,
+                       $"/api/v1/families/{familyId:D}/branches/{branchId:D}/people/{Guid.NewGuid():D}",
+                       adminCookie))
+                Check(failedRead.StatusCode == HttpStatusCode.NotFound &&
+                    failedRead.Content.Headers.ContentLength == 0 &&
+                    unknownRead.StatusCode == failedRead.StatusCode &&
+                    await unknownRead.Content.ReadAsStringAsync() ==
+                    await failedRead.Content.ReadAsStringAsync(),
+                    "read exceptions normalize to the same empty denial as unknown records");
 
             var denied = await SendWriteAsync(client, HttpMethod.Post,
                 $"/api/v1/families/{Guid.NewGuid():D}/invitations",
@@ -261,6 +392,10 @@ internal static class PrivateApiLoopbackAssertions
             Expect<ObjectDisposedException>(() =>
                     registeredFamilyStore.IsActiveMember(familyId, memberId),
                 "host disposal releases registered SQLite stores");
+            Expect<ObjectDisposedException>(() =>
+                    registeredTreeReadSource.LoadAsync(adminId, familyId, branchId,
+                        Guid.NewGuid(), default).GetAwaiter().GetResult(),
+                "host disposal releases the trusted read source");
             ExpectCertificateDisposed(registeredDataProtectionCertificate);
             Console.WriteLine("PASS loopback private API signed-cookie, CSRF and membership lifecycle");
         }
@@ -292,7 +427,6 @@ internal static class PrivateApiLoopbackAssertions
             .Select(value => value!.Split(';')[0]));
     }
 
-    [SupportedOSPlatform("linux")]
     private static void CreateSyntheticCertificate(string path, string password)
     {
         using var rsa = RSA.Create(3072);
@@ -318,7 +452,10 @@ internal static class PrivateApiLoopbackAssertions
             DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddDays(1));
         File.WriteAllBytes(path,
             certificate.Export(X509ContentType.Pfx, password));
-        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        if (OperatingSystem.IsLinux())
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        else if (OperatingSystem.IsWindows())
+            PrivateApiComposition.SetPrivateWindowsFilePermissions(path);
     }
 
     private static async Task<CsrfContext> GetCsrfAsync(HttpClient client, string sessionCookie)
@@ -344,6 +481,14 @@ internal static class PrivateApiLoopbackAssertions
         request.Headers.TryAddWithoutValidation("Origin",
             client.BaseAddress!.GetLeftPart(UriPartial.Authority));
         return await client.SendAsync(request);
+    }
+
+    private static Task<HttpResponseMessage> GetWithCookieAsync(HttpClient client,
+        string path, string sessionCookie)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.TryAddWithoutValidation("Cookie", sessionCookie);
+        return client.SendAsync(request);
     }
 
     private sealed record CsrfContext(string RequestToken, string Cookie)

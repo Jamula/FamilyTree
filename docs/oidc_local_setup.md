@@ -7,8 +7,8 @@ for public demo or CI. A successful login does **not** grant membership,
 genealogy access, an approved profile claim or a family grant. All private
 `/api/v1` routes return 501 in the default configuration. The separately
 documented opt-in [local private API mode](private_api_local_setup.md) only
-enables verified membership lifecycle routes; reads, bootstrap, and other
-unsupported routes stay fail-closed.
+enables verified membership lifecycle routes and grant-filtered private reads;
+bootstrap, relationship writes and other unsupported routes stay fail-closed.
 
 ## Local HTTPS prerequisite
 The session cookie is deliberately Secure, HttpOnly, SameSite=Lax, 8-hour

@@ -1,6 +1,9 @@
 using System.Runtime.Versioning;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.Principal;
+using FamilyTree.Domain;
 using FamilyTree.Persistence;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -32,13 +35,19 @@ internal static class PrivateApiComposition
         {
             builder.Services.AddSingleton<VerifiedFamilyMembership>(_ =>
                 throw new InvalidOperationException("The private API is disabled."));
+            builder.Services.AddSingleton<SqlitePersonReadService>(_ =>
+                throw new InvalidOperationException("The private API is disabled."));
+            builder.Services.AddSingleton<PrivateTreeReadService>(_ =>
+                throw new InvalidOperationException("The private API is disabled."));
             return false;
         }
 
         builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.None);
-        if (!builder.Environment.IsDevelopment() || !OperatingSystem.IsLinux())
+        if (!builder.Environment.IsDevelopment() ||
+            !(OperatingSystem.IsLinux() || OperatingSystem.IsWindows()))
             throw new InvalidOperationException(EnvironmentBlocker(
-                builder.Environment.IsDevelopment(), OperatingSystem.IsLinux()));
+                builder.Environment.IsDevelopment(), OperatingSystem.IsLinux(),
+                OperatingSystem.IsWindows()));
         if (providers.Count == 0)
             throw new InvalidOperationException(
                 "The private API requires an explicitly configured OIDC provider.");
@@ -61,6 +70,10 @@ internal static class PrivateApiComposition
 
         byte[]? encryptionKey = null;
         byte[]? identityKey = null;
+        SqliteFamilyStore? familyStore = null;
+        SqlitePrincipalRegistry? registry = null;
+        SqliteTreeReadSource? readSource = null;
+        var storesRegistered = false;
         try
         {
             encryptionKey = ReadKey(builder.Configuration["FAMILYTREE_PRIVATE_API_ENCRYPTION_KEY"]);
@@ -76,34 +89,54 @@ internal static class PrivateApiComposition
 
             var databasePath = ResolvePrivateChildPath(dataDirectory, "familytree.sqlite");
             EnsureNoReparsePointAncestors(databasePath);
-            var familyStore = new SqliteFamilyStore(databasePath, encryptionKey);
-            SqlitePrincipalRegistry? registry = null;
+            if (OperatingSystem.IsWindows())
+            {
+                if (!File.Exists(databasePath))
+                    using (new FileStream(databasePath, FileMode.CreateNew,
+                               FileAccess.ReadWrite, FileShare.None)) { }
+                SetPrivateWindowsFilePermissions(databasePath);
+            }
+            familyStore = new SqliteFamilyStore(databasePath, encryptionKey);
+            registry = new SqlitePrincipalRegistry(databasePath, identityKey);
+            readSource = new SqliteTreeReadSource(databasePath, encryptionKey);
+            if (OperatingSystem.IsLinux())
+                File.SetUnixFileMode(databasePath, PrivateFileMode);
+            else if (!OperatingSystem.IsWindows())
+                throw new InvalidOperationException("Unsupported private API storage platform.");
+            builder.Services.AddSingleton<SqliteFamilyStore>(_ => familyStore);
+            builder.Services.AddSingleton<SqlitePrincipalRegistry>(_ => registry);
+            builder.Services.AddSingleton<SqliteTreeReadSource>(_ => readSource);
+            builder.Services.AddSingleton<SqlitePersonReadService>();
+            builder.Services.AddSingleton<PrivateTreeReadService>(_ =>
+                new PrivateTreeReadService(readSource));
+            builder.Services.AddSingleton(new VerifiedFamilyMembership(
+                registry, familyStore, providers));
+
+            var dataProtectionCertificate = new X509Certificate2(certificate);
             try
             {
-                registry = new SqlitePrincipalRegistry(databasePath, identityKey);
-                File.SetUnixFileMode(databasePath, PrivateFileMode);
-                builder.Services.AddSingleton<SqliteFamilyStore>(_ => familyStore);
-                builder.Services.AddSingleton<SqlitePrincipalRegistry>(_ => registry);
-                builder.Services.AddSingleton(new VerifiedFamilyMembership(
-                    registry, familyStore, providers));
+                builder.Services.AddSingleton<X509Certificate2>(_ => dataProtectionCertificate);
+                builder.Services.AddDataProtection()
+                    .SetApplicationName("FamilyTree.Api.Private.Local")
+                    .PersistKeysToFileSystem(new DirectoryInfo(keyDirectory))
+                    .ProtectKeysWithCertificate(dataProtectionCertificate);
+                storesRegistered = true;
             }
             catch
             {
-                registry?.Dispose();
-                familyStore.Dispose();
+                dataProtectionCertificate.Dispose();
                 throw;
             }
-
-            var dataProtectionCertificate = new X509Certificate2(certificate);
-            builder.Services.AddSingleton<X509Certificate2>(_ => dataProtectionCertificate);
-            builder.Services.AddDataProtection()
-                .SetApplicationName("FamilyTree.Api.Private.Local")
-                .PersistKeysToFileSystem(new DirectoryInfo(keyDirectory))
-                .ProtectKeysWithCertificate(dataProtectionCertificate);
             return true;
         }
         finally
         {
+            if (!storesRegistered)
+            {
+                readSource?.Dispose();
+                registry?.Dispose();
+                familyStore?.Dispose();
+            }
             if (encryptionKey is not null)
                 CryptographicOperations.ZeroMemory(encryptionKey);
             if (identityKey is not null)
@@ -111,10 +144,11 @@ internal static class PrivateApiComposition
         }
     }
 
-    internal static string EnvironmentBlocker(bool isDevelopment, bool isLinux) =>
-        isDevelopment && isLinux
+    internal static string EnvironmentBlocker(bool isDevelopment, bool isLinux,
+        bool isWindows = false) =>
+        isDevelopment && (isLinux || isWindows)
             ? string.Empty
-            : "The private API currently requires local Linux Development; Windows and non-Development hosting are blocked.";
+            : "The private API requires local Development on Linux or Windows.";
 
     internal static string ResolvePrivateChildPath(string parent, string child)
     {
@@ -149,8 +183,18 @@ internal static class PrivateApiComposition
         throw new InvalidOperationException("Private API keys must contain 256 bits.");
     }
 
+    internal static void EnsurePrivateDirectory(string path)
+    {
+        if (OperatingSystem.IsLinux())
+            EnsurePrivateLinuxDirectory(path);
+        else if (OperatingSystem.IsWindows())
+            EnsurePrivateWindowsDirectory(path);
+        else
+            throw new InvalidOperationException("Unsupported private API storage platform.");
+    }
+
     [SupportedOSPlatform("linux")]
-    private static void EnsurePrivateDirectory(string path)
+    private static void EnsurePrivateLinuxDirectory(string path)
     {
         EnsureNoReparsePointAncestors(path);
         Directory.CreateDirectory(path, PrivateDirectoryMode);
@@ -162,6 +206,67 @@ internal static class PrivateApiComposition
                      UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
             throw new InvalidOperationException(
                 "Private API directories must be accessible only to the current user.");
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void EnsurePrivateWindowsDirectory(string path)
+    {
+        EnsureNoReparsePointAncestors(path);
+        var security = CreatePrivateWindowsDirectorySecurity();
+        var directory = new DirectoryInfo(path);
+        directory.Create(security);
+        directory.SetAccessControl(security);
+        EnsureNoReparsePointAncestors(path);
+        VerifyPrivateWindowsAccess(directory.GetAccessControl(
+            AccessControlSections.Access | AccessControlSections.Owner));
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static DirectorySecurity CreatePrivateWindowsDirectorySecurity()
+    {
+        var sid = WindowsIdentity.GetCurrent().User ??
+            throw new InvalidOperationException("The current Windows user SID is unavailable.");
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.SetOwner(sid);
+        security.AddAccessRule(new FileSystemAccessRule(sid,
+            FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None, AccessControlType.Allow));
+        return security;
+    }
+
+    [SupportedOSPlatform("windows")]
+    internal static void SetPrivateWindowsFilePermissions(string path)
+    {
+        var sid = WindowsIdentity.GetCurrent().User ??
+            throw new InvalidOperationException("The current Windows user SID is unavailable.");
+        var security = new FileSecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.SetOwner(sid);
+        security.AddAccessRule(new FileSystemAccessRule(sid,
+            FileSystemRights.FullControl, AccessControlType.Allow));
+        var file = new FileInfo(path);
+        file.SetAccessControl(security);
+        VerifyPrivateWindowsAccess(file.GetAccessControl(
+            AccessControlSections.Access | AccessControlSections.Owner));
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void VerifyPrivateWindowsAccess(FileSystemSecurity security)
+    {
+        var sid = WindowsIdentity.GetCurrent().User ??
+            throw new InvalidOperationException("The current Windows user SID is unavailable.");
+        var rules = security.GetAccessRules(includeExplicit: true,
+                includeInherited: true, targetType: typeof(SecurityIdentifier))
+            .Cast<FileSystemAccessRule>().ToArray();
+        if (!security.AreAccessRulesProtected ||
+            !sid.Equals(security.GetOwner(typeof(SecurityIdentifier))) ||
+            rules.Length == 0 ||
+            rules.Any(rule => !sid.Equals(rule.IdentityReference) ||
+                              rule.AccessControlType != AccessControlType.Allow))
+            throw new InvalidOperationException(
+                "Private API storage must grant access only to the current Windows user.");
     }
 
     internal static void EnsureNoReparsePointAncestors(string path)
@@ -176,18 +281,32 @@ internal static class PrivateApiComposition
                          StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Join(current, segment);
-            try
-            {
-                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                    throw new InvalidOperationException(
-                        "Private API storage cannot use symbolic links or reparse points.");
-            }
-            catch (FileNotFoundException) { }
-            catch (DirectoryNotFoundException) { }
+            if (TryGetAttributes(current, out var attributes) &&
+                (attributes & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException(
+                    "Private API storage cannot use symbolic links or reparse points.");
         }
     }
 
-    [SupportedOSPlatform("linux")]
+    private static bool TryGetAttributes(string path, out FileAttributes attributes)
+    {
+        try
+        {
+            attributes = File.GetAttributes(path);
+            return true;
+        }
+        catch (FileNotFoundException)
+        {
+            attributes = default;
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            attributes = default;
+            return false;
+        }
+    }
+
     private static string ReadCertificatePath(IConfiguration configuration,
         string dataDirectory)
     {
@@ -207,13 +326,20 @@ internal static class PrivateApiComposition
             (File.GetAttributes(fullPath) & FileAttributes.ReparsePoint) != 0)
             throw new InvalidOperationException(
                 "The Data Protection certificate must be a regular file in private storage.");
-        var mode = File.GetUnixFileMode(fullPath);
-        if ((mode & UnixFileMode.UserRead) == 0 ||
-            (mode & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite |
-                     UnixFileMode.GroupExecute | UnixFileMode.OtherRead |
-                     UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
-            throw new InvalidOperationException(
-                "The Data Protection certificate must be readable only by the current user.");
+        if (OperatingSystem.IsLinux())
+        {
+            var mode = File.GetUnixFileMode(fullPath);
+            if ((mode & UnixFileMode.UserRead) == 0 ||
+                (mode & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite |
+                         UnixFileMode.GroupExecute | UnixFileMode.OtherRead |
+                         UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
+                throw new InvalidOperationException(
+                    "The Data Protection certificate must be readable only by the current user.");
+        }
+        else if (OperatingSystem.IsWindows())
+            SetPrivateWindowsFilePermissions(fullPath);
+        else
+            throw new InvalidOperationException("Unsupported private API storage platform.");
         return fullPath;
     }
 }
@@ -221,6 +347,8 @@ internal static class PrivateApiComposition
 internal static class PrivateApiEndpoints
 {
     internal sealed record InvitationRequest(Guid IntendedPrincipalId);
+    private const string FamilyBranchPath =
+        "/api/v1/families/{familyId:guid}/branches/{branchId:guid}";
 
     internal static void MapPrivateApiEndpoints(this WebApplication app,
         IReadOnlyList<InteractiveOidc.Provider> providers)
@@ -234,6 +362,44 @@ internal static class PrivateApiEndpoints
             context.Response.Headers.CacheControl = "no-store";
             return Results.Ok(new { requestToken = tokens.RequestToken });
         }).WithMetadata(PrivateApiBoundary.EnabledPrivateEndpoint.Instance);
+
+        app.MapGet($"{FamilyBranchPath}/people/{{personId:guid}}",
+            async (Guid familyId, Guid branchId, Guid personId, HttpContext context,
+                VerifiedFamilyMembership membership, SqlitePersonReadService people) =>
+            {
+                var viewer = await GetRegisteredViewerAsync(context, providers, membership);
+                if (viewer is null)
+                    return Results.StatusCode(StatusCodes.Status404NotFound);
+                var person = await people.GetAsync(viewer.Value, familyId, branchId, personId,
+                    context.RequestAborted);
+                return person is null ? Results.StatusCode(StatusCodes.Status404NotFound) :
+                    Results.Ok(person);
+            }).WithMetadata(PrivateApiBoundary.EnabledPrivateEndpoint.Instance);
+
+        app.MapGet($"{FamilyBranchPath}/search",
+            async (Guid familyId, Guid branchId, HttpContext context,
+                VerifiedFamilyMembership membership, SqlitePersonReadService people) =>
+            {
+                var viewer = await GetRegisteredViewerAsync(context, providers, membership);
+                if (viewer is null)
+                    return Results.StatusCode(StatusCodes.Status404NotFound);
+                var results = await people.SearchAsync(viewer.Value, familyId, branchId,
+                    context.Request.Query["q"], context.RequestAborted);
+                return Results.Ok(results);
+            }).WithMetadata(PrivateApiBoundary.EnabledPrivateEndpoint.Instance);
+
+        app.MapGet($"{FamilyBranchPath}/tree/{{centerId:guid}}",
+            async (Guid familyId, Guid branchId, Guid centerId, HttpContext context,
+                VerifiedFamilyMembership membership, PrivateTreeReadService trees) =>
+            {
+                var viewer = await GetRegisteredViewerAsync(context, providers, membership);
+                if (viewer is null)
+                    return Results.StatusCode(StatusCodes.Status404NotFound);
+                var tree = await trees.GetAsync(viewer.Value, familyId, branchId, centerId,
+                    new TreeOptions(), context.RequestAborted);
+                return tree is null ? Results.StatusCode(StatusCodes.Status404NotFound) :
+                    Results.Ok(tree);
+            }).WithMetadata(PrivateApiBoundary.EnabledPrivateEndpoint.Instance);
 
         app.MapPost("/api/v1/me", async (HttpContext context,
             VerifiedFamilyMembership membership, IAntiforgery antiforgery) =>
@@ -306,6 +472,15 @@ internal static class PrivateApiEndpoints
         {
             return Results.StatusCode(StatusCodes.Status404NotFound);
         }
+    }
+
+    private static async Task<Guid?> GetRegisteredViewerAsync(HttpContext context,
+        IReadOnlyList<InteractiveOidc.Provider> providers,
+        VerifiedFamilyMembership membership)
+    {
+        if (!await VerifiedOidcSession.ReadAsync(context, providers))
+            return null;
+        return await membership.FindRegisteredPrincipalAsync(context);
     }
 
     private static bool HasSameOrigin(HttpContext context)
