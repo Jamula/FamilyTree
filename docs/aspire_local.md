@@ -10,13 +10,13 @@ The AppHost resolves the matching free Aspire CLI with DNX. If the CLI is alread
 
 AppHost coordinates:
 - API on localhost port 5181, `/health` and `/api/v1/capabilities`.
-- Web on localhost port 5182, public landing page.
+- Web on localhost port 5182, public landing page and `/health`.
 - Aspire local Dashboard for resource status, traces and metrics.
 
 Only **synthetic** requests are permitted; no production family data or secrets. Private genealogy API endpoints deliberately respond HTTP 501 until membership and branch privacy are fully implemented.
 
 ## Observability
-The API uses native `FamilyTelemetry` tracing and metrics plus an opt-in local OTLP exporter (tracked in #22). This AppHost opts in via `FAMILYTREE_OTLP_ENABLED=true` and uses Aspire's loopback OTLP service configuration. If the dashboard does not show telemetry, verify its localhost OTLP endpoint is present; never substitute a remote vendor endpoint without explicit approval.
+API and Web use native `FamilyTelemetry` tracing and metrics plus the opt-in OTLP exporter (tracked in #22). This AppHost opts both in via `FAMILYTREE_OTLP_ENABLED=true` and uses Aspire's loopback OTLP service configuration. If the dashboard does not show telemetry, verify its localhost OTLP endpoint is present; never substitute a remote vendor endpoint without explicit approval. Only bounded custom instruments are exported through this SDK configuration; framework request traces and application logs are not configured for OTLP export. Aspire can separately display process output, which is not guaranteed to be scrubbed; use synthetic data only.
 
 ## Containerless mode
 No Docker, Postgres, Redis, Azure, Cloudflare, managed storage, external AI or payment method is required for this AppHost. No self-hosted or production runtime needs Aspire.
@@ -33,8 +33,21 @@ Run those two commands in separate terminal sessions. OTLP stays off in ordinary
 dotnet restore FamilyTree.slnx
 dotnet build FamilyTree.slnx -c Release
 bash scripts/smoke-http.sh
+bash scripts/smoke-aspire.sh
 ```
-The CI build checks that the AppHost compiles. The HTTP smoke tests exercise the apps independently, not a full Aspire-dashboard end-to-end orchestration. A developer must verify dashboard traces and resource health locally before #23 is declared complete.
+The Aspire smoke starts the actual AppHost and checks both HTTP health responses. It does **not** inspect the dashboard, prove service discovery, cross-service correlation, OTLP delivery, or exercise all failure paths. A passing CI process smoke is not dashboard evidence.
+
+On Windows, from the repository root in PowerShell, start the AppHost with the single command above. Open the dashboard using the local link printed by Aspire (do not share its authentication token). Confirm both resources are healthy, then in a second PowerShell window make synthetic requests:
+
+```powershell
+Invoke-WebRequest http://127.0.0.1:5181/health
+Invoke-WebRequest http://127.0.0.1:5181/api/v1/capabilities
+Invoke-WebRequest http://127.0.0.1:5182/health
+```
+
+In the dashboard inspect both resources' traces and `familytree.http.requests` / `familytree.http.duration` metrics after allowing time for export. Check that tags contain only the documented bounded operation/result values, and no paths, query strings, headers, identities, names or payloads. Do not copy dashboard URLs, logs or raw telemetry into public evidence. Report only the tested configuration and pass/fail results. The Web resource has an Aspire reference to API but currently makes no API call, so these requests do not demonstrate cross-service discovery or correlation.
+
+Issue [#41](https://github.com/Jamula/FamilyTree/issues/41) remains open: end-to-end dashboard/export verification, unreachable-exporter behavior, privacy review and coverage targets require evidence; real authorized GEDCOM, identity, moderation and AI workflows must not be claimed before they exist. Managed telemetry remains subject to reviewed sampling, retention, quotas, TLS, scrubbers and explicit $0 owner approval.
 
 ## Zero-cost and privacy gates
 Use only localhost, with only synthetic people. Aspire does not authorize provisioning cloud services. Never `aspire publish` or deploy without a separately reviewed $0 plan and owner approval. No family data may be inserted into public logs, console output or telemetry.

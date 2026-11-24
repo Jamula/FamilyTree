@@ -13,6 +13,7 @@ builder.AddDotnetProject("web", "../FamilyTree.Web/FamilyTree.Web.csproj")
     .WithHttpEndpoint(port: 5182, name: "http")
     .WithExternalHttpEndpoints()
     .WithHttpHealthCheck("/health")
+    .WithEnvironment("FAMILYTREE_OTLP_ENABLED", "true")
     .WithReference(api)
     .WaitFor(api);
 

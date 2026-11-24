@@ -32,7 +32,7 @@ PID=$!
 ready=0
 for i in $(seq 1 80); do
   if curl --fail --silent --max-time 2 "http://127.0.0.1:5181/health" -o "$TMP/api.json" &&
-     curl --fail --silent --max-time 2 "http://127.0.0.1:5182/" -o /dev/null; then
+     curl --fail --silent --max-time 2 "http://127.0.0.1:5182/health" -o "$TMP/web.json"; then
     if ! kill -0 "$PID" 2>/dev/null; then
       echo "FAIL: AppHost exited even though localhost listeners responded"
       exit 1
@@ -42,19 +42,16 @@ for i in $(seq 1 80); do
   fi
   if ! kill -0 "$PID" 2>/dev/null; then
     echo "FAIL: Aspire AppHost exited before services were ready"
-    awk 'BEGIN{n=0} /[Uu]nhandled exception|[Ff]ailed to start|[Ff]atal error/{n=22} n>0{print; n--}' "$TMP/aspire.log" |
-      sed -E 's/(token|password|secret)=([^[:space:]]+)/\1=[redacted]/g;s/[A-Za-z0-9_+=/-]{64,}/[redacted]/g' |
-      tail -n 35 || true
     exit 1
   fi
   sleep 2
 done
 if [[ "$ready" != 1 ]]; then
   echo "FAIL: Aspire API and Web did not start within the local limit"
-  awk 'BEGIN{n=0} /[Uu]nhandled exception|[Ff]ailed to start|[Ff]atal error/{n=22} n>0{print; n--}' "$TMP/aspire.log" |
-      sed -E 's/(token|password|secret)=([^[:space:]]+)/\1=[redacted]/g;s/[A-Za-z0-9_+=/-]{64,}/[redacted]/g' |
-      tail -n 35 || true
   exit 1
 fi
 grep -q '"status":"ok"' "$TMP/api.json" || { echo "FAIL: AppHost API health endpoint"; exit 1; }
-echo "PASS: Aspire AppHost started API and Web on localhost, with synthetic-only health request"
+grep -q '"service":"FamilyTree.Api"' "$TMP/api.json" || { echo "FAIL: unexpected API health response"; exit 1; }
+grep -q '"status":"ok"' "$TMP/web.json" || { echo "FAIL: AppHost Web health endpoint"; exit 1; }
+grep -q '"service":"FamilyTree.Web"' "$TMP/web.json" || { echo "FAIL: unexpected Web health response"; exit 1; }
+echo "PASS: Aspire AppHost started API and Web; both HTTP health endpoints responded"
