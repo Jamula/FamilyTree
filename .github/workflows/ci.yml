@@ -55,7 +55,7 @@ jobs:
         run: bash scripts/smoke-aspire.sh
       - name: Local fictional MCP protocol handshake
         run: python3 scripts/smoke-mcp.py
-      - name: Measure and enforce M1 line coverage floor
+      - name: Enforce existing M1 90% line coverage floor
         run: python3 scripts/report-coverage.py coverage.cobertura.xml --min-overall 90 --min-domain 90
       - name: Enforce 90% line coverage per measured architectural component
         if: always() && hashFiles('coverage.cobertura.xml') != ''
@@ -68,5 +68,24 @@ jobs:
           --min-component Mcp=90
           --min-component ServiceDefaults=90
           --min-component SyntheticDemo=90
+      - name: Report staged M1 95% line and 90% branch targets
+        if: always() && hashFiles('coverage.cobertura.xml') != ''
+        continue-on-error: true
+        run: >-
+          python3 scripts/report-coverage.py coverage.cobertura.xml
+          --min-overall 95 --min-overall-branch 90 --min-domain 90
+      - name: Report staged 95% line and 90% branch targets per component
+        if: always() && hashFiles('coverage.cobertura.xml') != ''
+        continue-on-error: true
+        run: >-
+          python3 scripts/report-component-coverage.py coverage.cobertura.xml
+          --min-overall-line 95 --min-overall-branch 90
+          --min-component Domain=95 --min-component-branch Domain=90
+          --min-component Persistence=95 --min-component-branch Persistence=90
+          --min-component Api=95 --min-component-branch Api=90
+          --min-component Web=95 --min-component-branch Web=90
+          --min-component Mcp=95 --min-component-branch Mcp=90
+          --min-component ServiceDefaults=95 --min-component-branch ServiceDefaults=90
+          --min-component SyntheticDemo=95 --min-component-branch SyntheticDemo=90
 # No paid Code Quality upload or persisted artifacts: $0 cost guardrail.
 # Keep any future action SHA-pinned, approved, and behind explicit spending approval.

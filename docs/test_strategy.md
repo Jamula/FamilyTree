@@ -4,27 +4,45 @@
 
 CI instruments the real .NET 11 test process using Cobertura. The **overall**
 coverage is the instrumenter's root percentage and may include test code.
-The separately calculated **per-component** source-line coverage excludes
-test and generated files. The architectural gate requires at least
-**90% measured line coverage for each** of:
+The separately calculated **per-component** source-line and branch coverage
+excludes test and generated files. The M1 architectural target requires at
+least **95% measured line and 90% measured branch coverage for each** of:
 `FamilyTree.Domain`, `FamilyTree.Persistence`, `FamilyTree.Api`, `FamilyTree.Web`,
 `FamilyTree.Mcp`, `FamilyTree.ServiceDefaults`, and
 `FamilyTree.SyntheticDemo`. Missing or unmeasured components fail this
-gate rather than counting as covered. The overall line-coverage floor
-remains 90%.
+gate rather than counting as covered. A component with no branches requires
+an explicit allowlist justification; it is never counted as 100%. The
+overall M1 target is also 95% lines and 90% branches.
 
-The current baseline before enabling the six-area gate measured Domain
-95.2%, Api 95.9%, Web 95.1%, Mcp 97.7% (from its tested feature branch),
-ServiceDefaults 95.1%, and SyntheticDemo 100.0%.
-Every new PR and `main` push must rerun the coverage check. **These are
-measured test observations, not a claim that all user features work.**
+The latest local baseline from the real .NET 11 test process (the same
+`dotnet-coverage` Cobertura collector used by CI) is:
 
-Branch coverage is reported separately: the latest combined main build
-reported 81.1% overall branch coverage. The instrumenter does not provide
-reliable per-component branch conditions; the component reporter labels
-these **Not measured**, rather than inventing estimates. We should continue
-raising branch coverage with adversarial input, cancellation, concurrency,
-authentication and error tests.
+| Scope | Lines | Branches | Conditions |
+|---|---:|---:|---:|
+| Overall instrumented report | 98.3% | 77.0% | 3,820 |
+| Domain | 96.2% | 77.0% | 1,609 |
+| Persistence | 97.6% | 83.8% | 308 |
+| Api | 96.9% | 93.7% | 158 |
+| Web | 96.8% | 88.6% | 273 |
+| Mcp | 97.7% | 100.0% | 58 |
+| ServiceDefaults | 95.1% | 100.0% | 68 |
+| SyntheticDemo | 100.0% | 100.0% | 20 |
+
+This baseline is evidence for the remaining exception-path work; it does not
+claim that the 95/90 target currently passes. The collector emits real
+per-line Cobertura condition counts, including `True`/`False` branch flags.
+The blocking transition gate remains 90% lines while the target steps report
+95% lines and 90% branches without masking their failures. Every new PR and
+`main` push must rerun the coverage check. **These are measured test
+observations, not a claim that all user features work.**
+
+The compact exception-path matrix should prioritize validation, authentication
+failure, privacy denial, malformed input, corruption, concurrency/rollback,
+cancellation, recovery, telemetry and dependency failures. It must assert
+outcomes, reuse synthetic fixtures, and report scenario count and runtime.
+The current added matrix reports 7 scenarios; the full executable assertion
+suite measured 10.32 seconds locally. Final target acceptance requires the
+staged target steps to pass, followed by making them blocking.
 
 ## Existing executable test categories
 

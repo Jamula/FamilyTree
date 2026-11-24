@@ -46,6 +46,11 @@ if __name__ == "__main__":
     assert "FamilyTree.Web: lines=NOT MEASURED" in output, output
     assert "branches=50.0% (2 conditions)" in output, output
     check(SAMPLE, 0, "--min-component", "Api=90")
+    check(SAMPLE, 0, "--min-component-branch", "Domain=50")
+    check(SAMPLE, 1, "--min-component-branch", "Domain=90")
+    check(SAMPLE, 0, "--min-overall-line", "50")
+    check(SAMPLE, 0, "--min-overall-branch", "40")
+    check(SAMPLE, 1, "--min-overall-branch", "60")
     components = ("Domain", "Persistence", "Api", "Web", "Mcp", "ServiceDefaults", "SyntheticDemo")
     all_covered = '<coverage line-rate="1" branch-rate="1"><packages>' + "".join(
         f'<package name="FamilyTree.{component}"><classes>'
@@ -82,6 +87,10 @@ if __name__ == "__main__":
         '<line number="2" hits="0" branch="true" condition-coverage="unknown"/>'), 2)
     check(SAMPLE.replace('<line number="2" hits="0"/>',
         '<line number="2" hits="0" branch="true"/>'), 2)
+    check(SAMPLE.replace('branch="true"', 'branch="TRUE"'), 0)
+    check(SAMPLE.replace('branch="true"', 'branch="unknown"'), 2)
+    check(SAMPLE.replace('condition-coverage="50% (1/2)"', 'condition-coverage="missing"'), 2)
+    check(SAMPLE, 1, "--min-component-branch", "Web=90")
     # Independent C# lambda/classes can share a file and source line while
     # contributing distinct conditional branches. Never overstate branch %.
     same_line = SAMPLE.replace('<class filename="src/FamilyTree.Domain/A.cs">',

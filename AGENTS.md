@@ -16,3 +16,9 @@
 
 ## MCP integration
 - Local demo MCP is **stdio-only**, synthetic-only and cannot approve or persist genealogical edits. Never let an agent silently bypass human review. Remote ChatGPT/Copilot integrations need distinct issue tracking, scoped authentication and deployment security review.
+
+## Measured quality gates
+- Coverage is collected from the executable `FamilyTree.Tests` process with the free local `dotnet-coverage` Cobertura collector.
+- CI must fail closed on missing, malformed, partial, or unmeasured coverage. M1 targets are at least 95% measured source lines and 90% measured source branches overall and for every executable component.
+- Component reports exclude tests and generated files. Never fabricate counts, use blanket exclusions, or treat branchless components as covered without an explicit justification.
+- Keep synthetic exception-path tests compact and outcome-asserting; record baseline/final measurements, scenario count, and runtime in the linked issue.
