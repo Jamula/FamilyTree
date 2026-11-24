@@ -45,6 +45,8 @@ ScaffoldingReadMe.txt
 CodeCoverage/
 *.cobertura.xml
 coverage/
+__pycache__/
+src/FamilyTree.AppHost/aspire.config.json
 
 # MSBuild Binary and Structured Log
 *.binlog
