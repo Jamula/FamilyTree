@@ -23,7 +23,7 @@ startInfo.ArgumentList.Add("--no-launch-profile");
 startInfo.ArgumentList.Add("--urls");
 startInfo.ArgumentList.Add(apiAddress.ToString());
 startInfo.ArgumentList.Add("--contentRoot");
-startInfo.ArgumentList.Add(apiDirectory);
+startInfo.ArgumentList.Add(isolatedHome.FullName);
 foreach (var key in startInfo.Environment.Keys.Where(IsInheritedConfiguration).ToArray())
     startInfo.Environment.Remove(key);
 startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
