@@ -6,6 +6,11 @@ environment on Linux and every private request must arrive from a loopback
 address with a `localhost` or loopback host. Use a localhost listener; never
 bind this mode to a public interface or proxy it remotely.
 
+Windows opt-in is an explicit, tested blocker: startup rejects the mode until
+a secure Windows ACL implementation and Windows-specific acceptance tests are
+available. Do not work around the platform check or run this mode with private
+data on Windows.
+
 ## Local configuration
 
 Use the OIDC setup in [oidc_local_setup.md](oidc_local_setup.md), a dedicated

@@ -1,6 +1,8 @@
 using FamilyTree.Domain;
+using FamilyTree.Persistence;
 using FamilyTree.ServiceDefaults;
 using System.Diagnostics;
+using System.Security.Cryptography.X509Certificates;
 
 namespace FamilyTree.Api;
 
@@ -17,6 +19,14 @@ public static class ApiApplication
         var identityProviders = InteractiveOidc.Configure(builder);
         var privateApiEnabled = PrivateApiComposition.Configure(builder, identityProviders);
         var app = builder.Build();
+        if (privateApiEnabled)
+        {
+            // Resolve registered disposable instances so the host owns their
+            // lifetime even when no private request reaches the endpoint layer.
+            _ = app.Services.GetRequiredService<SqliteFamilyStore>();
+            _ = app.Services.GetRequiredService<SqlitePrincipalRegistry>();
+            _ = app.Services.GetRequiredService<X509Certificate2>();
+        }
         
         // Local, privacy-filtered diagnostics only. No exporter is configured.
         app.Use(async (context, next) =>

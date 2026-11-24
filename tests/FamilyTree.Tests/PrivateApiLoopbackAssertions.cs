@@ -21,6 +21,15 @@ using Microsoft.Extensions.Hosting;
 
 internal static class PrivateApiLoopbackAssertions
 {
+    internal static void AssertWindowsOptInBlocked()
+    {
+        Check(PrivateApiComposition.EnvironmentBlocker(
+                isDevelopment: true, isLinux: false).Contains("Windows",
+                StringComparison.Ordinal),
+            "Windows opt-in remains blocked until secure ACL support is available");
+        Console.WriteLine("PASS Windows private API opt-in blocker");
+    }
+
     [SupportedOSPlatform("linux")]
     internal static async Task RunAsync()
     {
@@ -30,12 +39,12 @@ internal static class PrivateApiLoopbackAssertions
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         File.SetUnixFileMode(directory,
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        var databasePath = Path.Combine(directory, "familytree.sqlite");
+        var databasePath = Path.Join(directory, "familytree.sqlite");
         var encryptionKey = RandomNumberGenerator.GetBytes(32);
         var identityKey = RandomNumberGenerator.GetBytes(32);
         var certificatePassword = Convert.ToBase64String(
             RandomNumberGenerator.GetBytes(32));
-        var certificatePath = Path.Combine(directory, "data-protection.pfx");
+        var certificatePath = Path.Join(directory, "data-protection.pfx");
         const string authority = "https://accounts.google.com";
         const string adminSubject = "synthetic-private-api-admin";
         const string memberSubject = "synthetic-private-api-member";
@@ -44,9 +53,26 @@ internal static class PrivateApiLoopbackAssertions
         var familyId = Guid.NewGuid();
         Guid adminId;
         Guid memberId;
+        SqliteFamilyStore? registeredFamilyStore = null;
+        X509Certificate2? registeredDataProtectionCertificate = null;
 
         try
         {
+            Expect<ArgumentException>(() =>
+                    PrivateApiComposition.ResolvePrivateChildPath(directory, "../outside.sqlite"),
+                "private database paths cannot escape the configured directory");
+            Expect<ArgumentException>(() =>
+                    PrivateApiComposition.ResolvePrivateChildPath(directory, "/outside.sqlite"),
+                "absolute child paths cannot replace the configured storage directory");
+            var linkedDirectory = Path.Join(directory, "linked-directory");
+            Directory.CreateDirectory(linkedDirectory);
+            var directoryLink = Path.Join(directory, "storage-link");
+            Directory.CreateSymbolicLink(directoryLink, linkedDirectory);
+            Expect<InvalidOperationException>(() =>
+                    PrivateApiComposition.EnsureNoReparsePointAncestors(
+                        Path.Join(directoryLink, "familytree.sqlite")),
+                "private storage rejects symlinked path components");
+
             CreateSyntheticCertificate(certificatePath, certificatePassword);
             using (var registry = new SqlitePrincipalRegistry(databasePath, identityKey))
             using (var familyStore = new SqliteFamilyStore(databasePath, encryptionKey))
@@ -80,6 +106,11 @@ internal static class PrivateApiLoopbackAssertions
                     listen => listen.UseHttps(certificatePath, certificatePassword)));
             await using var app = ApiApplication.Build(builder);
             await app.StartAsync();
+            registeredFamilyStore = app.Services.GetRequiredService<SqliteFamilyStore>();
+            registeredDataProtectionCertificate =
+                app.Services.GetRequiredService<X509Certificate2>();
+            Check(registeredDataProtectionCertificate.HasPrivateKey,
+                "host owns the configured Data Protection certificate");
             var addresses = app.Services.GetRequiredService<IServer>()
                 .Features.Get<IServerAddressesFeature>()?.Addresses;
             Check(addresses is { Count: > 0 }, "private API binds loopback");
@@ -207,6 +238,11 @@ internal static class PrivateApiLoopbackAssertions
                     "private reads remain closed until the reviewed grant contract is integrated");
 
             await app.StopAsync();
+            await app.DisposeAsync();
+            Expect<ObjectDisposedException>(() =>
+                    registeredFamilyStore.IsActiveMember(familyId, memberId),
+                "host disposal releases registered SQLite stores");
+            ExpectCertificateDisposed(registeredDataProtectionCertificate);
             Console.WriteLine("PASS loopback private API signed-cookie, CSRF and membership lifecycle");
         }
         finally
@@ -215,6 +251,7 @@ internal static class PrivateApiLoopbackAssertions
             CryptographicOperations.ZeroMemory(identityKey);
             Directory.Delete(directory, recursive: true);
         }
+
     }
 
     private static async Task<string> CreateCookieAsync(WebApplication app,
@@ -298,5 +335,26 @@ internal static class PrivateApiLoopbackAssertions
     private static void Check(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private static void Expect<TException>(Action action, string message)
+        where TException : Exception
+    {
+        try { action(); }
+        catch (TException) { return; }
+        throw new InvalidOperationException(message);
+    }
+
+    private static void ExpectCertificateDisposed(X509Certificate2 certificate)
+    {
+        try
+        {
+            using var privateKey = certificate.GetRSAPrivateKey();
+            if (privateKey is null) return;
+        }
+        catch (CryptographicException) { return; }
+        catch (ObjectDisposedException) { return; }
+        throw new InvalidOperationException(
+            "Host disposal must release its Data Protection certificate.");
     }
 }

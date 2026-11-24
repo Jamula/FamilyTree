@@ -37,8 +37,8 @@ internal static class PrivateApiComposition
 
         builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.None);
         if (!builder.Environment.IsDevelopment() || !OperatingSystem.IsLinux())
-            throw new InvalidOperationException(
-                "The private API is supported only in local Linux development.");
+            throw new InvalidOperationException(EnvironmentBlocker(
+                builder.Environment.IsDevelopment(), OperatingSystem.IsLinux()));
         if (providers.Count == 0)
             throw new InvalidOperationException(
                 "The private API requires an explicitly configured OIDC provider.");
@@ -50,7 +50,7 @@ internal static class PrivateApiComposition
                 "An absolute private API data directory is required.");
         var dataDirectory = Path.GetFullPath(configuredDirectory);
         EnsurePrivateDirectory(dataDirectory);
-        var keyDirectory = Path.Combine(dataDirectory, "data-protection");
+        var keyDirectory = ResolvePrivateChildPath(dataDirectory, "data-protection");
         EnsurePrivateDirectory(keyDirectory);
         var certificatePath = ReadCertificatePath(builder.Configuration, dataDirectory);
         var certificatePassword = builder.Configuration[
@@ -61,12 +61,11 @@ internal static class PrivateApiComposition
 
         byte[]? encryptionKey = null;
         byte[]? identityKey = null;
-        X509Certificate2? certificate = null;
         try
         {
             encryptionKey = ReadKey(builder.Configuration["FAMILYTREE_PRIVATE_API_ENCRYPTION_KEY"]);
             identityKey = ReadKey(builder.Configuration["FAMILYTREE_PRIVATE_API_IDENTITY_KEY"]);
-            certificate = X509CertificateLoader.LoadPkcs12FromFile(certificatePath,
+            using var certificate = X509CertificateLoader.LoadPkcs12FromFile(certificatePath,
                 certificatePassword, X509KeyStorageFlags.EphemeralKeySet);
             using (var privateKey = certificate.GetRSAPrivateKey())
                 if (privateKey is null || privateKey.KeySize < 2048 ||
@@ -75,15 +74,16 @@ internal static class PrivateApiComposition
                     throw new InvalidOperationException(
                         "A current RSA Data Protection certificate is required.");
 
-            var databasePath = Path.Combine(dataDirectory, "familytree.sqlite");
+            var databasePath = ResolvePrivateChildPath(dataDirectory, "familytree.sqlite");
+            EnsureNoReparsePointAncestors(databasePath);
             var familyStore = new SqliteFamilyStore(databasePath, encryptionKey);
             SqlitePrincipalRegistry? registry = null;
             try
             {
                 registry = new SqlitePrincipalRegistry(databasePath, identityKey);
                 File.SetUnixFileMode(databasePath, PrivateFileMode);
-                builder.Services.AddSingleton(familyStore);
-                builder.Services.AddSingleton(registry);
+                builder.Services.AddSingleton<SqliteFamilyStore>(_ => familyStore);
+                builder.Services.AddSingleton<SqlitePrincipalRegistry>(_ => registry);
                 builder.Services.AddSingleton(new VerifiedFamilyMembership(
                     registry, familyStore, providers));
             }
@@ -94,12 +94,12 @@ internal static class PrivateApiComposition
                 throw;
             }
 
-            builder.Services.AddSingleton(certificate);
+            var dataProtectionCertificate = new X509Certificate2(certificate);
+            builder.Services.AddSingleton<X509Certificate2>(_ => dataProtectionCertificate);
             builder.Services.AddDataProtection()
                 .SetApplicationName("FamilyTree.Api.Private.Local")
                 .PersistKeysToFileSystem(new DirectoryInfo(keyDirectory))
-                .ProtectKeysWithCertificate(certificate);
-            certificate = null;
+                .ProtectKeysWithCertificate(dataProtectionCertificate);
             return true;
         }
         finally
@@ -108,8 +108,29 @@ internal static class PrivateApiComposition
                 CryptographicOperations.ZeroMemory(encryptionKey);
             if (identityKey is not null)
                 CryptographicOperations.ZeroMemory(identityKey);
-            certificate?.Dispose();
         }
+    }
+
+    internal static string EnvironmentBlocker(bool isDevelopment, bool isLinux) =>
+        isDevelopment && isLinux
+            ? string.Empty
+            : "The private API currently requires local Linux Development; Windows and non-Development hosting are blocked.";
+
+    internal static string ResolvePrivateChildPath(string parent, string child)
+    {
+        if (string.IsNullOrWhiteSpace(parent) || !Path.IsPathFullyQualified(parent) ||
+            string.IsNullOrWhiteSpace(child) || Path.IsPathFullyQualified(child))
+            throw new ArgumentException("A private child path is required.");
+
+        var normalizedParent = Path.GetFullPath(parent);
+        var fullPath = Path.GetFullPath(Path.Join(normalizedParent, child));
+        var relativePath = Path.GetRelativePath(normalizedParent, fullPath);
+        if (relativePath == "." || relativePath == ".." ||
+            relativePath.StartsWith(".." + Path.DirectorySeparatorChar,
+                StringComparison.Ordinal) ||
+            Path.IsPathFullyQualified(relativePath))
+            throw new ArgumentException("The private path must remain below its configured directory.");
+        return fullPath;
     }
 
     private static byte[] ReadKey(string? encoded)
@@ -131,10 +152,9 @@ internal static class PrivateApiComposition
     [SupportedOSPlatform("linux")]
     private static void EnsurePrivateDirectory(string path)
     {
+        EnsureNoReparsePointAncestors(path);
         Directory.CreateDirectory(path, PrivateDirectoryMode);
-        var info = new DirectoryInfo(path);
-        if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
-            throw new InvalidOperationException("Private API storage cannot be a symbolic link.");
+        EnsureNoReparsePointAncestors(path);
         var mode = File.GetUnixFileMode(path);
         if ((mode & PrivateDirectoryMode) != PrivateDirectoryMode ||
             (mode & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite |
@@ -142,6 +162,29 @@ internal static class PrivateApiComposition
                      UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
             throw new InvalidOperationException(
                 "Private API directories must be accessible only to the current user.");
+    }
+
+    internal static void EnsureNoReparsePointAncestors(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+            throw new ArgumentException("An absolute storage path is required.", nameof(path));
+
+        var fullPath = Path.GetFullPath(path);
+        var current = Path.GetPathRoot(fullPath)!;
+        foreach (var segment in fullPath[current.Length..]
+                     .Split(Path.DirectorySeparatorChar,
+                         StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Join(current, segment);
+            try
+            {
+                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidOperationException(
+                        "Private API storage cannot use symbolic links or reparse points.");
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+        }
     }
 
     [SupportedOSPlatform("linux")]
@@ -154,21 +197,24 @@ internal static class PrivateApiComposition
             !Path.IsPathFullyQualified(configuredPath))
             throw new InvalidOperationException(
                 "An absolute Data Protection certificate path is required.");
-        var path = Path.GetFullPath(configuredPath);
-        var prefix = dataDirectory.EndsWith(Path.DirectorySeparatorChar)
-            ? dataDirectory : dataDirectory + Path.DirectorySeparatorChar;
-        if (!path.StartsWith(prefix, StringComparison.Ordinal) || !File.Exists(path) ||
-            (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+        var fullPath = Path.GetFullPath(configuredPath);
+        var relativePath = Path.GetRelativePath(dataDirectory, fullPath);
+        EnsureNoReparsePointAncestors(fullPath);
+        if (relativePath == "." || relativePath == ".." ||
+            relativePath.StartsWith(".." + Path.DirectorySeparatorChar,
+                StringComparison.Ordinal) ||
+            Path.IsPathFullyQualified(relativePath) || !File.Exists(fullPath) ||
+            (File.GetAttributes(fullPath) & FileAttributes.ReparsePoint) != 0)
             throw new InvalidOperationException(
                 "The Data Protection certificate must be a regular file in private storage.");
-        var mode = File.GetUnixFileMode(path);
+        var mode = File.GetUnixFileMode(fullPath);
         if ((mode & UnixFileMode.UserRead) == 0 ||
             (mode & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite |
                      UnixFileMode.GroupExecute | UnixFileMode.OtherRead |
                      UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
             throw new InvalidOperationException(
                 "The Data Protection certificate must be readable only by the current user.");
-        return path;
+        return fullPath;
     }
 }
 
