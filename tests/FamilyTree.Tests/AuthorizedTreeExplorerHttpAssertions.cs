@@ -32,7 +32,7 @@ internal static class AuthorizedTreeExplorerHttpAssertions
 
     internal static async Task RunAsync()
     {
-        var path = Path.Combine(Path.GetTempPath(), "familytree-ui-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Join(Path.GetTempPath(), "familytree-ui-" + Guid.NewGuid().ToString("N"));
         var viewer = Guid.NewGuid();
         var family = Guid.NewGuid();
         var branch = Guid.NewGuid();
