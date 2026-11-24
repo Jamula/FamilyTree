@@ -13,9 +13,23 @@ For #10, an active-membership check is not a graph grant or a durable
 authorization lease: every private operation must enforce current membership
 and applicable persisted graph grants together with the data access, so that
 revocation cannot race a previously cached check. Trusted administrator
-provisioning, actual provider callbacks, profile claims, the remaining
-membership transitions, and production key/deployment review are still
-required before issue #9 can be accepted.
+provisioning, actual provider callbacks, profile-claim API integration, the
+remaining membership transitions, and production key/deployment review are
+still required before issue #9 can be accepted.
+
+The local profile-claim persistence slice is implemented without a private
+route. It stores claims in the existing family SQLite database, checks active
+membership and explicit branch/person visibility within each claim transaction,
+and records proposal/review/withdrawal events in the existing audit table. The
+`ProfileClaimService` binds the actor through the verified-cookie membership
+bridge; it accepts no principal ID from callers.
+
+This slice remains unaccepted as an integrated feature. It requires the
+`person_visibility` schema/grant contract from #100 to be installed in the same
+database, and authenticated application composition from #107 before any route
+can consume it. No route is enabled here. API integration, full process-level
+authorization tests, deployment/key lifecycle review, and independent security
+review remain outstanding; do not close #9/#90 based on this persistence slice.
 
 ## Membership lifecycle and permitted transitions
 

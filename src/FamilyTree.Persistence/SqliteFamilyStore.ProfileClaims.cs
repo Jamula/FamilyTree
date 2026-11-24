@@ -38,7 +38,8 @@ public sealed partial class SqliteFamilyStore
                 """, ("$id", claim.Id.ToString("D")), ("$f", familyId.ToString("D")),
                 ("$person", personId.ToString("D")), ("$principal", principalId.ToString("D")));
         }
-        catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
+        catch (SqliteException ex) when (
+            ex.SqliteExtendedErrorCode is 1555 or 2067)
         {
             throw new InvalidOperationException("An active profile claim already exists.", ex);
         }
