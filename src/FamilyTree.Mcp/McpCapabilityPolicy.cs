@@ -65,15 +65,16 @@ public static class McpCapabilityPolicy
 
 public static class McpToolErrors
 {
-    public static string Redact(Exception? exception) =>
-        "The request could not be completed.";
+    public static string Redact() => "The request could not be completed.";
 
     public static string Invoke(Func<string> operation)
     {
+        ArgumentNullException.ThrowIfNull(operation);
         try { return operation(); }
-        catch (Exception exception)
-        {
-            return JsonSerializer.Serialize(new { error = Redact(exception) });
-        }
+        catch (ArgumentException) { return ErrorResponse(); }
+        catch (InvalidOperationException) { return ErrorResponse(); }
     }
+
+    private static string ErrorResponse() =>
+        JsonSerializer.Serialize(new { error = Redact() });
 }

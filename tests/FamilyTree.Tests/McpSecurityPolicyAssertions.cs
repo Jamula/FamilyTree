@@ -39,12 +39,22 @@ internal static class McpSecurityPolicyAssertions
               McpCapabilityPolicy.Negotiate(new McpCapabilityOffer(
                   "bad\nagent", allCapabilities, allCapabilities)).Granted.Count == 0,
             "invalid capability offers fail closed");
-        Check(McpToolErrors.Redact(new InvalidOperationException(
-                  "cross-family identifier and private details")) ==
-              "The request could not be completed." &&
-              !McpToolErrors.Redact(new Exception("secret")).Contains("secret",
-                  StringComparison.Ordinal),
-            "tool errors are replaced with a non-sensitive generic message");
+        Check(McpToolErrors.Invoke(() =>
+                  throw new ArgumentException("cross-family identifier")) ==
+              "{\"error\":\"The request could not be completed.\"}" &&
+              McpToolErrors.Invoke(() =>
+                  throw new InvalidOperationException("private details")) ==
+              "{\"error\":\"The request could not be completed.\"}" &&
+              !McpToolErrors.Redact().Contains("secret", StringComparison.Ordinal),
+            "expected tool errors are replaced with a non-sensitive generic message");
+        Expect<ApplicationException>(() =>
+                _ = McpToolErrors.Invoke(() =>
+                    throw new ApplicationException("unexpected failure")),
+            "unexpected failures are not swallowed by the input error boundary");
+        Expect<OperationCanceledException>(() =>
+                _ = McpToolErrors.Invoke(() =>
+                    throw new OperationCanceledException("cancelled")),
+            "cancellation is not swallowed by the input error boundary");
 
         var drafts = new ScopedDemoDraftStore();
         var firstScope = drafts.CreateScope();
