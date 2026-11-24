@@ -39,3 +39,4 @@ await ApiLoopbackIntegrationAssertions.RunAsync();
 await VerifiedCookieHandlerAssertions.RunAsync();
 
 await SqliteRelationshipConcurrencyAssertions.RunAsync();
+await VerifiedFamilyMembershipAssertions.RunAsync();

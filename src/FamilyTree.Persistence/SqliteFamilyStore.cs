@@ -152,6 +152,21 @@ public sealed partial class SqliteFamilyStore : IDisposable
         transaction.Commit();
     }
 
+    /// <summary>
+    /// Checks current membership, not identity or graph permissions. A caller
+    /// must repeat authorization inside each operation that accesses private data.
+    /// </summary>
+    public bool IsActiveMember(Guid familyId, Guid principalId)
+    {
+        RequireIds(familyId, principalId);
+        using var con = Open();
+        using var tx = con.BeginTransaction();
+        return Scalar<long>(con, tx, """
+            SELECT COUNT(*) FROM memberships
+            WHERE family_id=$f AND principal_id=$p AND state='Active';
+            """, ("$f", familyId.ToString("D")), ("$p", principalId.ToString("D"))) == 1;
+    }
+
     public Guid IssueInvitation(Guid familyId, Guid administratorId,
         Guid intendedPrincipalId, DateTimeOffset expiry, DateTimeOffset now)
     {
