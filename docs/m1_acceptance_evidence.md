@@ -20,10 +20,11 @@ dotnet run --project tests/FamilyTree.AcceptanceHarness/FamilyTree.AcceptanceHar
 ```
 
 On Linux or macOS, run the same `dotnet` commands from the repository root.
-The harness clears inherited OIDC provider environment variables for its child
-API process, binds only to loopback on a temporary port, and terminates the
-child process when done. It does not create valid authenticated sessions or
-write family data.
+The harness clears inherited OIDC provider and OTEL environment variables,
+forces OTLP off for its child API process, binds only to loopback on a temporary
+port, and terminates the child process when done. CI runs the same harness with
+inherited OTLP enabled and an invalid exporter endpoint to catch isolation
+regressions. It does not create valid authenticated sessions or write family data.
 
 Expected output includes `PASS` for local API process startup, health and
 capabilities, default-disabled OIDC, anonymous/forged-session denials, and
@@ -35,6 +36,7 @@ uniform empty 501 responses for reserved private paths. It also prints
 | Acceptance area | Status | Evidence / limitation |
 | --- | --- | --- |
 | Actual API process and HTTP startup | Verified locally and in CI | `tests/FamilyTree.AcceptanceHarness/Program.cs`; PR #103 run 45330602101 passed the process-level acceptance step. |
+| Child-process telemetry isolation | Verified locally; updated CI pending | The real API baseline passes with inherited `FAMILYTREE_OTLP_ENABLED=true`, remote approval, and an invalid OTLP endpoint; the CI harness step injects these settings without changing #115's coverage gates. |
 | Anonymous and malformed/forged session denial | Verified baseline | `/auth/session` returns 401 without a cookie and for invalid cookie values. |
 | Valid expired or revoked session-cookie denial | **Unaccepted** | A real trusted session and revocation path are not available; invalid cookie text is not an expired/revoked-session test. |
 | Private GET/search/tree/export and write behavior | Verified fail-closed baseline only | Reserved paths and POST return uniform empty 501 responses; no handler is claimed to work. |
@@ -47,8 +49,8 @@ uniform empty 501 responses for reserved private paths. It also prints
 ## CI evidence snapshot
 
 As of 2026-11-24, the latest observed `main` build/test workflow completed
-successfully on commit [`bd8e67e`](https://github.com/Jamula/FamilyTree/commit/bd8e67e1271a311282563297c255d98348685267)
-([workflow run 45330317828](https://github.com/Jamula/FamilyTree/actions/runs/45330317828)).
+successfully after #100 on commit [`407b319`](https://github.com/Jamula/FamilyTree/commit/407b319a205dab9273f26db4a56b0218014c1629)
+([workflow run 45488006511](https://github.com/Jamula/FamilyTree/actions/runs/45488006511)).
 This integration branch's build/test workflow also passed on commit
 [`46a69bf`](https://github.com/Jamula/FamilyTree/commit/46a69bfdabb86c55e38727772d0efb7f91b106ce)
 ([PR #103 run 45330602101](https://github.com/Jamula/FamilyTree/actions/runs/45330602101)),

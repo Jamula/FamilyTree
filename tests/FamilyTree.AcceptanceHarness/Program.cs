@@ -23,6 +23,11 @@ startInfo.ArgumentList.Add(apiAddress.ToString());
 startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
 startInfo.Environment["DOTNET_ENVIRONMENT"] = "Production";
 startInfo.Environment["Logging__LogLevel__Default"] = "Warning";
+startInfo.Environment["FAMILYTREE_OTLP_ENABLED"] = "false";
+startInfo.Environment.Remove("FAMILYTREE_REMOTE_OTLP_APPROVED");
+foreach (var key in startInfo.Environment.Keys
+             .Where(key => key.StartsWith("OTEL_", StringComparison.OrdinalIgnoreCase)).ToArray())
+    startInfo.Environment.Remove(key);
 startInfo.Environment["HOME"] = isolatedHome.FullName;
 startInfo.Environment["USERPROFILE"] = isolatedHome.FullName;
 startInfo.Environment["APPDATA"] = Path.Combine(isolatedHome.FullName, "AppData", "Roaming");

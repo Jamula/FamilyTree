@@ -40,6 +40,11 @@ jobs:
       - name: Build
         run: dotnet build FamilyTree.slnx --no-restore --configuration Release
       - name: Process-level private API acceptance baseline
+        env:
+          FAMILYTREE_OTLP_ENABLED: 'true'
+          FAMILYTREE_REMOTE_OTLP_APPROVED: 'true'
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'not-a-valid-otlp-endpoint'
+          OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf'
         run: dotnet run --project tests/FamilyTree.AcceptanceHarness/FamilyTree.AcceptanceHarness.csproj --configuration Release
       - name: Restore local tools
         run: dotnet tool restore
