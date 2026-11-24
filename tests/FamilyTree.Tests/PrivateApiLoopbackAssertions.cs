@@ -96,6 +96,15 @@ internal static class PrivateApiLoopbackAssertions
             Expect<ArgumentException>(() =>
                     PrivateApiComposition.ResolvePrivateChildPath(directory, "/outside.sqlite"),
                 "absolute child paths cannot replace the configured storage directory");
+            Expect<ArgumentException>(() =>
+                    PrivateApiComposition.ResolvePrivateChildPath("relative", "child"),
+                "private database paths require an absolute parent");
+            Expect<ArgumentException>(() =>
+                    PrivateApiComposition.ResolvePrivateChildPath(directory, " "),
+                "private database paths require a child name");
+            Expect<ArgumentException>(() =>
+                    PrivateApiComposition.EnsureNoReparsePointAncestors("relative-storage"),
+                "private storage paths require an absolute path");
             if (OperatingSystem.IsLinux())
             {
                 var linkedDirectory = Path.Join(directory, "linked-directory");
@@ -107,8 +116,13 @@ internal static class PrivateApiLoopbackAssertions
                             Path.Join(directoryLink, "familytree.sqlite")),
                     "private storage rejects symlinked path components");
             }
+            PrivateApiComposition.EnsureNoReparsePointAncestors(
+                Path.Join(directory, "missing-parent", "familytree.sqlite"));
+            Check(true, "missing storage ancestors are handled without an empty catch");
 
             CreateSyntheticCertificate(certificatePath, certificatePassword);
+            AssertConfigurationFailures(directory, certificatePath, certificatePassword,
+                encryptionKey, identityKey, provider);
             using (var registry = new SqlitePrincipalRegistry(databasePath, identityKey))
             using (var familyStore = new SqliteFamilyStore(databasePath, encryptionKey))
             {
@@ -247,6 +261,19 @@ internal static class PrivateApiLoopbackAssertions
                     "cross-origin cookie-authenticated writes are denied");
             }
 
+            using (var pathOrigin = new HttpRequestMessage(HttpMethod.Post, "/api/v1/me"))
+            {
+                pathOrigin.Headers.TryAddWithoutValidation("Cookie",
+                    adminCsrf.CookieHeader(adminCookie));
+                pathOrigin.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", adminCsrf.RequestToken);
+                pathOrigin.Headers.TryAddWithoutValidation("Origin",
+                    baseAddress.GetLeftPart(UriPartial.Authority) + "/nested");
+                using var response = await client.SendAsync(pathOrigin);
+                Check(response.StatusCode == HttpStatusCode.NotFound &&
+                    response.Content.Headers.ContentLength == 0,
+                    "same-origin requests with a non-root origin path are denied");
+            }
+
             var acceptPath = $"{invitationPath}/{invitationId:D}/accept";
             using (var accepted = await SendWriteAsync(client, HttpMethod.Post,
                        acceptPath, memberCsrf, memberCookie))
@@ -288,6 +315,15 @@ internal static class PrivateApiLoopbackAssertions
                     results[0].GetProperty("displayName").GetString() == person.DisplayName,
                     "authorized person search returns only granted fields");
             }
+            using (var emptySearch = await GetWithCookieAsync(client,
+                       $"/api/v1/families/{familyId:D}/branches/{branchId:D}/search?q=absent",
+                       memberCookie))
+            {
+                var results = await emptySearch.Content.ReadFromJsonAsync<JsonElement>();
+                Check(emptySearch.StatusCode == HttpStatusCode.OK &&
+                    results.GetArrayLength() == 0,
+                    "authorized search returns an empty result without disclosing hidden people");
+            }
             var treePath = $"/api/v1/families/{familyId:D}/branches/{branchId:D}/tree/{person.Id:D}";
             using (var treeResponse = await GetWithCookieAsync(client, treePath, memberCookie))
             {
@@ -297,6 +333,18 @@ internal static class PrivateApiLoopbackAssertions
                     tree.GetProperty("edges").GetArrayLength() == 0,
                     "authorized tree read contains only its transactionally granted center");
             }
+            using (var forgedRead = await GetWithCookieAsync(client, personPath,
+                       "__Host-FamilyTreeSession=forged"))
+                Check(forgedRead.StatusCode == HttpStatusCode.NotFound &&
+                    forgedRead.Content.Headers.ContentLength == 0,
+                    "forged OIDC cookies cannot access private reads");
+            var unregisteredCookie = await CreateCookieAsync(app, provider,
+                "synthetic-unregistered-read-principal");
+            using (var unregisteredRead = await GetWithCookieAsync(client, personPath,
+                       unregisteredCookie))
+                Check(unregisteredRead.StatusCode == HttpStatusCode.NotFound &&
+                    unregisteredRead.Content.Headers.ContentLength == 0,
+                    "valid OIDC sessions without a registered principal cannot read records");
             using (var forbidden = await GetWithCookieAsync(client,
                        $"/api/v1/families/{familyId:D}/branches/{Guid.NewGuid():D}/people/{person.Id:D}",
                        memberCookie))
@@ -456,6 +504,228 @@ internal static class PrivateApiLoopbackAssertions
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         else if (OperatingSystem.IsWindows())
             PrivateApiComposition.SetPrivateWindowsFilePermissions(path);
+    }
+
+    private static void AssertConfigurationFailures(string directory,
+        string certificatePath, string certificatePassword, byte[] encryptionKey,
+        byte[] identityKey, InteractiveOidc.Provider provider)
+    {
+        var valid = new Dictionary<string, string?>
+        {
+            ["FAMILYTREE_PRIVATE_API_ENABLED"] = "true",
+            ["FAMILYTREE_PRIVATE_API_DATA_DIRECTORY"] = directory,
+            ["FAMILYTREE_PRIVATE_API_ENCRYPTION_KEY"] =
+                Convert.ToBase64String(encryptionKey),
+            ["FAMILYTREE_PRIVATE_API_IDENTITY_KEY"] = Convert.ToBase64String(identityKey),
+            ["FAMILYTREE_PRIVATE_API_DATA_PROTECTION_CERTIFICATE"] = certificatePath,
+            ["FAMILYTREE_PRIVATE_API_DATA_PROTECTION_CERTIFICATE_PASSWORD"] =
+                certificatePassword
+        };
+        ExpectConfigurationFailure(valid, [provider], "Production",
+            "private API refuses non-Development hosting");
+        ExpectConfigurationFailure(valid, [], Environments.Development,
+            "private API requires an OIDC provider");
+        ExpectConfigurationFailure(Remove(valid,
+                "FAMILYTREE_PRIVATE_API_DATA_DIRECTORY"), [provider],
+            Environments.Development, "private API requires an absolute storage directory");
+        ExpectConfigurationFailure(Replace(valid,
+                "FAMILYTREE_PRIVATE_API_DATA_DIRECTORY", "relative-storage"),
+            [provider], Environments.Development,
+            "private API rejects relative storage directories");
+        ExpectConfigurationFailure(Remove(valid,
+                "FAMILYTREE_PRIVATE_API_DATA_PROTECTION_CERTIFICATE"),
+            [provider], Environments.Development,
+            "private API requires an absolute certificate path");
+        ExpectConfigurationFailure(Remove(valid,
+                "FAMILYTREE_PRIVATE_API_DATA_PROTECTION_CERTIFICATE_PASSWORD"),
+            [provider], Environments.Development,
+            "private API requires a certificate password");
+        ExpectConfigurationFailure(Replace(valid,
+                "FAMILYTREE_PRIVATE_API_ENCRYPTION_KEY", "not-base64"),
+            [provider], Environments.Development,
+            "private API rejects malformed encryption keys");
+        ExpectConfigurationFailure(Remove(valid,
+                "FAMILYTREE_PRIVATE_API_ENCRYPTION_KEY"),
+            [provider], Environments.Development,
+            "private API rejects missing encryption keys");
+        ExpectConfigurationFailure(Replace(valid,
+                "FAMILYTREE_PRIVATE_API_ENCRYPTION_KEY",
+                Convert.ToBase64String(new byte[31])),
+            [provider], Environments.Development,
+            "private API rejects short encryption keys");
+        ExpectConfigurationFailure(Replace(valid,
+                "FAMILYTREE_PRIVATE_API_IDENTITY_KEY", "not-base64"),
+            [provider], Environments.Development,
+            "private API rejects malformed identity keys");
+        ExpectConfigurationFailure(Remove(valid,
+                "FAMILYTREE_PRIVATE_API_IDENTITY_KEY"),
+            [provider], Environments.Development,
+            "private API rejects missing identity keys");
+        ExpectConfigurationFailure(Replace(valid,
+                "FAMILYTREE_PRIVATE_API_DATA_PROTECTION_CERTIFICATE",
+                Path.GetFullPath(Path.Join(directory, "..", "outside.pfx"))),
+            [provider], Environments.Development,
+            "private API rejects certificates outside private storage");
+        ExpectConfigurationFailure(Replace(valid,
+                "FAMILYTREE_PRIVATE_API_DATA_PROTECTION_CERTIFICATE",
+                Path.Join(directory, "missing.pfx")),
+            [provider], Environments.Development,
+            "private API rejects missing certificate files");
+        var expiredCertificate = CreateInvalidCertificate(directory,
+            certificatePassword, keySize: 2048, expired: true);
+        ExpectConfigurationFailure(Replace(valid,
+                "FAMILYTREE_PRIVATE_API_DATA_PROTECTION_CERTIFICATE",
+                expiredCertificate),
+            [provider], Environments.Development,
+            "private API rejects expired Data Protection certificates");
+        var weakCertificate = CreateInvalidCertificate(directory,
+            certificatePassword, keySize: 1024, expired: false);
+        ExpectConfigurationFailure(Replace(valid,
+                "FAMILYTREE_PRIVATE_API_DATA_PROTECTION_CERTIFICATE",
+                weakCertificate),
+            [provider], Environments.Development,
+            "private API rejects weak Data Protection certificates");
+        var publicOnlyCertificate = CreatePublicOnlyCertificate(directory,
+            certificatePassword);
+        ExpectConfigurationFailure(Replace(valid,
+                "FAMILYTREE_PRIVATE_API_DATA_PROTECTION_CERTIFICATE",
+                publicOnlyCertificate),
+            [provider], Environments.Development,
+            "private API rejects certificates without a private key");
+        Expect<CryptographicException>(() =>
+                ConfigureForFailure(Replace(valid,
+                    "FAMILYTREE_PRIVATE_API_DATA_PROTECTION_CERTIFICATE_PASSWORD",
+                    "wrong-password"), [provider]),
+            "private API rejects incorrect certificate passwords");
+
+        var disabled = WebApplication.CreateBuilder(new WebApplicationOptions
+            { EnvironmentName = Environments.Development });
+        disabled.Configuration.Sources.Clear();
+        Check(!PrivateApiComposition.Configure(disabled, []),
+            "private API remains disabled by default");
+        using (var services = disabled.Services.BuildServiceProvider())
+        {
+            Expect<InvalidOperationException>(() =>
+                    services.GetRequiredService<VerifiedFamilyMembership>(),
+                "disabled membership service fails closed");
+            Expect<InvalidOperationException>(() =>
+                    services.GetRequiredService<SqlitePersonReadService>(),
+                "disabled person read service fails closed");
+            Expect<InvalidOperationException>(() =>
+                    services.GetRequiredService<PrivateTreeReadService>(),
+                "disabled tree read service fails closed");
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            var permissiveDirectory = Path.Join(directory, "permissive");
+            Directory.CreateDirectory(permissiveDirectory,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                UnixFileMode.UserExecute);
+            File.SetUnixFileMode(permissiveDirectory,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                UnixFileMode.UserExecute | UnixFileMode.GroupRead);
+            try
+            {
+                Expect<InvalidOperationException>(() =>
+                        PrivateApiComposition.EnsurePrivateDirectory(permissiveDirectory),
+                    "private API rejects group-readable storage");
+            }
+            finally
+            {
+                File.SetUnixFileMode(permissiveDirectory,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                    UnixFileMode.UserExecute);
+                Directory.Delete(permissiveDirectory);
+            }
+            var originalCertificateMode = File.GetUnixFileMode(certificatePath);
+            File.SetUnixFileMode(certificatePath,
+                UnixFileMode.UserRead | UnixFileMode.GroupRead);
+            try
+            {
+                ExpectConfigurationFailure(valid, [provider], Environments.Development,
+                    "private API rejects group-readable certificates");
+            }
+            finally
+            {
+                File.SetUnixFileMode(certificatePath, originalCertificateMode);
+            }
+        }
+    }
+
+    private static Dictionary<string, string?> Remove(
+        IReadOnlyDictionary<string, string?> values, string key)
+    {
+        var result = new Dictionary<string, string?>(values);
+        result.Remove(key);
+        return result;
+    }
+
+    private static Dictionary<string, string?> Replace(
+        IReadOnlyDictionary<string, string?> values, string key, string value)
+    {
+        var result = new Dictionary<string, string?>(values) { [key] = value };
+        return result;
+    }
+
+    private static void ExpectConfigurationFailure(
+        IReadOnlyDictionary<string, string?> values,
+        IReadOnlyList<InteractiveOidc.Provider> providers,
+        string environment, string message)
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+            { EnvironmentName = environment });
+        builder.Configuration.Sources.Clear();
+        builder.Configuration.AddInMemoryCollection(values);
+        Expect<InvalidOperationException>(() =>
+                PrivateApiComposition.Configure(builder, providers), message);
+    }
+
+    private static void ConfigureForFailure(
+        IReadOnlyDictionary<string, string?> values,
+        IReadOnlyList<InteractiveOidc.Provider> providers)
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+            { EnvironmentName = Environments.Development });
+        builder.Configuration.Sources.Clear();
+        builder.Configuration.AddInMemoryCollection(values);
+        PrivateApiComposition.Configure(builder, providers);
+    }
+
+    private static string CreateInvalidCertificate(string directory, string password,
+        int keySize, bool expired)
+    {
+        using var rsa = RSA.Create(keySize);
+        var request = new CertificateRequest("CN=FamilyTree synthetic invalid test",
+            rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(
+            expired ? DateTimeOffset.UtcNow.AddDays(-2) : DateTimeOffset.UtcNow.AddMinutes(-1),
+            expired ? DateTimeOffset.UtcNow.AddDays(-1) : DateTimeOffset.UtcNow.AddDays(1));
+        var path = Path.Join(directory, $"invalid-{keySize}-{expired}.pfx");
+        File.WriteAllBytes(path, certificate.Export(X509ContentType.Pfx, password));
+        if (OperatingSystem.IsLinux())
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        else if (OperatingSystem.IsWindows())
+            PrivateApiComposition.SetPrivateWindowsFilePermissions(path);
+        return path;
+    }
+
+    private static string CreatePublicOnlyCertificate(string directory, string password)
+    {
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=FamilyTree synthetic public-only test",
+            rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddDays(1));
+        using var publicOnly = X509CertificateLoader.LoadCertificate(
+            certificate.Export(X509ContentType.Cert));
+        var path = Path.Join(directory, "public-only.pfx");
+        File.WriteAllBytes(path, publicOnly.Export(X509ContentType.Pfx, password));
+        if (OperatingSystem.IsLinux())
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        else if (OperatingSystem.IsWindows())
+            PrivateApiComposition.SetPrivateWindowsFilePermissions(path);
+        return path;
     }
 
     private static async Task<CsrfContext> GetCsrfAsync(HttpClient client, string sessionCookie)

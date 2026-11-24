@@ -99,9 +99,12 @@ internal static class PrivateApiComposition
             familyStore = new SqliteFamilyStore(databasePath, encryptionKey);
             registry = new SqlitePrincipalRegistry(databasePath, identityKey);
             readSource = new SqliteTreeReadSource(databasePath, encryptionKey);
-            if (OperatingSystem.IsLinux())
+            var isLinux = OperatingSystem.IsLinux();
+            var isWindows = OperatingSystem.IsWindows();
+            if (isLinux)
                 File.SetUnixFileMode(databasePath, PrivateFileMode);
-            else if (!OperatingSystem.IsWindows())
+            if (isWindows) SetPrivateWindowsFilePermissions(databasePath);
+            if (!isLinux && !isWindows)
                 throw new InvalidOperationException("Unsupported private API storage platform.");
             builder.Services.AddSingleton<SqliteFamilyStore>(_ => familyStore);
             builder.Services.AddSingleton<SqlitePrincipalRegistry>(_ => registry);
@@ -185,11 +188,11 @@ internal static class PrivateApiComposition
 
     internal static void EnsurePrivateDirectory(string path)
     {
-        if (OperatingSystem.IsLinux())
-            EnsurePrivateLinuxDirectory(path);
-        else if (OperatingSystem.IsWindows())
-            EnsurePrivateWindowsDirectory(path);
-        else
+        var isLinux = OperatingSystem.IsLinux();
+        var isWindows = OperatingSystem.IsWindows();
+        if (isLinux) EnsurePrivateLinuxDirectory(path);
+        if (isWindows) EnsurePrivateWindowsDirectory(path);
+        if (!isLinux && !isWindows)
             throw new InvalidOperationException("Unsupported private API storage platform.");
     }
 
@@ -336,10 +339,7 @@ internal static class PrivateApiComposition
                 throw new InvalidOperationException(
                     "The Data Protection certificate must be readable only by the current user.");
         }
-        else if (OperatingSystem.IsWindows())
-            SetPrivateWindowsFilePermissions(fullPath);
-        else
-            throw new InvalidOperationException("Unsupported private API storage platform.");
+        if (OperatingSystem.IsWindows()) SetPrivateWindowsFilePermissions(fullPath);
         return fullPath;
     }
 }
