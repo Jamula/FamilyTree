@@ -60,6 +60,8 @@ public static class GedcomLegacyCompatibility
                       (record[2].Split(' ', 2)[0] is "HEAD" or "TRLR"))))
                     return Reject("Repeated GEDCOM boundary record");
                 inHeader = false;
+                if (record.Length > 1 && record[1] is ("INDI" or "FAM"))
+                    return Reject("Missing genealogy record pointer");
                 currentRecordKind = record.Length == 3 ? record[2] : "";
                 if (record.Length == 3 && record[1].StartsWith('@'))
                 {
