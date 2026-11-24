@@ -36,6 +36,8 @@ await AuthorizedTreeExplorerHttpAssertions.RunAsync();
 
 // Keep HTTP integration off module initializers to avoid CLR startup locks.
 await ApiLoopbackIntegrationAssertions.RunAsync();
+if (OperatingSystem.IsLinux())
+    await PrivateApiLoopbackAssertions.RunAsync();
 
 await VerifiedCookieHandlerAssertions.RunAsync();
 await SqliteInvitationRaceAssertions.RunAsync();

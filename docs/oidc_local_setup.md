@@ -5,7 +5,10 @@ middleware, with both Google and Microsoft **disabled by default**. No
 identity provider is configured in source and no live account is required
 for public demo or CI. A successful login does **not** grant membership,
 genealogy access, an approved profile claim or a family grant. All private
-`/api/v1` endpoints remain 501 until #9/#10 integration is reviewed.
+`/api/v1` routes return 501 in the default configuration. The separately
+documented opt-in [local private API mode](private_api_local_setup.md) only
+enables verified membership lifecycle routes; reads, bootstrap, and other
+unsupported routes stay fail-closed.
 
 ## Local HTTPS prerequisite
 The session cookie is deliberately Secure, HttpOnly, SameSite=Lax, 8-hour

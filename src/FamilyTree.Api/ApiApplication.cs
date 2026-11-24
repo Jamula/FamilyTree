@@ -15,6 +15,7 @@ public static class ApiApplication
         ArgumentNullException.ThrowIfNull(builder);
         builder.Services.AddFamilyTreeObservability(builder.Configuration);
         var identityProviders = InteractiveOidc.Configure(builder);
+        var privateApiEnabled = PrivateApiComposition.Configure(builder, identityProviders);
         var app = builder.Build();
         
         // Local, privacy-filtered diagnostics only. No exporter is configured.
@@ -38,11 +39,12 @@ public static class ApiApplication
         });
         
         
-        // This global route gate must remain active until authenticated server policies are reviewed.
-        app.UsePrivateApiBoundary();
+        // Only explicitly marked routes may pass in opt-in loopback development.
+        app.UsePrivateApiBoundary(privateApiEnabled);
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapInteractiveOidc(identityProviders);
+        app.MapPrivateApiEndpoints(identityProviders);
         
         app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "FamilyTree.Api" }))
            .WithName("Health");
