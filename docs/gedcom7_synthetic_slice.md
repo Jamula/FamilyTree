@@ -56,13 +56,19 @@ sidecars, external round-trips and privacy regression tests remain open. Do not
 deploy a private GEDCOM endpoint or treat this slice as a backup.
 
 The in-flight private API composition in #107 does not expose GEDCOM routes.
-The read authorization work in #100 currently lacks relationship and
-date/source grants; the merged relationship review work in #94 does not
-provide a transactional GEDCOM import. After the remaining contracts are
-merged and reviewed, integration must bind the active authenticated principal
-and current grants to a field- and link-filtered export projection, and
-atomically apply the exact reconciled import only after independent authorized
-approval. Tests must
+The merged read foundation in #100 checks persisted membership, branch,
+person and display-name grants, but currently returns an isolated person
+without relationship or date/source grants. The relationship review work in
+#94 does not provide a transactional GEDCOM import. Neither foundation can
+yet construct a complete authorized GEDCOM projection or apply an approved
+reconciliation atomically.
+
+After the remaining contracts are merged and reviewed, integration must bind
+the verified principal from #107 to a single current, persisted authorization
+snapshot; build the export projection only from permitted records, links and
+fields; and atomically apply the exact reconciled import only after independent
+authorized approval. Caller-supplied grants and the synthetic projection
+wrapper are not authorization. Tests must
 prove pending, rejected, self-approved, revoked and cross-family imports
 produce no writes, and that hidden people, links, dates, sources and media
 never leave the export boundary. Current loopback tests verify prospective
