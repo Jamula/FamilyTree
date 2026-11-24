@@ -42,4 +42,5 @@ await VerifiedCookieHandlerAssertions.RunAsync();
 await SqliteRelationshipConcurrencyAssertions.RunAsync();
 await SqliteSchemaMigrationConcurrencyAssertions.RunAsync();
 await SqliteInvitationRaceAssertions.RunAsync();
+await SqliteScopedPersonRaceAssertions.RunAsync();
 await VerifiedFamilyMembershipAssertions.RunAsync();
