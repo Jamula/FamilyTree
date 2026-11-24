@@ -83,9 +83,9 @@ The focused suite uses fictional data and verifies WAL backup, memberships,
 approved records, identity registry, grants, revocations and audit state after
 a separate-process reopen. It also checks wrong keys, tampering, truncated and
 authenticated-corrupt snapshots, existing-target rollback, symlink rejection,
-cleanup and non-sensitive failure output. The .NET coverage check enforces a
-90% line-coverage floor for the recovery implementation. No shared CI workflow,
-version, dependency, or paid service is changed.
+cleanup and non-sensitive failure output. The .NET coverage check enforces 90%
+line and branch-coverage floors for the recovery implementation. No shared CI
+workflow, version, dependency, or paid service is changed.
 
 The existing `FamilyTree.Tests` executable invokes this recovery suite as a
 child process, so the normal CI coverage run includes the recovery implementation

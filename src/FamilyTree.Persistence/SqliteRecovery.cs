@@ -35,7 +35,7 @@ public static class SqliteRecovery
             var encrypted = Encrypt(database, backupKey);
             try
             {
-                WriteAtomically(targetPath, encrypted, overwrite: true);
+                WriteAtomically(targetPath, encrypted);
             }
             finally
             {
@@ -114,22 +114,22 @@ public static class SqliteRecovery
     {
         using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA journal_mode=DELETE;";
-        if (!IsDeleteJournalMode(command.ExecuteScalar() as string))
-            throw new InvalidDataException("SQLite snapshot journal mode is invalid.");
+        EnsureDeleteJournalMode(command.ExecuteScalar() as string);
     }
 
     internal static bool IsDeleteJournalMode(string? journalMode) =>
         string.Equals(journalMode, "delete", StringComparison.OrdinalIgnoreCase);
 
+    internal static void EnsureDeleteJournalMode(string? journalMode)
+    {
+        if (!IsDeleteJournalMode(journalMode))
+            throw new InvalidDataException("SQLite snapshot journal mode is invalid.");
+    }
+
     private static byte[] Serialize(SqliteConnection connection)
     {
         var pointer = SQLitePCL.raw.sqlite3_serialize(connection.Handle, "main", out var length, 0);
-        if (!IsSerializedBufferValid(pointer, length))
-        {
-            if (pointer != IntPtr.Zero)
-                SQLitePCL.raw.sqlite3_free(pointer);
-            throw new InvalidDataException("SQLite snapshot could not be serialized.");
-        }
+        EnsureSerializedBufferValid(pointer, length);
 
         try
         {
@@ -146,10 +146,18 @@ public static class SqliteRecovery
     internal static bool IsSerializedBufferValid(IntPtr pointer, long length) =>
         pointer != IntPtr.Zero && length > 0 && length <= MaximumSnapshotLength;
 
+    internal static void EnsureSerializedBufferValid(IntPtr pointer, long length)
+    {
+        if (IsSerializedBufferValid(pointer, length))
+            return;
+        if (pointer != IntPtr.Zero)
+            SQLitePCL.raw.sqlite3_free(pointer);
+        throw new InvalidDataException("SQLite snapshot could not be serialized.");
+    }
+
     private static byte[] Encrypt(byte[] database, byte[] key)
     {
-        if (!IsSnapshotSizeValid(database.Length))
-            throw new InvalidDataException("SQLite snapshot size is invalid.");
+        EnsureSnapshotSizeValid(database.Length);
 
         var envelope = new byte[checked(HeaderLength + database.Length)];
         Magic.CopyTo(envelope, 0);
@@ -164,6 +172,12 @@ public static class SqliteRecovery
 
     internal static bool IsSnapshotSizeValid(int length) =>
         length > 0 && length <= MaximumSnapshotLength;
+
+    internal static void EnsureSnapshotSizeValid(int length)
+    {
+        if (!IsSnapshotSizeValid(length))
+            throw new InvalidDataException("SQLite snapshot size is invalid.");
+    }
 
     private static byte[] Decrypt(byte[] envelope, byte[] key)
     {
@@ -197,19 +211,14 @@ public static class SqliteRecovery
         {
             check.CommandText = "PRAGMA integrity_check;";
             using var reader = check.ExecuteReader();
-            var hasFirstRow = reader.Read();
-            var firstResult = hasFirstRow ? reader.GetString(0) : null;
-            var hasAdditionalRows = hasFirstRow && reader.Read();
-            if (!IsIntegrityCheckValid(hasFirstRow, firstResult, hasAdditionalRows))
-                throw new InvalidDataException("SQLite snapshot integrity check failed.");
+            EnsureIntegrityCheckValid(reader.Read, () => reader.GetString(0));
         }
 
         using (var check = connection.CreateCommand())
         {
             check.CommandText = "PRAGMA foreign_key_check;";
             using var reader = check.ExecuteReader();
-            if (!IsForeignKeyCheckClean(reader.Read()))
-                throw new InvalidDataException("SQLite snapshot relationship check failed.");
+            EnsureForeignKeyCheckClean(reader.Read());
         }
 
         using (var check = connection.CreateCommand())
@@ -220,8 +229,7 @@ public static class SqliteRecovery
                     ('families','memberships','invitations','people',
                      'person_proposals','audit','key_verifier');
                 """;
-            if (!HasRequiredSchema(Convert.ToInt32(check.ExecuteScalar())))
-                throw new InvalidDataException("SQLite snapshot schema is incomplete.");
+            EnsureRequiredSchema(Convert.ToInt32(check.ExecuteScalar()));
         }
     }
 
@@ -234,6 +242,27 @@ public static class SqliteRecovery
     internal static bool IsForeignKeyCheckClean(bool hasViolations) => !hasViolations;
 
     internal static bool HasRequiredSchema(int tableCount) => tableCount == 7;
+
+    internal static void EnsureIntegrityCheckValid(Func<bool> read, Func<string> readResult)
+    {
+        var hasFirstRow = read();
+        var firstResult = hasFirstRow ? readResult() : null;
+        var hasAdditionalRows = hasFirstRow && read();
+        if (!IsIntegrityCheckValid(hasFirstRow, firstResult, hasAdditionalRows))
+            throw new InvalidDataException("SQLite snapshot integrity check failed.");
+    }
+
+    internal static void EnsureForeignKeyCheckClean(bool hasViolations)
+    {
+        if (!IsForeignKeyCheckClean(hasViolations))
+            throw new InvalidDataException("SQLite snapshot relationship check failed.");
+    }
+
+    internal static void EnsureRequiredSchema(int tableCount)
+    {
+        if (!HasRequiredSchema(tableCount))
+            throw new InvalidDataException("SQLite snapshot schema is incomplete.");
+    }
 
     private static SqliteConnection OpenMemory()
     {
@@ -337,11 +366,20 @@ public static class SqliteRecovery
             var entry = new FileInfo(current);
             if (entry.LinkTarget is not null)
                 throw new IOException("Recovery paths cannot contain symbolic links.");
-            if ((File.Exists(current) || Directory.Exists(current)) &&
-                (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+            var fileExists = File.Exists(current);
+            var directoryExists = Directory.Exists(current);
+            var attributes = fileExists || directoryExists
+                ? File.GetAttributes(current)
+                : default;
+            if (HasReparseAttributes(fileExists, directoryExists, attributes))
                 throw new IOException("Recovery paths cannot contain symbolic links.");
         }
     }
+
+    internal static bool HasReparseAttributes(
+        bool fileExists, bool directoryExists, FileAttributes attributes) =>
+        (fileExists || directoryExists) &&
+        (attributes & FileAttributes.ReparsePoint) != 0;
 
     internal static string JoinChildPath(string directory, string child)
     {

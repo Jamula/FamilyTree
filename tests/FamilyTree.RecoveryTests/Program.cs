@@ -18,6 +18,7 @@ return 0;
 
 static void RunRecoveryAssertions()
 {
+    AssertRecoveryValidationBranches();
     var directory = Path.Combine(Path.GetTempPath(), "familytree-recovery-" + Guid.NewGuid().ToString("N"));
     var restoreDirectory = Path.Combine(directory, "restored");
     Directory.CreateDirectory(directory);
@@ -131,6 +132,29 @@ static void RunRecoveryAssertions()
 
         Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(databasePath, databasePath, backupKey),
             "backup cannot replace the source database");
+        Expect<ArgumentException>(() => SqliteRecovery.CreateBackup("", backupPath, backupKey),
+            "backup rejects an empty source path");
+        Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(" ", backupPath, backupKey),
+            "backup rejects a whitespace source path");
+        Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(null!, backupPath, backupKey),
+            "backup rejects a missing source path");
+        Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(
+            "relative.sqlite", backupPath, backupKey),
+            "backup rejects a relative source path");
+        Expect<ArgumentException>(() => SqliteRecovery.Restore(backupPath, "relative.sqlite", backupKey),
+            "restore rejects a relative destination path");
+        Expect<DirectoryNotFoundException>(() => SqliteRecovery.CreateBackup(
+            databasePath, Path.Combine(directory, "missing", "backup.sqlite"), backupKey),
+            "backup requires an existing output directory");
+        Expect<IOException>(() => SqliteRecovery.CreateBackup(
+            databasePath, directory, backupKey),
+            "backup rejects a directory as its output");
+        Expect<DirectoryNotFoundException>(() => SqliteRecovery.Restore(
+            backupPath, Path.Combine(directory, "missing", "restored.sqlite"), backupKey),
+            "restore requires an existing target directory");
+        Expect<IOException>(() => SqliteRecovery.Restore(
+            backupPath, restoreDirectory, backupKey),
+            "restore rejects a directory as its target");
         Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(
             databasePath, databasePath.ToUpperInvariant(), backupKey),
             "case-variant path aliases are rejected conservatively");
@@ -147,6 +171,19 @@ static void RunRecoveryAssertions()
             "case-variant WAL sidecar aliases are rejected");
         Expect<ArgumentException>(() => SqliteRecovery.Restore(backupPath, backupPath, backupKey),
             "restore cannot replace its encrypted source");
+        var sidecarTarget = Path.Combine(restoreDirectory, "sidecar.sqlite");
+        File.WriteAllBytes(sidecarTarget + "-wal", [1]);
+        try
+        {
+            Expect<IOException>(() => SqliteRecovery.Restore(backupPath, sidecarTarget, backupKey),
+                "restore rejects a destination with a SQLite sidecar");
+        }
+        finally
+        {
+            File.Delete(sidecarTarget + "-wal");
+        }
+        TestRestoreDestinationRace(backupPath, backupKey, restoreDirectory, sidecar: false);
+        TestRestoreDestinationRace(backupPath, backupKey, restoreDirectory, sidecar: true);
         Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(databasePath, backupPath, new byte[8]),
             "backup requires a 256-bit external key");
         Expect<ArgumentException>(() => SqliteRecovery.Restore(backupPath, restoredPath, new byte[8]),
@@ -212,6 +249,125 @@ static void RunRecoveryAssertions()
         CryptographicOperations.ZeroMemory(wrongKey);
         Directory.Delete(directory, recursive: true);
     }
+}
+
+static void AssertRecoveryValidationBranches()
+{
+    using var connection = new SqliteConnection("Data Source=:memory:");
+    connection.Open();
+    Check(SqliteRecovery.IsDeleteJournalMode("DELETE") &&
+          !SqliteRecovery.IsDeleteJournalMode("wal") &&
+          !SqliteRecovery.IsDeleteJournalMode(null),
+        "journal-mode validation accepts only DELETE");
+    SqliteRecovery.EnsureDeleteJournalMode("delete");
+    Expect<InvalidDataException>(() => SqliteRecovery.EnsureDeleteJournalMode("wal"),
+        "journal-mode enforcement rejects unexpected modes");
+    Check(SqliteRecovery.IsSerializedBufferValid(new IntPtr(1), 1) &&
+          !SqliteRecovery.IsSerializedBufferValid(IntPtr.Zero, 1) &&
+          !SqliteRecovery.IsSerializedBufferValid(new IntPtr(1), 0) &&
+          !SqliteRecovery.IsSerializedBufferValid(new IntPtr(1), int.MaxValue),
+        "serialized-buffer validation rejects missing and invalid buffers");
+    SqliteRecovery.EnsureSerializedBufferValid(new IntPtr(1), 1);
+    Expect<InvalidDataException>(() => SqliteRecovery.EnsureSerializedBufferValid(IntPtr.Zero, 1),
+        "serialized-buffer enforcement rejects a missing buffer");
+    var allocated = SQLitePCL.raw.sqlite3_malloc(1);
+    if (allocated != IntPtr.Zero)
+        Expect<InvalidDataException>(() => SqliteRecovery.EnsureSerializedBufferValid(allocated, 0),
+            "serialized-buffer enforcement releases invalid native allocations");
+    Check(SqliteRecovery.IsSnapshotSizeValid(1) &&
+          !SqliteRecovery.IsSnapshotSizeValid(0) &&
+          !SqliteRecovery.IsSnapshotSizeValid(int.MaxValue),
+        "snapshot-size validation enforces positive bounded lengths");
+    SqliteRecovery.EnsureSnapshotSizeValid(1);
+    Expect<InvalidDataException>(() => SqliteRecovery.EnsureSnapshotSizeValid(0),
+        "snapshot-size enforcement rejects empty databases");
+    Check(SqliteRecovery.IsIntegrityCheckValid(true, "ok", false) &&
+          !SqliteRecovery.IsIntegrityCheckValid(false, null, false) &&
+          !SqliteRecovery.IsIntegrityCheckValid(true, "corrupt", false) &&
+          !SqliteRecovery.IsIntegrityCheckValid(true, "ok", true),
+        "integrity validation rejects absent, failed and multiple results");
+    var validResultReads = 1;
+    SqliteRecovery.EnsureIntegrityCheckValid(
+        () => validResultReads-- > 0, () => "ok");
+    Expect<InvalidDataException>(() => SqliteRecovery.EnsureIntegrityCheckValid(
+        () => false, () => throw new InvalidOperationException()),
+        "integrity enforcement rejects missing results");
+    Expect<InvalidDataException>(() => SqliteRecovery.EnsureIntegrityCheckValid(
+        () => true, () => "corrupt"),
+        "integrity enforcement rejects corrupt results");
+    var multipleResults = new Queue<string>(["ok", "extra"]);
+    Expect<InvalidDataException>(() => SqliteRecovery.EnsureIntegrityCheckValid(
+        () => multipleResults.Count > 0, () => multipleResults.Dequeue()),
+        "integrity enforcement rejects multiple results");
+    Check(SqliteRecovery.IsForeignKeyCheckClean(false) &&
+          !SqliteRecovery.IsForeignKeyCheckClean(true),
+        "foreign-key validation rejects reported violations");
+    SqliteRecovery.EnsureForeignKeyCheckClean(false);
+    Expect<InvalidDataException>(() => SqliteRecovery.EnsureForeignKeyCheckClean(true),
+        "foreign-key enforcement rejects reported violations");
+    Check(SqliteRecovery.HasRequiredSchema(7) && !SqliteRecovery.HasRequiredSchema(6),
+        "schema validation requires every recovery table");
+    SqliteRecovery.EnsureRequiredSchema(7);
+    Expect<InvalidDataException>(() => SqliteRecovery.EnsureRequiredSchema(6),
+        "schema enforcement rejects incomplete databases");
+    Check(SqliteRecovery.JoinChildPath(Path.GetTempPath(), "safe-child") ==
+          Path.Join(Path.GetTempPath(), "safe-child"),
+        "recovery path composition accepts a single safe child");
+    foreach (var invalidChild in new[]
+             {
+                 "", ".", "..", Path.GetFullPath("absolute-child"),
+                 Path.Join("nested", "child"), "\0"
+             })
+        Expect<IOException>(() => SqliteRecovery.JoinChildPath(Path.GetTempPath(), invalidChild),
+            "recovery path composition rejects unsafe child segments");
+    Check(!SqliteRecovery.HasReparseAttributes(false, false, default) &&
+          !SqliteRecovery.HasReparseAttributes(true, false, FileAttributes.Normal) &&
+          !SqliteRecovery.HasReparseAttributes(false, true, FileAttributes.Directory) &&
+          SqliteRecovery.HasReparseAttributes(true, false, FileAttributes.ReparsePoint) &&
+          SqliteRecovery.HasReparseAttributes(false, true,
+              FileAttributes.Directory | FileAttributes.ReparsePoint),
+        "recovery path validation detects reparse attributes on files and directories");
+}
+
+static void TestRestoreDestinationRace(
+    string backupPath, byte[] backupKey, string restoreDirectory, bool sidecar)
+{
+    var destination = Path.Combine(restoreDirectory,
+        sidecar ? "raced-sidecar.sqlite" : "raced-destination.sqlite");
+    var sentinel = Encoding.UTF8.GetBytes("destination race sentinel");
+    var racedPath = sidecar ? destination + "-wal" : destination;
+    var restore = Task.Run(() =>
+    {
+        try
+        {
+            SqliteRecovery.Restore(backupPath, destination, backupKey);
+            return (Exception?)null;
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
+    });
+
+    var deadline = DateTime.UtcNow.AddSeconds(10);
+    while (!restore.IsCompleted && DateTime.UtcNow < deadline)
+    {
+        if (Directory.EnumerateFiles(restoreDirectory, ".ft-recovery-*").Any())
+        {
+            File.WriteAllBytes(racedPath, sentinel);
+            break;
+        }
+        Thread.Sleep(1);
+    }
+
+    if (!File.Exists(racedPath))
+        throw new InvalidOperationException("Restore staging window was not observed.");
+    var failure = restore.GetAwaiter().GetResult();
+    Check(failure is IOException && File.ReadAllBytes(racedPath).SequenceEqual(sentinel),
+        sidecar
+            ? "restore refuses a sidecar created while staging"
+            : "restore refuses a destination created while staging");
+    File.Delete(racedPath);
 }
 
 static void JoinMember(SqliteFamilyStore store, Guid family, Guid admin, Guid member)
@@ -477,11 +633,13 @@ static byte[] EncryptTestSnapshot(byte[] plaintext, byte[] key)
 static int CheckRecoveryCoverage(string coveragePath)
 {
     var coverage = XDocument.Load(coveragePath);
-    var sourceLines = coverage.Descendants("class")
-        .Where(element => element.Attribute("filename")?.Value
-            .Replace('\\', '/').EndsWith("src/FamilyTree.Persistence/SqliteRecovery.cs",
-                StringComparison.Ordinal) == true)
-        .SelectMany(element => element.Element("lines")?.Elements("line") ?? [])
+    var sourceClass = coverage.Descendants("class")
+        .FirstOrDefault(element => element.Attribute("name")?.Value ==
+            "FamilyTree.Persistence.SqliteRecovery" &&
+            element.Attribute("filename")?.Value.Replace('\\', '/')
+                .EndsWith("src/FamilyTree.Persistence/SqliteRecovery.cs",
+                    StringComparison.Ordinal) == true);
+    var sourceLines = (sourceClass?.Element("lines")?.Elements("line") ?? [])
         .GroupBy(element => element.Attribute("number")!.Value)
         .ToDictionary(group => group.Key, group => group.Any(element =>
             int.TryParse((string?)element.Attribute("hits"), out var hits) && hits > 0));
@@ -499,8 +657,44 @@ static int CheckRecoveryCoverage(string coveragePath)
         Console.Error.WriteLine("FAIL SqliteRecovery requires at least 90% line coverage.");
         return 1;
     }
-    Console.WriteLine("PASS SqliteRecovery meets its 90% line-coverage gate.");
+
+    var branchTotals = (sourceClass?.Element("lines")?.Elements("line") ?? [])
+        .Where(element => string.Equals((string?)element.Attribute("branch"), "True",
+            StringComparison.OrdinalIgnoreCase))
+        .Select(element => ParseBranchCoverage((string?)element.Attribute("condition-coverage")))
+        .ToArray();
+    var coveredBranches = branchTotals.Sum(branch => branch.Covered);
+    var totalBranches = branchTotals.Sum(branch => branch.Total);
+    if (totalBranches == 0)
+    {
+        Console.Error.WriteLine("Recovery branch coverage is missing.");
+        return 2;
+    }
+
+    var branchPercent = coveredBranches * 100.0 / totalBranches;
+    Console.WriteLine(
+        $"SqliteRecovery branch coverage: {coveredBranches}/{totalBranches} ({branchPercent:F1}%).");
+    if (branchPercent < 90)
+    {
+        Console.Error.WriteLine("FAIL SqliteRecovery requires at least 90% branch coverage.");
+        return 1;
+    }
+    Console.WriteLine("PASS SqliteRecovery meets its 90% line and branch coverage gates.");
     return 0;
+}
+
+static (int Covered, int Total) ParseBranchCoverage(string? coverage)
+{
+    var start = coverage?.LastIndexOf('(') ?? -1;
+    var end = coverage?.LastIndexOf(')') ?? -1;
+    if (start < 0 || end <= start)
+        throw new InvalidDataException($"Recovery branch coverage metadata is invalid: {coverage ?? "<missing>"}.");
+    var counts = coverage![(start + 1)..end].Split('/');
+    if (counts.Length != 2 ||
+        !int.TryParse(counts[0], out var covered) ||
+        !int.TryParse(counts[1], out var total))
+        throw new InvalidDataException($"Recovery branch coverage metadata is invalid: {coverage}.");
+    return (covered, total);
 }
 
 static bool Contains(byte[] haystack, byte[] needle)
