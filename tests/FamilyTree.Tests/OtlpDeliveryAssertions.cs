@@ -50,7 +50,6 @@ internal static class OtlpDeliveryAssertions
             .Features.Get<IServerAddressesFeature>()!.Addresses.Single();
 
         var builder = WebApplication.CreateBuilder();
-        builder.Logging.ClearProviders();
         builder.WebHost.UseTestServer();
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -60,21 +59,41 @@ internal static class OtlpDeliveryAssertions
         });
         builder.Services.AddFamilyTreeObservability(builder.Configuration);
         await using var app = builder.Build();
+        app.Use(async (context, next) =>
+        {
+            if (context.Request.Path == "/unsampled")
+            {
+                using var parent = new Activity("synthetic-server-parent")
+                    .SetParentId("00-0123456789abcdef0123456789abcdef-0123456789abcdef-00")
+                    .Start();
+                Check(!parent.Recorded && Activity.Current == parent, "unrecorded parent inside server pipeline");
+                await next(context);
+            }
+            else
+            {
+                await next(context);
+            }
+        });
         app.UseFamilyTreeRequestTelemetry();
         app.MapGet("/health", () => Results.Ok());
+        app.MapGet("/unsampled", () => Results.Ok());
         app.MapGet("/denied", () => Results.StatusCode(403));
         app.MapGet("/failure", () => Results.StatusCode(503));
         app.MapGet("/exception", (Func<IResult>)(() => throw new InvalidOperationException("synthetic-exception-marker")));
         app.MapPost("/submit", () => Results.Ok());
         await app.StartAsync();
         using var client = app.GetTestClient();
-        using var parent = new Activity("synthetic-server-parent").SetIdFormat(ActivityIdFormat.W3C).Start();
-        Check(!parent.Recorded, "synthetic parent is not recorded");
         using var request = new HttpRequestMessage(HttpMethod.Get, "/health?value=synthetic-query-marker");
         request.Headers.Add("X-Synthetic", "synthetic-header-marker");
         Check((await client.SendAsync(request)).StatusCode == HttpStatusCode.OK, "success request");
         Check(app.Services.GetRequiredService<TracerProvider>().ForceFlush(10000), "initial trace export");
         Check(payloads.Any(payload => payload.Path == "/collector/v1/traces" &&
+            Encoding.UTF8.GetString(payload.Body).Contains("familytree.http", StringComparison.Ordinal)),
+            "trace with normal logging");
+        var initialBatchCount = payloads.Count;
+        Check((await client.GetAsync("/unsampled")).StatusCode == HttpStatusCode.OK, "unsampled parent request");
+        Check(app.Services.GetRequiredService<TracerProvider>().ForceFlush(10000), "unsampled parent trace export");
+        Check(payloads.Skip(initialBatchCount).Any(payload => payload.Path == "/collector/v1/traces" &&
             Encoding.UTF8.GetString(payload.Body).Contains("familytree.http", StringComparison.Ordinal)),
             "trace with unsampled server parent");
         using var sensitive = new HttpRequestMessage(HttpMethod.Post, "/submit?name=synthetic-name-marker")

@@ -48,6 +48,7 @@ public static class ObservabilityExtensions
         services.AddOpenTelemetry()
             .WithTracing(tracing => tracing
                 .AddSource(FamilyTelemetry.SourceName)
+                .SetSampler(new AlwaysOnSampler())
                 .AddOtlpExporter(options =>
                 {
                     options.Endpoint = protocol == OtlpExportProtocol.HttpProtobuf
