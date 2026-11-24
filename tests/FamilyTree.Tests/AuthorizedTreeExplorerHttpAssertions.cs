@@ -90,7 +90,22 @@ internal static class AuthorizedTreeExplorerHttpAssertions
                 body.Contains("name='below' type='number' min='0' max='8' value='4'", StringComparison.Ordinal) &&
                 body.Contains("tabindex='0'", StringComparison.Ordinal),
                 "default depth and keyboard navigation rendered");
+            var skip = body.IndexOf("<a class='skip' href='#visible-people'>Skip to visible people</a>", StringComparison.Ordinal);
+            var diagram = body.IndexOf("<svg ", StringComparison.Ordinal);
+            var target = body.IndexOf("<h2 id='visible-people' tabindex='-1'>Visible people</h2>", StringComparison.Ordinal);
+            var listLink = body.IndexOf(">Center on Fictional Child</a></td>", StringComparison.Ordinal);
+            Check(skip >= 0 && skip < diagram && diagram < target && target < listLink &&
+                body.Contains(".skip:focus{position:static}", StringComparison.Ordinal),
+                "keyboard bypass precedes the diagram and targets the focusable people list");
 
+            using var social = await client.GetAsync(baseUrl + "&spouses=yes&social=yes");
+            var socialBody = await social.Content.ReadAsStringAsync();
+            Check(socialBody.Contains("Fictional Child", StringComparison.Ordinal) &&
+                socialBody.Contains("Fictional Partner", StringComparison.Ordinal) &&
+                socialBody.Contains("Fictional Friend", StringComparison.Ordinal) &&
+                socialBody.Contains("Friend connection between visible people", StringComparison.Ordinal) &&
+                !socialBody.Contains("Mentor connection", StringComparison.Ordinal),
+                "social and spouse views include allowed edges but exclude denied relationship");
             var options = "&above=0&below=8&spouses=no&siblings=no&social=yes";
             using var changed = await client.GetAsync(baseUrl + options);
             var changedBody = await changed.Content.ReadAsStringAsync();
@@ -115,7 +130,9 @@ internal static class AuthorizedTreeExplorerHttpAssertions
             using var searched = await client.GetAsync(baseUrl + "&search=Child");
             var searchedBody = await searched.Content.ReadAsStringAsync();
             Check(searchedBody.Contains(">Center on Fictional Child</a></td>", StringComparison.Ordinal) &&
-                !searchedBody.Contains(">Center on Fictional Partner</a></td>", StringComparison.Ordinal),
+                !searchedBody.Contains(">Center on Fictional Partner</a></td>", StringComparison.Ordinal) &&
+                searchedBody.Contains("href='#visible-people'", StringComparison.Ordinal) &&
+                searchedBody.Contains("id='visible-people' tabindex='-1'", StringComparison.Ordinal),
                 "search filters only the already authorized visible list");
             using var denied = await client.GetAsync("/test-tree?center=" + hidden.Id);
             using var unknown = await client.GetAsync("/test-tree?center=" + Guid.NewGuid());

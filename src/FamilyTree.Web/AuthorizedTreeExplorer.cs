@@ -68,7 +68,10 @@ public static class AuthorizedTreeExplorer
             .Append("form{display:flex;flex-wrap:wrap;gap:.9rem;margin:1.5rem 0}")
             .Append("label{display:grid;gap:.3rem}select,input,button{font:inherit;padding:.4rem}")
             .Append("a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible")
-            .Append("{outline:3px solid #185abc;outline-offset:3px}</style></head><body><main>")
+            .Append("{outline:3px solid #185abc;outline-offset:3px}")
+            .Append(".skip{position:absolute;left:-10000px}.skip:focus{position:static}")
+            .Append("</style></head><body><main>")
+            .Append("<a class='skip' href='#visible-people'>Skip to visible people</a>")
             .Append("<h1>Family tree</h1><form method='get' action=''>")
             .Append("<label for='center'>Center person<select id='center' name='center'>");
         foreach (var node in tree.Nodes)
@@ -90,7 +93,7 @@ public static class AuthorizedTreeExplorer
             .Append("<button type='submit'>Explore family</button></form>")
             .Append("<p>Use Tab to reach person links, or tap a link. The list below is an alternative to scrolling the diagram.</p>")
             .Append(FictionalSvgTree.Render(graph, options, "", false))
-            .Append("<h2>Visible people</h2><table><caption>Keyboard-accessible generation list</caption>")
+            .Append("<h2 id='visible-people' tabindex='-1'>Visible people</h2><table><caption>Keyboard-accessible generation list</caption>")
             .Append("<thead><tr><th scope='col'>Person</th><th scope='col'>Relative generation</th></tr></thead><tbody>");
         foreach (var node in tree.Nodes.Where(n =>
             n.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase)))
