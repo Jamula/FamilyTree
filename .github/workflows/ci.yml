@@ -39,6 +39,8 @@ jobs:
         run: dotnet restore FamilyTree.slnx
       - name: Build
         run: dotnet build FamilyTree.slnx --no-restore --configuration Release
+      - name: Process-level private API acceptance baseline
+        run: dotnet run --project tests/FamilyTree.AcceptanceHarness/FamilyTree.AcceptanceHarness.csproj --configuration Release
       - name: Restore local tools
         run: dotnet tool restore
       - name: Domain assertions and local coverage
