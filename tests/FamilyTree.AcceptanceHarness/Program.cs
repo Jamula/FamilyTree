@@ -3,7 +3,8 @@ using System.Net;
 using System.Net.Sockets;
 
 var repositoryRoot = FindRepositoryRoot();
-var apiProject = Path.Combine(repositoryRoot, "src", "FamilyTree.Api", "FamilyTree.Api.csproj");
+var apiDirectory = Path.Combine(repositoryRoot, "src", "FamilyTree.Api");
+var apiProject = Path.Combine(apiDirectory, "FamilyTree.Api.csproj");
 var port = GetAvailablePort();
 var apiAddress = new Uri($"http://127.0.0.1:{port}");
 var isolatedHome = Directory.CreateTempSubdirectory("familytree-acceptance-");
@@ -21,6 +22,8 @@ startInfo.ArgumentList.Add("--no-build");
 startInfo.ArgumentList.Add("--no-launch-profile");
 startInfo.ArgumentList.Add("--urls");
 startInfo.ArgumentList.Add(apiAddress.ToString());
+startInfo.ArgumentList.Add("--contentRoot");
+startInfo.ArgumentList.Add(apiDirectory);
 foreach (var key in startInfo.Environment.Keys.Where(IsInheritedConfiguration).ToArray())
     startInfo.Environment.Remove(key);
 startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
@@ -177,6 +180,7 @@ static bool IsInheritedConfiguration(string key)
            key.Equals("URLS", StringComparison.OrdinalIgnoreCase) ||
            key.Equals("HTTP_PORTS", StringComparison.OrdinalIgnoreCase) ||
            key.Equals("HTTPS_PORTS", StringComparison.OrdinalIgnoreCase) ||
+           key.Equals("CONTENTROOT", StringComparison.OrdinalIgnoreCase) ||
            (hostPrefixed && key.Equals("ENVIRONMENT", StringComparison.OrdinalIgnoreCase));
 }
 

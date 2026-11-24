@@ -51,6 +51,7 @@ jobs:
             env "${prefix}Kestrel__Endpoints__Hostile__Url=http://0.0.0.0:0" \
               "${prefix}familytree_oidc_google_client_id=fictional-client" \
               "${prefix}FAMILYTREE_PRIVATE_API_ENABLED=true" \
+              "${prefix}CONTENTROOT=/nonexistent-familytree-acceptance-root" \
               dotnet run --project tests/FamilyTree.AcceptanceHarness/FamilyTree.AcceptanceHarness.csproj --configuration Release --no-build
           done
       - name: Restore local tools

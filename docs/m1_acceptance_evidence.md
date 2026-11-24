@@ -20,13 +20,14 @@ dotnet run --project tests/FamilyTree.AcceptanceHarness/FamilyTree.AcceptanceHar
 ```
 
 On Linux or macOS, run the same `dotnet` commands from the repository root.
-The harness clears inherited `FAMILYTREE_*`, `OTEL_*`, Kestrel and listener
-settings, including host-prefixed and case-insensitive aliases. It forces OTLP
-off for its child API process, binds only to loopback on a temporary port, and
-terminates the child process when done. CI runs the real process with hostile
-OIDC, private-mode, Kestrel and OTLP settings under multiple aliases. The
-current private boundary is unconditional, not controlled by a switch. The
-harness does not create valid authenticated sessions or write family data.
+The harness clears inherited `FAMILYTREE_*`, `OTEL_*`, Kestrel, listener and
+content-root settings, including host-prefixed and case-insensitive aliases. It
+fixes the API content root, forces OTLP off, binds only to loopback on a temporary
+port, and terminates the child process when done. CI runs the real process with
+hostile OIDC, private-mode, Kestrel, content-root and OTLP settings under
+multiple aliases. The current private boundary is unconditional, not controlled
+by a switch. The harness does not create valid authenticated sessions or write
+family data.
 
 Expected output includes `PASS` for local API process startup, health and
 capabilities, default-disabled OIDC, anonymous/forged-session denials, and
