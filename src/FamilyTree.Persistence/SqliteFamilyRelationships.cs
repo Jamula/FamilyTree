@@ -71,9 +71,12 @@ public sealed partial class SqliteFamilyStore
     }
 
     public IReadOnlyList<PendingRelationshipReview> ListPendingRelationships(
-        Guid familyId, Guid moderatorId)
+        Guid familyId, Guid moderatorId, Guid? afterProposalId = null)
     {
         RequireIds(familyId, moderatorId);
+        if (afterProposalId == Guid.Empty)
+            throw new ArgumentException("Pagination cursor cannot be empty.",
+                nameof(afterProposalId));
         using var con = Open();
         using var tx = con.BeginTransaction();
         RequireMember(con, tx, familyId, moderatorId, administrator: true);
@@ -83,34 +86,41 @@ public sealed partial class SqliteFamilyStore
                    identity_envelope
             FROM relationship_proposals
             WHERE family_id=$f AND state='Pending' AND submitter<>$moderator
+                AND id>$after
             ORDER BY id LIMIT 100;
             """, ("$f", familyId.ToString("D")),
-            ("$moderator", moderatorId.ToString("D"))))
+            ("$moderator", moderatorId.ToString("D")),
+            ("$after", afterProposalId?.ToString("D") ?? "")))
         using (var reader = cmd.ExecuteReader())
             while (reader.Read())
             {
                 Relationship? edge = null;
-                var unreadable = false;
-                try
+                var proposalId = Guid.TryParse(reader.GetString(0), out var parsedId)
+                    ? parsedId : Guid.Empty;
+                var submitter = Guid.TryParse(reader.GetString(6), out var parsedSubmitter)
+                    ? parsedSubmitter : Guid.Empty;
+                var unreadable = proposalId == Guid.Empty || submitter == Guid.Empty;
+                if (!unreadable)
                 {
-                    var proposalId = Guid.Parse(reader.GetString(0));
-                    var submitter = Guid.Parse(reader.GetString(6));
-                    VerifyRelationshipProposalIdentity(familyId, proposalId,
-                        reader.GetString(1), reader.GetString(2), reader.GetString(3),
-                        reader.GetString(4), submitter, reader.GetFieldValue<byte[]>(7));
-                    edge = MaterializeRelationship(familyId,
-                        proposalId, submitter, reader.GetString(1),reader.GetString(2),
-                        reader.GetString(3), reader.GetString(4),
-                        reader.GetFieldValue<byte[]>(5));
+                    try
+                    {
+                        VerifyRelationshipProposalIdentity(familyId, proposalId,
+                            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                            reader.GetString(4), submitter,
+                            reader.GetFieldValue<byte[]>(7));
+                        edge = MaterializeRelationship(familyId,
+                            proposalId, submitter, reader.GetString(1), reader.GetString(2),
+                            reader.GetString(3), reader.GetString(4),
+                            reader.GetFieldValue<byte[]>(5));
+                    }
+                    catch (InvalidDataException)
+                    {
+                        // Keep a content-free proposal ID visible for an
+                        // independent moderator to reject corrupted submissions.
+                        unreadable = true;
+                    }
                 }
-                catch (InvalidDataException)
-                {
-                    // Keep a content-free proposal ID visible for an
-                    // independent moderator to reject corrupted submissions.
-                    unreadable = true;
-                }
-                results.Add(new(Guid.Parse(reader.GetString(0)),edge,
-                    Guid.Parse(reader.GetString(6)),unreadable));
+                results.Add(new(proposalId, edge, submitter, unreadable));
             }
         tx.Commit();
         return results;
@@ -222,26 +232,31 @@ public sealed partial class SqliteFamilyStore
             while (reader.Read())
             {
                 Relationship? edge = null;
-                var unreadable = false;
-                try
+                var proposalId = Guid.TryParse(reader.GetString(0), out var parsedId)
+                    ? parsedId : Guid.Empty;
+                var submitter = Guid.TryParse(reader.GetString(6), out var parsedSubmitter)
+                    ? parsedSubmitter : Guid.Empty;
+                var unreadable = proposalId == Guid.Empty || submitter == Guid.Empty;
+                if (!unreadable)
                 {
-                    var proposalId = Guid.Parse(reader.GetString(0));
-                    var submitter = Guid.Parse(reader.GetString(6));
-                    VerifyRelationshipProposalIdentity(familyId, proposalId,
-                        reader.GetString(1), reader.GetString(2), reader.GetString(3),
-                        reader.GetString(4), submitter, reader.GetFieldValue<byte[]>(7));
-                    edge = MaterializeRelationship(familyId,
-                        proposalId, submitter, reader.GetString(1), reader.GetString(2),
-                        reader.GetString(3), reader.GetString(4),
-                        reader.GetFieldValue<byte[]>(5));
-                }
-                catch (InvalidDataException)
-                {
-                    unreadable = true;
+                    try
+                    {
+                        VerifyRelationshipProposalIdentity(familyId, proposalId,
+                            reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                            reader.GetString(4), submitter,
+                            reader.GetFieldValue<byte[]>(7));
+                        edge = MaterializeRelationship(familyId,
+                            proposalId, submitter, reader.GetString(1), reader.GetString(2),
+                            reader.GetString(3), reader.GetString(4),
+                            reader.GetFieldValue<byte[]>(5));
+                    }
+                    catch (InvalidDataException)
+                    {
+                        unreadable = true;
+                    }
                 }
                 result.Add(new ApprovedRelationshipUndo(
-                    Guid.Parse(reader.GetString(0)), edge,
-                    Guid.Parse(reader.GetString(6)), unreadable));
+                    proposalId, edge, submitter, unreadable));
             }
         tx.Commit();
         return result;

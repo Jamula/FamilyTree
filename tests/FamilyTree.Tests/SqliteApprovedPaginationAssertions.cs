@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using FamilyTree.Domain;
 using FamilyTree.Persistence;
+using Microsoft.Data.Sqlite;
 
 /// <summary>
 /// Keyset pagination and durable undo discovery with more approvals than
@@ -48,6 +49,63 @@ internal static class SqliteApprovedPaginationAssertions
             }
             using (var reopened = new SqliteFamilyStore(database, key))
             {
+                var malformedIdProposal = proposals.Min();
+                var malformedSubmitterProposal = proposals
+                    .Where(x => x != malformedIdProposal).Min();
+                using (var connection = new SqliteConnection(
+                    new SqliteConnectionStringBuilder {
+                        DataSource = database, Pooling = false }.ToString()))
+                {
+                    connection.Open();
+                    using var change = connection.CreateCommand();
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET id='!invalid-guid'
+                        WHERE family_id=$f AND id=$badId;
+                        """;
+                    change.Parameters.Clear();
+                    change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$badId",
+                        malformedIdProposal.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1, "tamper approved proposal ID format");
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET submitter='not-a-guid'
+                        WHERE family_id=$f AND id=$badSubmitter;
+                        """;
+                    change.Parameters.Clear();
+                    change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$badSubmitter",
+                        malformedSubmitterProposal.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1, "tamper approved submitter format");
+                    var quarantined = reopened.ListApprovedRelationshipsForUndo(
+                        family, admin);
+                    Check(quarantined.Count == 100 &&
+                        quarantined.Any(x => x.ProposalId == Guid.Empty &&
+                            x.SubmittedBy == member && x.Relationship is null &&
+                            x.ContentUnreadable) &&
+                        quarantined.Any(x => x.ProposalId == malformedSubmitterProposal &&
+                            x.SubmittedBy == Guid.Empty && x.Relationship is null &&
+                            x.ContentUnreadable),
+                        "malformed approved identities are quarantined without hiding healthy items");
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET id=$id
+                        WHERE family_id=$f AND id='!invalid-guid';
+                        """;
+                    change.Parameters.Clear();
+                    change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$id",
+                        malformedIdProposal.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1, "restore approved proposal ID");
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET submitter=$submitter
+                        WHERE family_id=$f AND id=$id;
+                        """;
+                    change.Parameters.Clear();
+                    change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$submitter", member.ToString("D"));
+                    change.Parameters.AddWithValue("$id",
+                        malformedSubmitterProposal.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1, "restore approved submitter ID");
+                }
                 var page1 = reopened.ListApprovedRelationshipsForUndo(family, admin);
                 Check(page1.Count == 100, "first page is bounded to 100 approvals");
                 var page2 = reopened.ListApprovedRelationshipsForUndo(

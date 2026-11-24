@@ -355,6 +355,80 @@ internal static class SqliteRelationshipAssertions
                 }
                 store.ReviewRelationship(family, admin, identityTarget, false);
                 store.ReviewRelationship(family, admin, identitySource, false);
+                var pendingProposals = new List<Guid>();
+                for (var index = 0; index < 105; index++)
+                    pendingProposals.Add(store.ProposeRelationship(family, actor,
+                        Relationship.Create(personA.Id, personB.Id,
+                            RelationKind.Neighbor, $"fictional-pending-page-{index}")));
+                var malformedIdProposal = pendingProposals.Min();
+                var malformedSubmitterProposal = pendingProposals
+                    .Where(x => x != malformedIdProposal).Min();
+                using (var connection = new SqliteConnection(
+                    new SqliteConnectionStringBuilder {
+                        DataSource = database, Pooling = false }.ToString()))
+                {
+                    connection.Open();
+                    using var change = connection.CreateCommand();
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET id='!invalid-guid'
+                        WHERE family_id=$f AND id=$badId;
+                        """;
+                    change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$badId",
+                        malformedIdProposal.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1, "tamper pending proposal ID format");
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET submitter='not-a-guid'
+                        WHERE family_id=$f AND id=$badSubmitter;
+                        """;
+                    change.Parameters.Clear();
+                    change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$badSubmitter",
+                        malformedSubmitterProposal.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1, "tamper pending submitter format");
+                    var firstPage = store.ListPendingRelationships(family, admin);
+                    Check(firstPage.Count == 100 &&
+                        firstPage.Any(x => x.ProposalId == Guid.Empty &&
+                            x.SubmittedBy == actor && x.Relationship is null &&
+                            x.ContentUnreadable) &&
+                        firstPage.Any(x => x.ProposalId == malformedSubmitterProposal &&
+                            x.SubmittedBy == Guid.Empty && x.Relationship is null &&
+                            x.ContentUnreadable),
+                        "malformed pending identities are quarantined without hiding healthy items");
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET id=$id
+                        WHERE family_id=$f AND id='!invalid-guid';
+                        """;
+                    change.Parameters.Clear();
+                    change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$id",
+                        malformedIdProposal.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1, "restore pending proposal ID");
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET submitter=$submitter
+                        WHERE family_id=$f AND id=$id;
+                        """;
+                    change.Parameters.Clear();
+                    change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$submitter", actor.ToString("D"));
+                    change.Parameters.AddWithValue("$id",
+                        malformedSubmitterProposal.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1, "restore pending submitter ID");
+                    var secondPage = store.ListPendingRelationships(
+                        family, admin, firstPage[^1].ProposalId);
+                    var discoveredIds = firstPage.Concat(secondPage)
+                        .Select(x => x.ProposalId).ToArray();
+                    Check(secondPage.Count == 5 && discoveredIds.Length == 105 &&
+                        discoveredIds.Distinct().Count() == 105 &&
+                        discoveredIds.Contains(Guid.Empty) &&
+                        pendingProposals.Where(x => x != malformedIdProposal)
+                            .All(discoveredIds.Contains),
+                        "pending cursor discovers every item beyond the first bounded page");
+                }
+                foreach (var proposal in pendingProposals)
+                    store.ReviewRelationship(family, admin, proposal, false);
+                Expect<ArgumentException>(() => store.ListPendingRelationships(
+                    family, admin, Guid.Empty), "empty pending cursor is invalid");
                 Check(!store.ListPendingRelationships(family, admin).Any(x =>
                     x.ProposalId == adminOwned),
                     "self-submitted items do not occupy independent review inbox");
@@ -547,44 +621,10 @@ internal static class SqliteRelationshipAssertions
                     family, admin, corruptProposal, true),
                     "corrupt ciphertext cannot become approved");
                 store.ReviewRelationship(family, admin, corruptProposal, false);
-                Check(store.ReadRelationships(family, admin).Count == 2,
+                Check(store.ReadRelationships(family, admin).Count==2,
                     "rejecting bad proposal preserves healthy approved links");
                 Expect<UnauthorizedAccessException>(() => store.UndoRelationship(
                     family, actor, Guid.NewGuid()), "unauthorized undo denied");
-                var originalLinks = store.ReadRelationships(family, admin);
-                var paginationProposals = new List<Guid>();
-                var paginationRelationshipIds = new HashSet<Guid>();
-                for (var index = 0; index < 105; index++)
-                {
-                    var edge = Relationship.Create(personA.Id, personB.Id,
-                        RelationKind.Friend, $"fictional-pagination-{index}");
-                    var proposal = store.ProposeRelationship(family, actor, edge);
-                    store.ReviewRelationship(family, admin, proposal, true);
-                    paginationProposals.Add(proposal);
-                    paginationRelationshipIds.Add(edge.Id);
-                }
-                var discovered = new List<SqliteFamilyStore.ApprovedRelationshipUndo>();
-                Guid? cursor = null;
-                while (true)
-                {
-                    var page = store.ListApprovedRelationshipsForUndo(
-                        family, admin, cursor);
-                    discovered.AddRange(page);
-                    if (page.Count < 100) break;
-                    cursor = page[^1].ProposalId;
-                }
-                var discoveredIds = discovered.Select(x => x.ProposalId).ToArray();
-                Check(discovered.Count == 107 && discoveredIds.Distinct().Count() == 107 &&
-                    paginationProposals.All(discoveredIds.Contains),
-                    "cursor pagination discovers every eligible approval beyond 100");
-                Check(store.ReadRelationships(family, admin).Count == 107 &&
-                    store.ReadRelationships(family, admin).Where(x =>
-                        !paginationRelationshipIds.Contains(x.Id)).SequenceEqual(originalLinks),
-                    "reading approval pages leaves existing graph links unchanged");
-                foreach (var proposal in paginationProposals)
-                    store.UndoRelationship(family, admin, proposal);
-                Check(store.ReadRelationships(family, admin).SequenceEqual(originalLinks),
-                    "undoing pagination fixtures preserves all original links");
                 store.RevokeMember(family, admin, actor);
                 Expect<UnauthorizedAccessException>(() => store.ReadRelationships(
                     family, actor), "member revocation blocks saved links");

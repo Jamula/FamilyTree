@@ -98,17 +98,25 @@ public sealed partial class SqliteFamilyStore : IDisposable
 
     private static void EnsureAuditTimestampColumn(SqliteConnection connection)
     {
+        using var transaction = connection.BeginTransaction(deferred: false);
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "PRAGMA table_info(audit);";
         using var reader = command.ExecuteReader();
         var hasTimestamp = false;
         while (reader.Read())
             hasTimestamp |= reader.GetString(1) == "created_utc";
         reader.Close();
-        if (hasTimestamp) return;
+        if (hasTimestamp)
+        {
+            transaction.Commit();
+            return;
+        }
         using var migrate = connection.CreateCommand();
+        migrate.Transaction = transaction;
         migrate.CommandText = "ALTER TABLE audit ADD COLUMN created_utc TEXT;";
         migrate.ExecuteNonQuery();
+        transaction.Commit();
     }
 
     // Bind an on-disk family database to the verified key before any write.
