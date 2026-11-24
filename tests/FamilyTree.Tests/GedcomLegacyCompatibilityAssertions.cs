@@ -200,6 +200,81 @@ internal static class GedcomLegacyCompatibilityAssertions
             Check(!GedcomLegacyCompatibility.Preview(eventDetails.Replace(
                 "2 HUSB\n3 AGE 30y", "2 FAMC @F1@", StringComparison.Ordinal)).Valid,
                 "family event cannot conceal a relationship pointer");
+
+            foreach (var tag in new[] { "FAMC", "FAMS", "HUSB", "WIFE", "CHIL",
+                         "ASSO", "ALIA", "ANCI", "DESI" })
+                foreach (var record in new[] { $"0 {tag} @I1@", $"0 @X@ {tag} @I1@" })
+                    Check(!GedcomLegacyCompatibility.Preview(source.Replace(
+                        "0 TRLR", record + "\n0 TRLR", StringComparison.Ordinal)).Valid,
+                        "pointer tags cannot be level-zero records");
+
+            foreach (var tag in new[] { "OBJE", "ASSO", "ALIA", "ANCI", "DESI",
+                         "SUBM", "SUBN", "REPO", "SNOTE", "SOUR", "NOTE" })
+                foreach (var value in new[] { "@MISSING", "@MISSING@", "@I1@ extra" })
+                    Check(!GedcomLegacyCompatibility.Preview(source.Replace(
+                        "1 NAME Alex /Example/", $"1 NAME Alex /Example/\n1 {tag} {value}",
+                        StringComparison.Ordinal)).Valid,
+                        "malformed and unresolved nonrelationship references are rejected");
+
+            foreach (var tag in new[] { "ASSO", "ALIA", "ANCI", "DESI", "SUBM",
+                         "SUBN", "REPO", "SNOTE" })
+                Check(!GedcomLegacyCompatibility.Preview(source.Replace(
+                    "1 NAME Alex /Example/", $"1 NAME Alex /Example/\n1 {tag} text",
+                    StringComparison.Ordinal)).Valid,
+                    "pointer-only tags require a pointer");
+
+            foreach (var item in new (string Tag, string Pointer)[] { ("ASSO", "@I2@"),
+                         ("ALIA", "@I2@"), ("OBJE", "@M1@"), ("SOUR", "@S1@"),
+                         ("NOTE", "@N1@"), ("SUBM", "@U1@"), ("SNOTE", "@T1@"),
+                         ("ANCI", "@U1@"), ("DESI", "@U1@") })
+            {
+                var withReferences = source.Replace(
+                    "1 NAME Alex /Example/", $"1 NAME Alex /Example/\n1 {item.Tag} {item.Pointer}",
+                    StringComparison.Ordinal).Replace("0 TRLR",
+                    "0 @M1@ OBJE\n0 @S1@ SOUR\n0 @N1@ NOTE\n0 @U1@ SUBM\n" +
+                    "0 @B1@ SUBN\n0 @R1@ REPO\n0 @T1@ SNOTE\n0 TRLR", StringComparison.Ordinal);
+                Check(GedcomLegacyCompatibility.Preview(withReferences).Valid ==
+                    (item.Tag != "NOTE" || source == converted),
+                    "complete references use the version's supported note form");
+                Check(!GedcomLegacyCompatibility.Preview(withReferences.Replace(
+                    $"1 {item.Tag} {item.Pointer}", $"1 {item.Tag} @F1@",
+                    StringComparison.Ordinal)).Valid,
+                    "nonrelationship references must target the correct record type");
+            }
+            var headerPointers = source.Replace("1 GEDC",
+                "1 SUBM @U1@\n1 SUBN @B1@\n1 GEDC", StringComparison.Ordinal).Replace(
+                "0 TRLR", "0 @U1@ SUBM\n0 @B1@ SUBN\n0 @S1@ SOUR\n1 REPO @R1@\n0 @R1@ REPO\n0 TRLR",
+                StringComparison.Ordinal);
+            Check(GedcomLegacyCompatibility.Preview(headerPointers).Valid,
+                "header and source repository references are previewable");
+            var submission = headerPointers.Replace("0 @B1@ SUBN",
+                "0 @B1@ SUBN\n1 SUBM @U1@", StringComparison.Ordinal);
+            Check(GedcomLegacyCompatibility.Preview(submission).Valid == (source == converted),
+                "legacy submission may reference its submitter");
+            foreach (var tag in new[] { "SUBM", "SUBN", "REPO", "SOUR", "OBJE" })
+                foreach (var record in new[] { $"0 {tag} @MISSING@", $"0 @X@ {tag} @MISSING@" })
+                    Check(!GedcomLegacyCompatibility.Preview(source.Replace(
+                        "0 TRLR", record + "\n0 TRLR", StringComparison.Ordinal)).Valid,
+                        "reference records require an ID and cannot carry pointer payloads");
+            foreach (var tag in new[] { "SUBN", "REPO" })
+                Check(!GedcomLegacyCompatibility.Preview(source.Replace(
+                    "1 NAME Alex /Example/", $"1 NAME Alex /Example/\n1 {tag} @I1@",
+                    StringComparison.Ordinal)).Valid, "pointer must appear in its permitted container");
+            var eventAssociation = source.Replace("1 NAME Alex /Example/",
+                "1 NAME Alex /Example/\n1 BIRT\n2 ASSO @I2@\n3 ROLE WITN", StringComparison.Ordinal);
+            Check(GedcomLegacyCompatibility.Preview(eventAssociation).Valid,
+                "event association remains previewable");
+            Check(!GedcomLegacyCompatibility.Preview(eventAssociation.Replace(
+                "1 BIRT\n2 ASSO", "1 NOTE text\n2 ASSO", StringComparison.Ordinal)).Valid,
+                "event association cannot be hidden beneath a note");
+            var inline = source.Replace(
+                "1 NAME Alex /Example/", "1 NAME Alex /Example/\n1 NOTE ordinary text\n1 SOUR inline text\n1 OBJE\n2 FILE example.jpg",
+                StringComparison.Ordinal);
+            Check(GedcomLegacyCompatibility.Preview(inline).Valid == (source == converted),
+                "legacy inline source and media remain previewable; GEDCOM 7 requires pointers");
+            Check(!GedcomLegacyCompatibility.Preview(source.Replace(
+                "1 SOUR FamilyTreeSyntheticFixtures", "1 SOUR FamilyTreeSyntheticFixtures\n1 ALIA @I1@",
+                StringComparison.Ordinal)).Valid, "individual alias is not a header pointer");
         }
         Console.WriteLine("PASS GEDCOM 5.5.1 UTF8 bounded preview, round-trip and invalid-input tests");
     }
