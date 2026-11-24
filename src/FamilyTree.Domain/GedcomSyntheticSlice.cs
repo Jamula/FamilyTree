@@ -66,20 +66,20 @@ public static partial class GedcomSyntheticSlice
 
     private sealed class PersonBuilder(string id)
     {
-        public string Id = id;
+        public readonly string Id = id;
         public string? Name;
         public readonly List<SyntheticGedcomEvent> Events = [];
         public readonly List<(string Tag, string Id)> FamilyRefs = [];
     }
     private sealed class FamilyBuilder(string id)
     {
-        public string Id = id;
+        public readonly string Id = id;
         public readonly List<SyntheticGedcomParent> Parents = [];
         public readonly List<string> Children = [];
     }
     private sealed class EventBuilder(string kind)
     {
-        public string Kind = kind;
+        public readonly string Kind = kind;
         public string? Date;
         public readonly List<string> Sources = [];
     }

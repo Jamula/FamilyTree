@@ -108,7 +108,10 @@ internal static class ApiLoopbackIntegrationAssertions
             "/api/v1/search?name=Fictional", "/api/v1/relationships/hidden",
             "/api/v1/media/private", "/api/v1/stories/private",
             "/api/v1/gratitude", "/api/v1/exports/gedcom",
-            "/api/v1/imports", "/api/v1/ai", "/api/v1/mcp",
+            "/api/v1/imports", "/api/v1/imports/gedcom/preview",
+            "/api/v1/imports/gedcom/proposals",
+            "/api/v1/imports/gedcom/proposals/fictional/approve",
+            "/api/v1/ai", "/api/v1/mcp",
             "/api/v1/private/unknown"
         };
         var methods = new[] {
@@ -153,7 +156,7 @@ internal static class ApiLoopbackIntegrationAssertions
             Check(response.StatusCode == HttpStatusCode.NotFound,
                 $"path segment comparison must not block unrelated route: {publicUnknown}");
         }
-        Console.WriteLine("PASS HTTP private route matrix: 133 verb/path pairs and malicious cookie/headers");
+        Console.WriteLine($"PASS HTTP private route matrix: {privatePaths.Length * methods.Length} verb/path pairs and malicious cookie/headers");
 
         using (var unknown = await client.GetAsync("/nothing-public-here"))
             Check(unknown.StatusCode == HttpStatusCode.NotFound,

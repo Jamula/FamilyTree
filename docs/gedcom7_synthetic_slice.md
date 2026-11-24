@@ -54,3 +54,17 @@ must precede real-data integration. Independent GEDCOM 7/5.5.1 conformance,
 complex family and adoption semantics, media, lossless application-specific
 sidecars, external round-trips and privacy regression tests remain open. Do not
 deploy a private GEDCOM endpoint or treat this slice as a backup.
+
+The in-flight private API composition in #107 does not expose GEDCOM routes.
+The read authorization work in #100 currently lacks relationship and
+date/source grants; the merged relationship review work in #94 does not
+provide a transactional GEDCOM import. After the remaining contracts are
+merged and reviewed, integration must bind the active authenticated principal
+and current grants to a field- and link-filtered export projection, and
+atomically apply the exact reconciled import only after independent authorized
+approval. Tests must
+prove pending, rejected, self-approved, revoked and cross-family imports
+produce no writes, and that hidden people, links, dates, sources and media
+never leave the export boundary. Current loopback tests verify prospective
+import preview, proposal and approval paths remain 501 for all verbs; they
+do not establish approved writes or authorized GEDCOM export.
