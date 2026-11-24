@@ -69,13 +69,17 @@ registered identity.
 
 Private people/search/tree reads remain `501` until the reviewed #100
 transactional membership, family, branch, person, and field-grant adapters
-are available on this branch. Relationship changes remain disabled pending
-#94. Family creation/bootstrap and administrator-owner provisioning are also
-not exposed: the existing `CreateFictionalFamily` operation is explicitly a
+are merged into this branch; #100 remains open and unmerged. Relationship
+persistence and its review transactions from #94 are now available, but its
+operations enforce family membership rather than the required branch/person/
+field grants. Relationship proposal, review, undo, and read routes therefore
+remain `501` until the #100 grant contract can authorize them transactionally.
+Family creation/bootstrap and administrator-owner provisioning are also not
+exposed: the existing `CreateFictionalFamily` operation is explicitly a
 fictional local test seam, not an owner authorization mechanism. A verified
 OIDC login alone never creates a family or grants membership. GEDCOM routes
-remain disabled pending #104, and the #103 acceptance harness remains a
-separate integration dependency.
+remain disabled pending #104; #103's process-level baseline is separate from
+this authenticated loopback integration test.
 
 Until secure owner provisioning and the reviewed read/mutation contracts land,
 this is not a private-family deployment and must not be used with real family

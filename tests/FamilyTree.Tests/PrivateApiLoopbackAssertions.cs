@@ -236,6 +236,25 @@ internal static class PrivateApiLoopbackAssertions
                 Check(stillClosed.StatusCode == HttpStatusCode.NotImplemented &&
                     stillClosed.Headers.CacheControl?.NoStore == true,
                     "private reads remain closed until the reviewed grant contract is integrated");
+            var unavailableRelationshipRoutes = new[]
+            {
+                $"/api/v1/families/{familyId:D}/relationships/proposals",
+                $"/api/v1/families/{familyId:D}/relationships/pending/{invitationId:D}/review",
+                $"/api/v1/families/{familyId:D}/relationships/approved/{invitationId:D}/undo"
+            };
+            foreach (var route in unavailableRelationshipRoutes)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, route)
+                {
+                    Content = JsonContent.Create(new { approve = true })
+                };
+                request.Headers.TryAddWithoutValidation("Cookie", adminCookie);
+                using var response = await client.SendAsync(request);
+                Check(response.StatusCode == HttpStatusCode.NotImplemented &&
+                    await response.Content.ReadAsStringAsync() == "" &&
+                    response.Headers.CacheControl?.NoStore == true,
+                    $"unscoped #94 relationship handlers remain closed: {route}");
+            }
 
             await app.StopAsync();
             await app.DisposeAsync();
