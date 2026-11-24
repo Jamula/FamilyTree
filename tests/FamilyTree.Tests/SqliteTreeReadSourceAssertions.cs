@@ -119,13 +119,14 @@ internal static class SqliteTreeReadSourceAssertions
             using var cancelled = new CancellationTokenSource();
             cancelled.Cancel();
             Expect<OperationCanceledException>(() => source.LoadAsync(member, family, branch,
-                cancelled.Token).GetAwaiter().GetResult(), "cancelled source denied");
+                person.Id, cancelled.Token).GetAwaiter().GetResult(), "cancelled source denied");
             Expect<OperationCanceledException>(() => people.GetAsync(member, family, branch,
                 person.Id, cancelled.Token).GetAwaiter().GetResult(), "cancelled lookup denied");
             Expect<OperationCanceledException>(() => people.SearchAsync(member, family, branch,
                 "Fictional", cancelled.Token).GetAwaiter().GetResult(), "cancelled search denied");
             Expect<ArgumentNullException>(() => new SqlitePersonReadService(null!), "source required");
-            Check(source.LoadAsync(Guid.Empty, family, branch, default).GetAwaiter().GetResult() is null,
+            Check(source.LoadAsync(Guid.Empty, family, branch, person.Id, default)
+                .GetAwaiter().GetResult() is null,
                 "empty source identity denied");
             Scale(path, key, family, admin, member, branch);
             Console.WriteLine("PASS persisted tree read grants, isolation and revocation");
@@ -181,15 +182,21 @@ internal static class SqliteTreeReadSourceAssertions
         }
         using var source = new SqliteTreeReadSource(path, key);
         var people = new SqlitePersonReadService(source);
+        var trees = new PrivateTreeReadService(source);
         using (var db = new SqliteConnection(new SqliteConnectionStringBuilder
             { DataSource = path, Pooling = false }.ToString()))
         {
             db.Open();
             using var writer = db.BeginTransaction();
             Check(people.GetAsync(member, family, branch, Id(1)).GetAwaiter().GetResult() is not null &&
-                people.SearchAsync(member, family, branch, "common").GetAwaiter().GetResult().Count == 25,
+                people.SearchAsync(member, family, branch, "common").GetAwaiter().GetResult().Count == 25 &&
+                trees.GetAsync(member, family, branch, Id(1), new TreeOptions())
+                    .GetAwaiter().GetResult()?.Nodes.Single().DisplayName == "Fictional Common",
                 "read transactions do not compete for a write reservation");
         }
+        Check(trees.GetAsync(member, family, branch, Id(10019), new TreeOptions())
+            .GetAwaiter().GetResult()?.Nodes.Single().DisplayName == "Fictional Needle",
+            "center-aware tree reads work beyond the former branch snapshot limit");
         Check(people.GetAsync(member, family, branch, Id(10019)).GetAwaiter().GetResult()?.DisplayName
             == "Fictional Needle", "targeted lookup does not decrypt unrelated corrupt records");
         var first = people.SearchAsync(member, family, branch, "common").GetAwaiter().GetResult();
@@ -212,9 +219,14 @@ internal static class SqliteTreeReadSourceAssertions
             "no-match search traverses every authorized batch");
         var grants = new SqliteGraphGrantStore(path);
         grants.RevokeDisplayName(family, branch, admin, member, Id(10019));
+        grants.RevokeDisplayName(family, branch, admin, member, Id(10020));
         Check(people.GetAsync(member, family, branch, Id(10019)).GetAwaiter().GetResult() is null &&
             people.GetAsync(member, family, branch, Guid.NewGuid()).GetAwaiter().GetResult() is null &&
-            people.SearchAsync(member, family, branch, "needle").GetAwaiter().GetResult().Count == 0,
+            people.SearchAsync(member, family, branch, "needle").GetAwaiter().GetResult().Count == 0 &&
+            trees.GetAsync(member, family, branch, Id(10020), new TreeOptions())
+                .GetAwaiter().GetResult() is null &&
+            trees.GetAsync(member, family, branch, Id(20000), new TreeOptions())
+                .GetAwaiter().GetResult() is null,
             "revoked field and unknown person remain indistinguishable at scale");
     }
 

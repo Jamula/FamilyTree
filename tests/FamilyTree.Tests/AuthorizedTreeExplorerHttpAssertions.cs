@@ -14,7 +14,7 @@ internal static class AuthorizedTreeExplorerHttpAssertions
         : ITrustedTreeReadSource
     {
         public async Task<TrustedTreeReadSnapshot?> LoadAsync(Guid principal, Guid tenant,
-            Guid scope, CancellationToken token)
+        Guid scope, Guid center, CancellationToken token)
         {
             if (principal != viewer || tenant != family || scope != branch) return null;
             var snapshot = await store.LoadAsync(token);

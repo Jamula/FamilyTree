@@ -19,8 +19,8 @@ public sealed class SqliteTreeReadSource : ITrustedTreeReadSource, IDisposable
     }
 
     public Task<TrustedTreeReadSnapshot?> LoadAsync(Guid viewer, Guid family,
-        Guid branch, CancellationToken cancellationToken) =>
-        _store.LoadTreeSnapshotAsync(viewer, family, branch, cancellationToken);
+        Guid branch, Guid center, CancellationToken cancellationToken) =>
+        _store.LoadTreeSnapshotAsync(viewer, family, branch, center, cancellationToken);
 
     internal Task<AuthorizedPersonSummary?> GetPersonAsync(Guid viewer, Guid family,
         Guid branch, Guid person, CancellationToken cancellationToken) =>
@@ -36,16 +36,18 @@ public sealed class SqliteTreeReadSource : ITrustedTreeReadSource, IDisposable
 public sealed partial class SqliteFamilyStore
 {
     internal Task<TrustedTreeReadSnapshot?> LoadTreeSnapshotAsync(Guid viewer,
-        Guid family, Guid branch, CancellationToken cancellationToken)
+        Guid family, Guid branch, Guid center, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (viewer == Guid.Empty || family == Guid.Empty || branch == Guid.Empty)
+        if (viewer == Guid.Empty || family == Guid.Empty || branch == Guid.Empty ||
+            center == Guid.Empty)
             return Task.FromResult<TrustedTreeReadSnapshot?>(null);
 
         using var con = Open();
         using var tx = con.BeginTransaction(deferred: true);
         var parameters = new[] { ("$f", (object)family.ToString("D")),
-            ("$p", (object)viewer.ToString("D")), ("$b", (object)branch.ToString("D")) };
+            ("$p", (object)viewer.ToString("D")), ("$b", (object)branch.ToString("D")),
+            ("$c", (object)center.ToString("D")) };
         if (Scalar<long>(con, tx, """
             SELECT COUNT(*) FROM memberships
             WHERE family_id=$f AND principal_id=$p AND state='Active';
@@ -62,7 +64,7 @@ public sealed partial class SqliteFamilyStore
             JOIN people AS person ON person.family_id=visibility.family_id
               AND person.id=visibility.person_id
             WHERE visibility.family_id=$f AND visibility.principal_id=$p
-              AND visibility.branch_id=$b ORDER BY person.id LIMIT 10001;
+              AND visibility.branch_id=$b AND person.id=$c;
             """, parameters))
         using (var reader = q.ExecuteReader())
             while (reader.Read())
@@ -73,6 +75,7 @@ public sealed partial class SqliteFamilyStore
                     reader.GetInt64(2) != 0));
             }
         cancellationToken.ThrowIfCancellationRequested();
+        if (people.Count == 0) return Task.FromResult<TrustedTreeReadSnapshot?>(null);
         var visible = people.Select(person => person.Id).ToHashSet();
         var branchGrant = new BranchVisibilityGrant(viewer, family, branch,
             MembershipState.Active, visible, new HashSet<Guid>());
