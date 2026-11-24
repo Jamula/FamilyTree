@@ -55,7 +55,61 @@ internal static class SqliteRelationshipAssertions
             using (var store = new SqliteFamilyStore(database, key))
             {
                 Expect<UnauthorizedAccessException>(() => store.ReadRelationships(
-                    Guid.NewGuid(), actor), "cross-family relationships denied");
+                    Guid.NewGuid(), actor), "unknown family relationships denied");
+
+                var foreignFamily = Guid.NewGuid();
+                var foreignAdmin = Guid.NewGuid();
+                var foreignAuthor = Guid.NewGuid();
+                store.CreateFictionalFamily(foreignFamily, foreignAdmin);
+                var now = DateTimeOffset.UtcNow;
+                var foreignInvite = store.IssueInvitation(foreignFamily, foreignAdmin,
+                    foreignAuthor, now.AddDays(1), now);
+                store.AcceptInvitation(foreignFamily, foreignAuthor, foreignInvite, now);
+                store.ApproveMember(foreignFamily, foreignAdmin, foreignAuthor);
+                var foreignA = new Person(Guid.NewGuid(), "Fictional Ash");
+                var foreignB = new Person(Guid.NewGuid(), "Fictional Birch");
+                foreach (var person in new[] {foreignA, foreignB})
+                    store.ReviewPerson(foreignFamily, foreignAdmin,
+                        store.ProposePerson(foreignFamily, foreignAuthor, person), true);
+                var foreignEdge = Relationship.Create(foreignA.Id, foreignB.Id,
+                    RelationKind.Friend, "fictional-foreign-link");
+                var foreignProposal = store.ProposeRelationship(
+                    foreignFamily, foreignAuthor, foreignEdge);
+                var localAuditBefore = store.CountAudit(family, admin);
+                var foreignAuditBefore = store.CountAudit(foreignFamily, foreignAdmin);
+
+                Expect<UnauthorizedAccessException>(() => store.ReadRelationships(
+                    foreignFamily, actor), "existing foreign family read denied");
+                Expect<InvalidOperationException>(() => store.ProposeRelationship(
+                    family, actor, foreignEdge), "foreign approved endpoints denied");
+                Expect<InvalidOperationException>(() => store.ReviewRelationship(
+                    family, admin, foreignProposal, true), "foreign proposal approval denied");
+                Expect<InvalidOperationException>(() => store.ReviewRelationship(
+                    family, admin, foreignProposal, false), "foreign proposal rejection denied");
+                Check(store.ReadRelationships(family, actor).Count == 0 &&
+                    store.ReadRelationships(foreignFamily, foreignAuthor).Count == 0 &&
+                    store.ListPendingRelationships(family, admin).Count == 0 &&
+                    store.ListPendingRelationships(foreignFamily, foreignAdmin)
+                        .Single().ProposalId == foreignProposal &&
+                    store.CountAudit(family, admin) == localAuditBefore &&
+                    store.CountAudit(foreignFamily, foreignAdmin) == foreignAuditBefore,
+                    "denied foreign proposals and reviews preserve both families");
+
+                store.ReviewRelationship(foreignFamily, foreignAdmin, foreignProposal, true);
+                Check(store.ReadRelationships(foreignFamily, foreignAuthor)
+                    .Single() == foreignEdge &&
+                    store.CountAudit(foreignFamily, foreignAdmin) == foreignAuditBefore + 1,
+                    "foreign relationship approved only within its own family");
+                Expect<InvalidOperationException>(() => store.UndoRelationship(
+                    family, admin, foreignProposal), "foreign approved proposal undo denied");
+                Check(store.ReadRelationships(family, actor).Count == 0 &&
+                    store.ReadRelationships(foreignFamily, foreignAuthor)
+                        .Single() == foreignEdge &&
+                    store.ListApprovedRelationshipsForUndo(foreignFamily, foreignAdmin)
+                        .Single().ProposalId == foreignProposal &&
+                    store.CountAudit(family, admin) == localAuditBefore &&
+                    store.CountAudit(foreignFamily, foreignAdmin) == foreignAuditBefore + 1,
+                    "denied foreign undo preserves both graphs and audits");
                 Expect<UnauthorizedAccessException>(() => store.ReadRelationships(
                     family, other), "unknown viewer denied");
                 Expect<UnauthorizedAccessException>(() => store.ProposeRelationship(
