@@ -12,7 +12,7 @@ public sealed partial class SqliteFamilyStore
 {
     public sealed record PendingRelationshipReview(
         Guid ProposalId, Relationship? Relationship, Guid SubmittedBy,
-        bool ContentUnreadable);
+        bool ContentUnreadable, string Cursor);
 
     public Guid ProposeRelationship(Guid familyId, Guid authorId, Relationship edge)
     {
@@ -71,12 +71,12 @@ public sealed partial class SqliteFamilyStore
     }
 
     public IReadOnlyList<PendingRelationshipReview> ListPendingRelationships(
-        Guid familyId, Guid moderatorId, Guid? afterProposalId = null)
+        Guid familyId, Guid moderatorId, string? afterProposalCursor = null)
     {
         RequireIds(familyId, moderatorId);
-        if (afterProposalId == Guid.Empty)
+        if (afterProposalCursor is not null && afterProposalCursor.Length == 0)
             throw new ArgumentException("Pagination cursor cannot be empty.",
-                nameof(afterProposalId));
+                nameof(afterProposalCursor));
         using var con = Open();
         using var tx = con.BeginTransaction();
         RequireMember(con, tx, familyId, moderatorId, administrator: true);
@@ -90,7 +90,7 @@ public sealed partial class SqliteFamilyStore
             ORDER BY id LIMIT 100;
             """, ("$f", familyId.ToString("D")),
             ("$moderator", moderatorId.ToString("D")),
-            ("$after", afterProposalId?.ToString("D") ?? "")))
+            ("$after", afterProposalCursor ?? "")))
         using (var reader = cmd.ExecuteReader())
             while (reader.Read())
             {
@@ -120,7 +120,8 @@ public sealed partial class SqliteFamilyStore
                         unreadable = true;
                     }
                 }
-                results.Add(new(proposalId, edge, submitter, unreadable));
+                results.Add(new(proposalId, edge, submitter, unreadable,
+                    reader.GetString(0)));
             }
         tx.Commit();
         return results;
@@ -206,15 +207,15 @@ public sealed partial class SqliteFamilyStore
     /// </summary>
     public sealed record ApprovedRelationshipUndo(
         Guid ProposalId, Relationship? Relationship, Guid SubmittedBy,
-        bool ContentUnreadable);
+        bool ContentUnreadable, string Cursor);
 
     public IReadOnlyList<ApprovedRelationshipUndo> ListApprovedRelationshipsForUndo(
-        Guid familyId, Guid moderatorId, Guid? afterProposalId = null)
+        Guid familyId, Guid moderatorId, string? afterProposalCursor = null)
     {
         RequireIds(familyId, moderatorId);
-        if (afterProposalId == Guid.Empty)
+        if (afterProposalCursor is not null && afterProposalCursor.Length == 0)
             throw new ArgumentException("Pagination cursor cannot be empty.",
-                nameof(afterProposalId));
+                nameof(afterProposalCursor));
         using var con = Open();
         using var tx = con.BeginTransaction();
         RequireMember(con, tx, familyId, moderatorId, administrator: true);
@@ -227,7 +228,7 @@ public sealed partial class SqliteFamilyStore
             ORDER BY id LIMIT 100;
             """, ("$f", familyId.ToString("D")),
             ("$moderator", moderatorId.ToString("D")),
-            ("$after", afterProposalId?.ToString("D") ?? "")))
+            ("$after", afterProposalCursor ?? "")))
         using (var reader = cmd.ExecuteReader())
             while (reader.Read())
             {
@@ -256,7 +257,7 @@ public sealed partial class SqliteFamilyStore
                     }
                 }
                 result.Add(new ApprovedRelationshipUndo(
-                    proposalId, edge, submitter, unreadable));
+                    proposalId, edge, submitter, unreadable, reader.GetString(0)));
             }
         tx.Commit();
         return result;

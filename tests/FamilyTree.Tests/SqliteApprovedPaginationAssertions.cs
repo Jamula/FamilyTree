@@ -49,9 +49,12 @@ internal static class SqliteApprovedPaginationAssertions
             }
             using (var reopened = new SqliteFamilyStore(database, key))
             {
-                var malformedIdProposal = proposals.Min();
+                var orderedProposals = proposals.OrderBy(x => x.ToString("D"),
+                    StringComparer.Ordinal).ToArray();
+                var malformedIdProposal = orderedProposals[99];
                 var malformedSubmitterProposal = proposals
                     .Where(x => x != malformedIdProposal).Min();
+                var malformedId = malformedIdProposal.ToString("D") + "!";
                 using (var connection = new SqliteConnection(
                     new SqliteConnectionStringBuilder {
                         DataSource = database, Pooling = false }.ToString()))
@@ -59,11 +62,12 @@ internal static class SqliteApprovedPaginationAssertions
                     connection.Open();
                     using var change = connection.CreateCommand();
                     change.CommandText = """
-                        UPDATE relationship_proposals SET id='!invalid-guid'
+                        UPDATE relationship_proposals SET id=$malformedId
                         WHERE family_id=$f AND id=$badId;
                         """;
                     change.Parameters.Clear();
                     change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$malformedId", malformedId);
                     change.Parameters.AddWithValue("$badId",
                         malformedIdProposal.ToString("D"));
                     Check(change.ExecuteNonQuery() == 1, "tamper approved proposal ID format");
@@ -79,6 +83,8 @@ internal static class SqliteApprovedPaginationAssertions
                     var quarantined = reopened.ListApprovedRelationshipsForUndo(
                         family, admin);
                     Check(quarantined.Count == 100 &&
+                        quarantined[^1].ProposalId == Guid.Empty &&
+                        quarantined[^1].Cursor == malformedId &&
                         quarantined.Any(x => x.ProposalId == Guid.Empty &&
                             x.SubmittedBy == member && x.Relationship is null &&
                             x.ContentUnreadable) &&
@@ -88,10 +94,11 @@ internal static class SqliteApprovedPaginationAssertions
                         "malformed approved identities are quarantined without hiding healthy items");
                     change.CommandText = """
                         UPDATE relationship_proposals SET id=$id
-                        WHERE family_id=$f AND id='!invalid-guid';
+                        WHERE family_id=$f AND id=$malformedId;
                         """;
                     change.Parameters.Clear();
                     change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$malformedId", malformedId);
                     change.Parameters.AddWithValue("$id",
                         malformedIdProposal.ToString("D"));
                     Check(change.ExecuteNonQuery() == 1, "restore approved proposal ID");
@@ -109,10 +116,10 @@ internal static class SqliteApprovedPaginationAssertions
                 var page1 = reopened.ListApprovedRelationshipsForUndo(family, admin);
                 Check(page1.Count == 100, "first page is bounded to 100 approvals");
                 var page2 = reopened.ListApprovedRelationshipsForUndo(
-                    family, admin, page1[^1].ProposalId);
+                    family, admin, page1[^1].Cursor);
                 Check(page2.Count == 5, "cursor retrieves remaining five approvals");
                 Check(reopened.ListApprovedRelationshipsForUndo(
-                    family, admin, page2[^1].ProposalId).Count == 0,
+                    family, admin, page2[^1].Cursor).Count == 0,
                     "terminal page is empty");
                 var found = page1.Concat(page2).Select(x => x.ProposalId).ToHashSet();
                 Check(found.SetEquals(proposals) &&
@@ -122,7 +129,7 @@ internal static class SqliteApprovedPaginationAssertions
                 Check(reopened.CountAudit(family, admin) == 108,
                     "pagination does not mutate approved relationships or audit");
                 Expect<ArgumentException>(() => reopened.ListApprovedRelationshipsForUndo(
-                    family, admin, Guid.Empty), "empty cursor is invalid");
+                    family, admin, ""), "empty cursor is invalid");
                 Expect<UnauthorizedAccessException>(() =>
                     reopened.ListApprovedRelationshipsForUndo(family, member),
                     "ordinary member cannot read approved undo history");

@@ -360,9 +360,12 @@ internal static class SqliteRelationshipAssertions
                     pendingProposals.Add(store.ProposeRelationship(family, actor,
                         Relationship.Create(personA.Id, personB.Id,
                             RelationKind.Neighbor, $"fictional-pending-page-{index}")));
-                var malformedIdProposal = pendingProposals.Min();
+                var orderedPendingProposals = pendingProposals.OrderBy(
+                    x => x.ToString("D"), StringComparer.Ordinal).ToArray();
+                var malformedIdProposal = orderedPendingProposals[99];
                 var malformedSubmitterProposal = pendingProposals
                     .Where(x => x != malformedIdProposal).Min();
+                var malformedId = malformedIdProposal.ToString("D") + "!";
                 using (var connection = new SqliteConnection(
                     new SqliteConnectionStringBuilder {
                         DataSource = database, Pooling = false }.ToString()))
@@ -370,10 +373,11 @@ internal static class SqliteRelationshipAssertions
                     connection.Open();
                     using var change = connection.CreateCommand();
                     change.CommandText = """
-                        UPDATE relationship_proposals SET id='!invalid-guid'
+                        UPDATE relationship_proposals SET id=$malformedId
                         WHERE family_id=$f AND id=$badId;
                         """;
                     change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$malformedId", malformedId);
                     change.Parameters.AddWithValue("$badId",
                         malformedIdProposal.ToString("D"));
                     Check(change.ExecuteNonQuery() == 1, "tamper pending proposal ID format");
@@ -388,6 +392,8 @@ internal static class SqliteRelationshipAssertions
                     Check(change.ExecuteNonQuery() == 1, "tamper pending submitter format");
                     var firstPage = store.ListPendingRelationships(family, admin);
                     Check(firstPage.Count == 100 &&
+                        firstPage[^1].ProposalId == Guid.Empty &&
+                        firstPage[^1].Cursor == malformedId &&
                         firstPage.Any(x => x.ProposalId == Guid.Empty &&
                             x.SubmittedBy == actor && x.Relationship is null &&
                             x.ContentUnreadable) &&
@@ -397,10 +403,11 @@ internal static class SqliteRelationshipAssertions
                         "malformed pending identities are quarantined without hiding healthy items");
                     change.CommandText = """
                         UPDATE relationship_proposals SET id=$id
-                        WHERE family_id=$f AND id='!invalid-guid';
+                        WHERE family_id=$f AND id=$malformedId;
                         """;
                     change.Parameters.Clear();
                     change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$malformedId", malformedId);
                     change.Parameters.AddWithValue("$id",
                         malformedIdProposal.ToString("D"));
                     Check(change.ExecuteNonQuery() == 1, "restore pending proposal ID");
@@ -415,7 +422,7 @@ internal static class SqliteRelationshipAssertions
                         malformedSubmitterProposal.ToString("D"));
                     Check(change.ExecuteNonQuery() == 1, "restore pending submitter ID");
                     var secondPage = store.ListPendingRelationships(
-                        family, admin, firstPage[^1].ProposalId);
+                        family, admin, firstPage[^1].Cursor);
                     var discoveredIds = firstPage.Concat(secondPage)
                         .Select(x => x.ProposalId).ToArray();
                     Check(secondPage.Count == 5 && discoveredIds.Length == 105 &&
@@ -428,7 +435,7 @@ internal static class SqliteRelationshipAssertions
                 foreach (var proposal in pendingProposals)
                     store.ReviewRelationship(family, admin, proposal, false);
                 Expect<ArgumentException>(() => store.ListPendingRelationships(
-                    family, admin, Guid.Empty), "empty pending cursor is invalid");
+                    family, admin, ""), "empty pending cursor is invalid");
                 Check(!store.ListPendingRelationships(family, admin).Any(x =>
                     x.ProposalId == adminOwned),
                     "self-submitted items do not occupy independent review inbox");
