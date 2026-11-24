@@ -11,41 +11,92 @@ public sealed class SqlitePersonReadService(SqliteTreeReadSource source)
     private readonly SqliteTreeReadSource _source =
         source ?? throw new ArgumentNullException(nameof(source));
 
-    public async Task<AuthorizedPersonSummary?> GetAsync(Guid viewer, Guid family,
+    public Task<AuthorizedPersonSummary?> GetAsync(Guid viewer, Guid family,
         Guid branch, Guid person, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (person == Guid.Empty) return null;
-        var snapshot = await _source.LoadAsync(viewer, family, branch, cancellationToken);
-        if (snapshot is null) return null;
-        var authorization = Authorization(snapshot);
-        return await AuthorizedFamilyQuery.GetAsync(viewer, person, snapshot.People,
-            authorization, snapshot.FieldGrants, cancellationToken);
+        return _source.GetPersonAsync(viewer, family, branch, person, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<AuthorizedPersonSummary>> SearchAsync(Guid viewer,
+    public Task<IReadOnlyList<AuthorizedPersonSummary>> SearchAsync(Guid viewer,
         Guid family, Guid branch, string? text, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(text) || text.Length > 80 || text.Trim().Length < 2)
-            return Array.Empty<AuthorizedPersonSummary>();
-        var snapshot = await _source.LoadAsync(viewer, family, branch, cancellationToken);
-        if (snapshot is null) return Array.Empty<AuthorizedPersonSummary>();
-        var authorization = Authorization(snapshot);
-        return await AuthorizedFamilyQuery.SearchAsync(viewer, snapshot.People, text,
-            authorization, snapshot.FieldGrants, cancellationToken);
+            return Task.FromResult<IReadOnlyList<AuthorizedPersonSummary>>(Array.Empty<AuthorizedPersonSummary>());
+        return _source.SearchPeopleAsync(viewer, family, branch, text.Trim(), cancellationToken);
+    }
+}
+
+public sealed partial class SqliteFamilyStore
+{
+    private const int PersonSearchBatchSize = 128;
+    private const string AuthorizedPeopleSql = """
+        SELECT visibility.person_id, person.encrypted_name
+        FROM person_visibility AS visibility
+        JOIN memberships AS membership ON membership.family_id=visibility.family_id
+          AND membership.principal_id=visibility.principal_id AND membership.state='Active'
+        JOIN person_display_name_visibility AS field
+          ON field.family_id=visibility.family_id AND field.branch_id=visibility.branch_id
+          AND field.principal_id=visibility.principal_id AND field.person_id=visibility.person_id
+        JOIN people AS person ON person.family_id=visibility.family_id AND person.id=visibility.person_id
+        WHERE visibility.family_id=$f AND visibility.branch_id=$b AND visibility.principal_id=$p
+        """;
+
+    internal Task<AuthorizedPersonSummary?> GetAuthorizedPersonAsync(Guid viewer, Guid family,
+        Guid branch, Guid person, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (viewer == Guid.Empty || family == Guid.Empty || branch == Guid.Empty || person == Guid.Empty)
+            return Task.FromResult<AuthorizedPersonSummary?>(null);
+        using var con = Open();
+        using var tx = con.BeginTransaction();
+        using var q = Cmd(con, tx, AuthorizedPeopleSql + " AND visibility.person_id=$id;",
+            ("$f", family.ToString("D")), ("$b", branch.ToString("D")),
+            ("$p", viewer.ToString("D")), ("$id", person.ToString("D")));
+        using var reader = q.ExecuteReader();
+        AuthorizedPersonSummary? result = null;
+        if (reader.Read())
+            result = new(person, Decrypt(family, person, reader.GetFieldValue<byte[]>(1)));
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(result);
     }
 
-    private static MembershipScopedAuthorization Authorization(TrustedTreeReadSnapshot snapshot)
+    internal Task<IReadOnlyList<AuthorizedPersonSummary>> SearchAuthorizedPeopleAsync(Guid viewer,
+        Guid family, Guid branch, string text, CancellationToken cancellationToken)
     {
-        if (snapshot.People.Count > 10_000)
-            throw new InvalidOperationException("Trusted tree snapshot is invalid.");
-        var grants = snapshot.BranchGrants
-            .Where(grant => grant.PrincipalId == snapshot.ViewerId &&
-                grant.FamilyId == snapshot.FamilyId && grant.BranchId == snapshot.BranchId &&
-                grant.State == MembershipState.Active)
-            .Select(grant => new ScopedFamilyGrant(grant.PrincipalId, grant.FamilyId,
-                grant.State, grant.VisiblePeople, grant.VisibleRelationships));
-        return new MembershipScopedAuthorization(snapshot.FamilyId, grants);
+        cancellationToken.ThrowIfCancellationRequested();
+        var results = new List<AuthorizedPersonSummary>();
+        if (viewer == Guid.Empty || family == Guid.Empty || branch == Guid.Empty)
+            return Task.FromResult<IReadOnlyList<AuthorizedPersonSummary>>(results);
+        using var con = Open();
+        using var tx = con.BeginTransaction();
+        var after = "";
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var q = Cmd(con, tx, AuthorizedPeopleSql + """
+                 AND visibility.person_id>$after ORDER BY visibility.person_id LIMIT $limit;
+                """, ("$f", family.ToString("D")), ("$b", branch.ToString("D")),
+                ("$p", viewer.ToString("D")), ("$after", after), ("$limit", PersonSearchBatchSize));
+            using var reader = q.ExecuteReader();
+            var count = 0;
+            while (reader.Read())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                count++;
+                after = reader.GetString(0);
+                var id = Guid.Parse(after);
+                var name = Decrypt(family, id, reader.GetFieldValue<byte[]>(1));
+                if (name.Contains(text, StringComparison.OrdinalIgnoreCase))
+                    results.Add(new(id, name));
+                if (results.Count == 25)
+                    return Task.FromResult<IReadOnlyList<AuthorizedPersonSummary>>(results);
+            }
+            if (count < PersonSearchBatchSize)
+                break;
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult<IReadOnlyList<AuthorizedPersonSummary>>(results);
     }
 }

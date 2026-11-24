@@ -1,7 +1,9 @@
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using System.Text;
 using FamilyTree.Domain;
 using FamilyTree.Persistence;
+using Microsoft.Data.Sqlite;
 
 internal static class SqliteTreeReadSourceAssertions
 {
@@ -117,6 +119,7 @@ internal static class SqliteTreeReadSourceAssertions
             Expect<ArgumentNullException>(() => new SqlitePersonReadService(null!), "source required");
             Check(source.LoadAsync(Guid.Empty, family, branch, default).GetAwaiter().GetResult() is null,
                 "empty source identity denied");
+            Scale(path, key, family, admin, member, branch);
             Console.WriteLine("PASS persisted tree read grants, isolation and revocation");
         }
         finally
@@ -124,6 +127,78 @@ internal static class SqliteTreeReadSourceAssertions
             CryptographicOperations.ZeroMemory(key);
             Directory.Delete(folder, true);
         }
+    }
+
+    private static void Scale(string path, byte[] key, Guid family, Guid admin, Guid member, Guid branch)
+    {
+        static Guid Id(int n) => Guid.Parse($"00000000-0000-0000-0000-{n:x12}");
+        byte[] Seal(Guid id, string name)
+        {
+            var nonce = RandomNumberGenerator.GetBytes(12);
+            var clear = Encoding.UTF8.GetBytes(name);
+            var cipher = new byte[clear.Length];
+            var tag = new byte[16];
+            using var aes = new AesGcm(key, 16);
+            byte[] aad = [..family.ToByteArray(), ..id.ToByteArray()];
+            aes.Encrypt(nonce, clear, cipher, tag, aad);
+            return [..nonce, ..tag, ..cipher];
+        }
+
+        using (var db = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = path, ForeignKeys = true, Pooling = false }.ToString()))
+        {
+            db.Open();
+            using var tx = db.BeginTransaction();
+            using var insert = db.CreateCommand();
+            insert.Transaction = tx;
+            insert.CommandText = """
+                INSERT INTO people(family_id,id,encrypted_name,living) VALUES($f,$id,$name,0);
+                INSERT INTO person_visibility VALUES($f,$b,$p,$id);
+                INSERT INTO person_display_name_visibility VALUES($f,$b,$p,$id);
+                """;
+            insert.Parameters.AddWithValue("$f", family.ToString("D"));
+            insert.Parameters.AddWithValue("$b", branch.ToString("D"));
+            insert.Parameters.AddWithValue("$p", member.ToString("D"));
+            var idParameter = insert.Parameters.Add("$id", SqliteType.Text);
+            var nameParameter = insert.Parameters.Add("$name", SqliteType.Blob);
+            for (var i = 1; i <= 10020; i++)
+            {
+                var id = Id(i);
+                idParameter.Value = id.ToString("D");
+                nameParameter.Value = i == 10020 ? new byte[] { 0 } :
+                    Seal(id, i == 10019 ? "Fictional Needle" : "Fictional Common");
+                insert.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        using var source = new SqliteTreeReadSource(path, key);
+        var people = new SqlitePersonReadService(source);
+        Check(people.GetAsync(member, family, branch, Id(10019)).GetAwaiter().GetResult()?.DisplayName
+            == "Fictional Needle", "targeted lookup does not decrypt unrelated corrupt records");
+        var first = people.SearchAsync(member, family, branch, "common").GetAwaiter().GetResult();
+        Check(first.Count == 25 && first[0].PersonId == Id(1) && first[24].PersonId == Id(25),
+            "search stops after 25 matches without decrypting the rest");
+        using (var db = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = path, Pooling = false }.ToString()))
+        {
+            db.Open();
+            using var update = db.CreateCommand();
+            update.CommandText = "UPDATE people SET encrypted_name=$name WHERE family_id=$f AND id=$id;";
+            update.Parameters.AddWithValue("$name", Seal(Id(10020), "Fictional Last"));
+            update.Parameters.AddWithValue("$f", family.ToString("D"));
+            update.Parameters.AddWithValue("$id", Id(10020).ToString("D"));
+            update.ExecuteNonQuery();
+        }
+        Check(people.SearchAsync(member, family, branch, "needle").GetAwaiter().GetResult()
+            .Single().PersonId == Id(10019), "search reaches matches beyond tree limit");
+        Check(people.SearchAsync(member, family, branch, "not present").GetAwaiter().GetResult().Count == 0,
+            "no-match search traverses every authorized batch");
+        var grants = new SqliteGraphGrantStore(path);
+        grants.RevokeDisplayName(family, branch, admin, member, Id(10019));
+        Check(people.GetAsync(member, family, branch, Id(10019)).GetAwaiter().GetResult() is null &&
+            people.GetAsync(member, family, branch, Guid.NewGuid()).GetAwaiter().GetResult() is null &&
+            people.SearchAsync(member, family, branch, "needle").GetAwaiter().GetResult().Count == 0,
+            "revoked field and unknown person remain indistinguishable at scale");
     }
 
     private static void Invite(SqliteFamilyStore store, Guid family, Guid admin, Guid member, bool approve)

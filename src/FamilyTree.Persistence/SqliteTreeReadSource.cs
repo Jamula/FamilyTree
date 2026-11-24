@@ -22,6 +22,14 @@ public sealed class SqliteTreeReadSource : ITrustedTreeReadSource, IDisposable
         Guid branch, CancellationToken cancellationToken) =>
         _store.LoadTreeSnapshotAsync(viewer, family, branch, cancellationToken);
 
+    internal Task<AuthorizedPersonSummary?> GetPersonAsync(Guid viewer, Guid family,
+        Guid branch, Guid person, CancellationToken cancellationToken) =>
+        _store.GetAuthorizedPersonAsync(viewer, family, branch, person, cancellationToken);
+
+    internal Task<IReadOnlyList<AuthorizedPersonSummary>> SearchPeopleAsync(Guid viewer,
+        Guid family, Guid branch, string text, CancellationToken cancellationToken) =>
+        _store.SearchAuthorizedPeopleAsync(viewer, family, branch, text, cancellationToken);
+
     public void Dispose() => _store.Dispose();
 }
 
