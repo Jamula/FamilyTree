@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using FamilyTree.Persistence;
 
 if (args.Length != 7)
@@ -72,11 +73,10 @@ static string ResolveKeyPath(string keyPath, string sourcePath, string targetPat
         (File.GetAttributes(fullPath) & FileAttributes.Directory) != 0)
         throw new FileNotFoundException();
 
-    var comparison = OperatingSystem.IsWindows()
-        ? StringComparison.OrdinalIgnoreCase
-        : StringComparison.Ordinal;
     foreach (var path in new[] { sourcePath, targetPath })
-        if (string.Equals(fullPath, Path.GetFullPath(path), comparison))
+        if (string.Equals(fullPath.Normalize(NormalizationForm.FormC),
+                Path.GetFullPath(path).Normalize(NormalizationForm.FormC),
+                StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException();
     return fullPath;
 }

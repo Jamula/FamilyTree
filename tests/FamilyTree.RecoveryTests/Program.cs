@@ -132,8 +132,19 @@ static void RunRecoveryAssertions()
         Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(databasePath, databasePath, backupKey),
             "backup cannot replace the source database");
         Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(
+            databasePath, databasePath.ToUpperInvariant(), backupKey),
+            "case-variant path aliases are rejected conservatively");
+        var composedPath = Path.Combine(directory, "synthetic-\u00e9.sqlite");
+        var decomposedPath = Path.Combine(directory, "synthetic-e\u0301.sqlite");
+        Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(
+            composedPath, decomposedPath, backupKey),
+            "canonically equivalent Unicode path aliases are rejected");
+        Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(
             databasePath, databasePath + "-wal", backupKey),
             "backup cannot replace the source WAL sidecar");
+        Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(
+            databasePath, databasePath + "-WAL", backupKey),
+            "case-variant WAL sidecar aliases are rejected");
         Expect<ArgumentException>(() => SqliteRecovery.Restore(backupPath, backupPath, backupKey),
             "restore cannot replace its encrypted source");
         Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(databasePath, backupPath, new byte[8]),
@@ -377,6 +388,19 @@ static void TestCliIntegration(
         var conflict = RunCli(cliPath, "backup", "--database", databasePath,
             "--output", keyPath, "--key-file", keyPath);
         Check(conflict.ExitCode != 0, "CLI rejects a key file reused as its output");
+        var caseVariantConflict = RunCli(cliPath, "backup", "--database", databasePath,
+            "--output", keyPath.ToUpperInvariant(), "--key-file", keyPath);
+        Check(caseVariantConflict.ExitCode != 0,
+            "CLI rejects a case-variant alias of its external key file");
+        var unicodeKeyPath = Path.Combine(Path.GetDirectoryName(databasePath)!,
+            "recovery-\u00e9.key");
+        var unicodeAliasPath = Path.Combine(Path.GetDirectoryName(databasePath)!,
+            "recovery-e\u0301.key");
+        File.Copy(keyPath, unicodeKeyPath);
+        var unicodeConflict = RunCli(cliPath, "backup", "--database", databasePath,
+            "--output", unicodeAliasPath, "--key-file", unicodeKeyPath);
+        Check(unicodeConflict.ExitCode != 0,
+            "CLI rejects a canonically equivalent Unicode alias of its external key");
     }
     finally
     {

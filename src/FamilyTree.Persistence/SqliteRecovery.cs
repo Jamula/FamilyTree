@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.Sqlite;
 
 namespace FamilyTree.Persistence;
@@ -346,10 +347,7 @@ public static class SqliteRecovery
 
     private static void RequireDistinct(string first, string second)
     {
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        if (string.Equals(first, second, comparison))
+        if (PathsEqual(first, second))
             throw new ArgumentException("Recovery input and output paths must differ.");
     }
 
@@ -361,9 +359,8 @@ public static class SqliteRecovery
     }
 
     private static bool PathsEqual(string first, string second) =>
-        string.Equals(first, second, OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal);
+        string.Equals(first.Normalize(NormalizationForm.FormC),
+            second.Normalize(NormalizationForm.FormC), StringComparison.OrdinalIgnoreCase);
 
     private static bool HasSidecar(string path)
     {

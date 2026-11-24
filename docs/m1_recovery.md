@@ -17,7 +17,9 @@ published.
 The backup key is a separate, externally provisioned 32-byte file. It is not
 stored in the database, backup, source tree, command line, or logs. Backups
 fail closed for invalid keys, failed authentication, incomplete or invalid
-SQLite snapshots, symlink/reparse paths, and path collisions. New encrypted
+SQLite snapshots, symlink/reparse paths, and path collisions (including
+case-only and canonically equivalent Unicode path aliases, conservatively on
+every OS). New encrypted
 backup files are published through a same-directory temporary file and atomic
 rename. Restore only accepts a nonexistent target with no SQLite sidecars,
 validates before writing, stages beside the target, flushes it, then renames
