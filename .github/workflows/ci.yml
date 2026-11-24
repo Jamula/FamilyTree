@@ -39,6 +39,27 @@ jobs:
         run: dotnet restore FamilyTree.slnx
       - name: Build
         run: dotnet build FamilyTree.slnx --no-restore --configuration Release
+      - name: Process-level private API acceptance baseline
+        env:
+          FAMILYTREE_OTLP_ENABLED: 'true'
+          FAMILYTREE_REMOTE_OTLP_APPROVED: 'true'
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'not-a-valid-otlp-endpoint'
+          OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf'
+        run: |
+          dotnet build tests/FamilyTree.AcceptanceHarness/FamilyTree.AcceptanceHarness.csproj --configuration Release
+          hostile_root="$(mktemp -d)"
+          project_settings=src/FamilyTree.Api/appsettings.json
+          if [ -e "$project_settings" ]; then cp "$project_settings" "$hostile_root/original-appsettings.json"; fi
+          trap 'if [ -e "$hostile_root/original-appsettings.json" ]; then mv "$hostile_root/original-appsettings.json" "$project_settings"; else rm -f "$project_settings"; fi; rm -rf "$hostile_root"' EXIT
+          echo '{"Kestrel":{"Endpoints":{"Hostile":{"Url":"http://0.0.0.0:0"}}},"FAMILYTREE_OIDC_GOOGLE_CLIENT_ID":"fictional-client"}' > "$hostile_root/appsettings.json"
+          cp "$hostile_root/appsettings.json" "$project_settings"
+          for prefix in '' ASPNETCORE_ DOTNET_ aspnetcore_; do
+            env "${prefix}Kestrel__Endpoints__Hostile__Url=http://0.0.0.0:0" \
+              "${prefix}familytree_oidc_google_client_id=fictional-client" \
+              "${prefix}FAMILYTREE_PRIVATE_API_ENABLED=true" \
+              "${prefix}CONTENTROOT=$hostile_root" \
+              dotnet run --project tests/FamilyTree.AcceptanceHarness/FamilyTree.AcceptanceHarness.csproj --configuration Release --no-build
+          done
       - name: Restore local tools
         run: dotnet tool restore
       - name: Domain assertions and local coverage
