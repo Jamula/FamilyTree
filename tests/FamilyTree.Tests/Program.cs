@@ -32,6 +32,7 @@ await MembershipAuthorizationAssertions.RunAsync();
 // Run async HTTP integration checks outside module initializers to avoid
 // CLR type-initialization locks blocking the request continuations.
 await FictionalWorkbenchHttpAssertions.RunAsync();
+await AuthorizedTreeExplorerHttpAssertions.RunAsync();
 
 // Keep HTTP integration off module initializers to avoid CLR startup locks.
 await ApiLoopbackIntegrationAssertions.RunAsync();

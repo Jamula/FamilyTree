@@ -6,9 +6,8 @@ using FamilyTree.Domain;
 namespace FamilyTree.Web;
 
 /// <summary>
-/// Accessible, no-JavaScript SVG for the entirely fictional public explorer.
-/// The *caller* is exclusively SyntheticTreeExplorer; this helper does not
-/// authorize private data or access a user-controlled store.
+/// Accessible, no-JavaScript SVG. This helper does not authorize data or
+/// access a store; callers must supply an already authorized projection.
 /// </summary>
 public static class FictionalSvgTree
 {
@@ -18,11 +17,16 @@ public static class FictionalSvgTree
     private const int ColWidth = 172;
 
     public static string Render(PersonTreeProjection? tree, TreeOptions options)
+        => Render(tree, options, "/demo", true);
+
+    internal static string Render(PersonTreeProjection? tree, TreeOptions options,
+        string path, bool fictional)
     {
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
         if (tree is null || tree.Nodes.Count == 0)
-            return "<p>No fictional people available for this view.</p>";
+            return fictional ? "<p>No fictional people available for this view.</p>"
+                : "<p>No people available for this view.</p>";
 
         var levels = tree.Nodes.GroupBy(n => n.Generation)
             .OrderBy(g => g.Key)
@@ -45,14 +49,18 @@ public static class FictionalSvgTree
         html.Append("<p>Use a person link to recenter the diagram. On mobile, scroll the ");
         html.Append("diagram sideways. A complete keyboard-accessible table follows.</p>");
         html.Append("<div class='tree-scroll' tabindex='0' role='region' ");
-        html.Append("aria-label='Scrollable fictional family diagram' ");
+        html.Append(fictional ? "aria-label='Scrollable fictional family diagram' " :
+            "aria-label='Scrollable family diagram' ");
         html.Append("style='overflow:auto;max-width:100%;border:1px solid #aaa;padding:.3rem'>");
         html.Append("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ")
             .Append(width).Append(' ').Append(height)
             .Append("' width='").Append(width).Append("' height='").Append(height)
             .Append("' aria-labelledby='tree-svg-title tree-svg-description'>");
-        html.Append("<title id='tree-svg-title'>Fictional family generation diagram</title>");
-        html.Append("<desc id='tree-svg-description'>Links between invented people; ");
+        html.Append(fictional
+            ? "<title id='tree-svg-title'>Fictional family generation diagram</title>"
+            : "<title id='tree-svg-title'>Family generation diagram</title>");
+        html.Append(fictional ? "<desc id='tree-svg-description'>Links between invented people; "
+            : "<desc id='tree-svg-description'>Links between visible people; ");
         html.Append("select any person to recenter. The following table is an alternative.</desc>");
 
         // Distinct typed links can connect the same two people. Group them
@@ -135,7 +143,8 @@ public static class FictionalSvgTree
                 html.Append("><title>")
                     .Append(WebUtility.HtmlEncode(edge.Inferred ? "inferred sibling"
                         : edge.Kind.ToString()))
-                    .Append(" connection between fictional people</title></path>");
+                    .Append(fictional ? " connection between fictional people</title></path>"
+                        : " connection between visible people</title></path>");
             }
         }
 
@@ -148,7 +157,7 @@ public static class FictionalSvgTree
             // name: both text and ARIA labels are HTML-entity-encoded.
             var escaped = WebUtility.HtmlEncode(name);
             var shortName = WebUtility.HtmlEncode(name.Length > 22 ? name[..21] + "…" : name);
-            var query = "/demo?center=" + node.Person.Id.ToString("D") +
+            var query = WebUtility.HtmlEncode(path) + "?center=" + node.Person.Id.ToString("D") +
                 "&amp;above=" + options.GenerationsAbove +
                 "&amp;below=" + options.GenerationsBelow +
                 "&amp;spouses=" + (options.Spouses ? "yes" : "no") +
