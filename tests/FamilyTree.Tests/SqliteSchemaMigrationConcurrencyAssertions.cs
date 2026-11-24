@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using FamilyTree.Persistence;
 using Microsoft.Data.Sqlite;
@@ -12,7 +11,6 @@ internal static class SqliteSchemaMigrationConcurrencyAssertions
         Directory.CreateDirectory(directory);
         var database = Path.Join(directory, "legacy.sqlite");
         var key = RandomNumberGenerator.GetBytes(32);
-        var stores = new ConcurrentBag<SqliteFamilyStore>();
 
         try
         {
@@ -33,14 +31,17 @@ internal static class SqliteSchemaMigrationConcurrencyAssertions
             }
 
             using var start = new Barrier(2);
-            await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => Task.Run(() =>
+            Task<SqliteFamilyStore> OpenStore() => Task.Run(() =>
             {
                 if (!start.SignalAndWait(TimeSpan.FromSeconds(10)))
                     throw new TimeoutException("Concurrent legacy store open timed out.");
-                stores.Add(new SqliteFamilyStore(database, key));
-            })));
+                return new SqliteFamilyStore(database, key);
+            });
+            var firstOpen = OpenStore();
+            var secondOpen = OpenStore();
+            using var firstStore = await firstOpen;
+            using var secondStore = await secondOpen;
 
-            Check(stores.Count == 2, "both concurrent legacy stores open");
             using var verify = new SqliteConnection(
                 new SqliteConnectionStringBuilder {
                     DataSource = database, Pooling = false }.ToString());
@@ -56,7 +57,6 @@ internal static class SqliteSchemaMigrationConcurrencyAssertions
         }
         finally
         {
-            foreach (var store in stores) store.Dispose();
             CryptographicOperations.ZeroMemory(key);
             if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
