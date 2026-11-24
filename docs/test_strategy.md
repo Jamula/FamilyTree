@@ -7,7 +7,7 @@ coverage is the instrumenter's root percentage and may include test code.
 The separately calculated **per-component** source-line coverage excludes
 test and generated files. The architectural gate requires at least
 **90% measured line coverage for each** of:
-`FamilyTree.Domain`, `FamilyTree.Api`, `FamilyTree.Web`,
+`FamilyTree.Domain`, `FamilyTree.Persistence`, `FamilyTree.Api`, `FamilyTree.Web`,
 `FamilyTree.Mcp`, `FamilyTree.ServiceDefaults`, and
 `FamilyTree.SyntheticDemo`. Missing or unmeasured components fail this
 gate rather than counting as covered. The overall line-coverage floor
@@ -34,6 +34,10 @@ authentication and error tests.
 - API loopback integration: actual Kestrel application composition, anonymous
   session 401, default-off providers, forged identity headers, private
   read/write 501 and response body equality for denied/unknown IDs.
+- SQLite integration: isolated synthetic databases, reopening and competing
+  invitation acceptance through independent connections, pending-member denial,
+  independent approval, rollback, audit and durable revocation. This exercises
+  the persistence component directly, not authenticated HTTP or process restart.
 - Web integration: fictional workbench GET/POST/antiforgery, malformed forms,
   approved/rejected transitions, stale versions, undo and localhost-only access.
 - MCP: official stdio handshake, synthetic tool validation, bounded draft
@@ -54,3 +58,9 @@ mobile gestures and private data migration remain missing or incomplete.
 Tests above are mostly synthetic and cannot substitute for those end-to-end
 acceptance tests. Private family APIs stay fail-closed until the independent
 security gates have passed. Product version remains 0.1.0.
+
+Run the cross-platform executable assertions with
+`dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj --configuration Release`.
+The private MVP acceptance scenarios in [issue #90](https://github.com/Jamula/FamilyTree/issues/90)
+remain unaccepted; a passing component or fail-closed boundary test is not a
+passing login, browser, editing, import/export, or restart E2E scenario.
