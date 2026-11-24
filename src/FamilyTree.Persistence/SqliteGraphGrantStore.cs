@@ -32,6 +32,16 @@ public sealed class SqliteGraphGrantStore
                 FOREIGN KEY (family_id,person_id)
                     REFERENCES people(family_id,id)
             );
+            CREATE TABLE IF NOT EXISTS person_display_name_visibility (
+                family_id TEXT NOT NULL,
+                branch_id TEXT NOT NULL,
+                principal_id TEXT NOT NULL,
+                person_id TEXT NOT NULL,
+                PRIMARY KEY (family_id,branch_id,principal_id,person_id),
+                FOREIGN KEY (family_id,branch_id,principal_id,person_id)
+                    REFERENCES person_visibility(family_id,branch_id,principal_id,person_id)
+                    ON DELETE CASCADE
+            );
             """;
         cmd.ExecuteNonQuery();
     }
@@ -75,6 +85,41 @@ public sealed class SqliteGraphGrantStore
             AND branch_id=$branch AND principal_id=$recipient AND person_id=$person;
             """,familyId,branchId,recipientId,personId);
         cmd.ExecuteNonQuery(); // Idempotent, without revealing existence.
+        tx.Commit();
+    }
+
+    public void GrantDisplayName(Guid familyId, Guid branchId, Guid adminId,
+        Guid recipientId, Guid personId)
+    {
+        RequireIds(familyId, branchId, adminId, recipientId, personId);
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        if (!IsActive(db, tx, familyId, adminId, true) ||
+            !IsActive(db, tx, familyId, recipientId, false) ||
+            !IsVisible(db, tx, familyId, branchId, recipientId, personId))
+            throw new UnauthorizedAccessException("Access denied.");
+        using var cmd = Command(db, tx, """
+            INSERT OR IGNORE INTO person_display_name_visibility
+              (family_id,branch_id,principal_id,person_id)
+            VALUES($family,$branch,$recipient,$person);
+            """, familyId, branchId, recipientId, personId);
+        cmd.ExecuteNonQuery();
+        tx.Commit();
+    }
+
+    public void RevokeDisplayName(Guid familyId, Guid branchId, Guid adminId,
+        Guid recipientId, Guid personId)
+    {
+        RequireIds(familyId, branchId, adminId, recipientId, personId);
+        using var db = Open();
+        using var tx = db.BeginTransaction();
+        if (!IsActive(db, tx, familyId, adminId, true))
+            throw new UnauthorizedAccessException("Access denied.");
+        using var cmd = Command(db, tx, """
+            DELETE FROM person_display_name_visibility WHERE family_id=$family
+            AND branch_id=$branch AND principal_id=$recipient AND person_id=$person;
+            """, familyId, branchId, recipientId, personId);
+        cmd.ExecuteNonQuery();
         tx.Commit();
     }
 
