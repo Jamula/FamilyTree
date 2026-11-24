@@ -1,9 +1,17 @@
 using FamilyTree.Web.Components;
 using FamilyTree.Web;
+using Microsoft.AspNetCore.Http;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents();
-builder.Services.AddAntiforgery();
+builder.Services.AddAntiforgery(options =>
+{
+    options.Cookie.Name = "FamilyTreeWebAntiforgery";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    options.Cookie.Path = "/";
+});
 builder.Services.AddSingleton<SyntheticReviewWorkbench>();
 var privateTreeMode = PrivateTreeModeOptions.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(privateTreeMode);

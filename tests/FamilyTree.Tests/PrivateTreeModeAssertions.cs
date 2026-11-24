@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using FamilyTree.Domain;
 using FamilyTree.Web;
 using Microsoft.AspNetCore.Builder;
@@ -16,11 +18,33 @@ internal static class PrivateTreeModeAssertions
         public int Requests { get; private set; }
         public string? SessionCookie { get; private set; }
         public List<string?> SessionCookies { get; } = [];
+        public List<string?> RequestCookies { get; } = [];
+        public List<Uri> RequestUris { get; } = [];
+        public string? ExpectedSessionCookie { get; set; }
+        public bool Authenticated { get; set; }
+        public HttpStatusCode RegistrationStatus { get; set; } = HttpStatusCode.OK;
+        public HttpStatusCode SearchStatus { get; set; } = HttpStatusCode.OK;
+        public HttpStatusCode TreeStatus { get; set; } = HttpStatusCode.OK;
+        public bool ThrowOnTree { get; init; }
+
+        public static Guid FamilyId { get; } = Guid.NewGuid();
+        public static Guid BranchId { get; } = Guid.NewGuid();
+        public static Guid CenterId { get; } = Guid.NewGuid();
+        public static Guid ParentId { get; } = Guid.NewGuid();
+        public static Guid ChildId { get; } = Guid.NewGuid();
+        public static Guid HiddenId { get; } = Guid.NewGuid();
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests++;
+            var uri = request.RequestUri ??
+                throw new InvalidOperationException("API request URI missing.");
+            RequestUris.Add(uri);
+            var requestCookie = request.Headers.TryGetValues("Cookie", out var requestCookies)
+                ? requestCookies.Single()
+                : null;
+            RequestCookies.Add(requestCookie);
             if (request.RequestUri?.AbsolutePath == "/auth/providers")
                 return Task.FromResult(Json(HttpStatusCode.OK,
                     """{"providers":["google","microsoft","unknown"]}"""));
@@ -30,7 +54,67 @@ internal static class PrivateTreeModeAssertions
                     ? values.Single()
                     : null;
                 SessionCookies.Add(SessionCookie);
-                return Task.FromResult(Json(HttpStatusCode.Unauthorized, ""));
+                return Task.FromResult(Authenticated
+                    ? Json(HttpStatusCode.OK,
+                        """{"authenticated":true,"familyAccess":false}""")
+                    : Json(HttpStatusCode.Unauthorized, ""));
+            }
+            if (uri.AbsolutePath == "/api/v1/csrf")
+            {
+                if (requestCookie != ExpectedSessionCookie)
+                    throw new InvalidOperationException("API CSRF request did not forward the verified session cookie.");
+                var response = Json(HttpStatusCode.OK,
+                    """{"requestToken":"synthetic-api-csrf-token"}""");
+                response.Headers.TryAddWithoutValidation("Set-Cookie",
+                    "__Host-FamilyTreeAntiforgery=synthetic-api-csrf-cookie; Path=/; Secure; HttpOnly; SameSite=Strict");
+                return Task.FromResult(response);
+            }
+            if (uri.AbsolutePath == "/api/v1/me")
+            {
+                if (ExpectedSessionCookie is null ||
+                    requestCookie is null ||
+                    !requestCookie.StartsWith(ExpectedSessionCookie + "; ", StringComparison.Ordinal) ||
+                    !requestCookie.Contains("__Host-FamilyTreeAntiforgery=synthetic-api-csrf-cookie",
+                        StringComparison.Ordinal) ||
+                    !request.Headers.TryGetValues("Origin", out var origins) ||
+                    origins.Single() != "https://localhost:5043" ||
+                    !request.Headers.TryGetValues("X-CSRF-TOKEN", out var tokens) ||
+                    tokens.Single() != "synthetic-api-csrf-token")
+                    throw new InvalidOperationException("API identity registration did not use its same-origin antiforgery contract.");
+                return Task.FromResult(RegistrationStatus == HttpStatusCode.OK
+                    ? Json(HttpStatusCode.OK,
+                        """{"principalId":"21829b29-6bf7-4e31-b983-9fb54b76aa49"}""")
+                    : Json(RegistrationStatus, ""));
+            }
+
+            var familyPrefix = $"/api/v1/families/{FamilyId:D}/branches/{BranchId:D}/";
+            if (uri.AbsolutePath == familyPrefix + "search")
+                return Task.FromResult(SearchStatus == HttpStatusCode.OK
+                    ? Json(HttpStatusCode.OK, JsonSerializer.Serialize(new[]
+                    {
+                        new AuthorizedPersonSummary(CenterId, "Fictional Center"),
+                        new AuthorizedPersonSummary(ChildId, "Fictional <script>Guest</script>")
+                    }))
+                    : Json(SearchStatus, ""));
+            if (uri.AbsolutePath.StartsWith(familyPrefix + "tree/", StringComparison.Ordinal))
+            {
+                if (ThrowOnTree)
+                    return Task.FromException<HttpResponseMessage>(
+                        new HttpRequestException("PRIVATE_EXCEPTION_SENTINEL"));
+                return Task.FromResult(TreeStatus == HttpStatusCode.OK
+                    ? Json(HttpStatusCode.OK, JsonSerializer.Serialize(new AuthorizedTreeProjection(
+                        CenterId,
+                        [
+                            new AuthorizedTreeNode(CenterId, "Fictional Center", 0),
+                            new AuthorizedTreeNode(ParentId, "Fictional Parent", -1),
+                            new AuthorizedTreeNode(ChildId, "Fictional Child", 1)
+                        ],
+                        [
+                            new AuthorizedTreeEdge(Guid.NewGuid(), ParentId, CenterId, RelationKind.Parent),
+                            new AuthorizedTreeEdge(Guid.NewGuid(), CenterId, ChildId, RelationKind.Parent)
+                        ],
+                        [])))
+                    : Json(TreeStatus, ""));
             }
             throw new InvalidOperationException("Unexpected API route.");
         }
@@ -53,7 +137,7 @@ internal static class PrivateTreeModeAssertions
             Task.FromResult(true);
     }
 
-    public static async Task RunAsync()
+    public static async Task RunAsync(string verifiedSessionCookie)
     {
         var defaults = PrivateTreeModeOptions.FromConfiguration(new ConfigurationBuilder().Build());
         Ensure(!defaults.Enabled && defaults.ApiBaseUri is null, "private mode is disabled by default");
@@ -81,6 +165,7 @@ internal static class PrivateTreeModeAssertions
         }
 
         await VerifyPrivateRouteAsync();
+        await VerifyAuthenticatedWorkspaceAsync(verifiedSessionCookie);
         VerifyDepthLimits();
         Console.WriteLine("PASS private web mode and deep synthetic traversal assertions");
     }
@@ -95,6 +180,12 @@ internal static class PrivateTreeModeAssertions
             EnvironmentName = "Development"
         });
         builder.WebHost.UseTestServer();
+        builder.Services.AddAntiforgery(antiforgery =>
+        {
+            antiforgery.Cookie.Name = "FamilyTreeWebAntiforgery";
+            antiforgery.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+            antiforgery.Cookie.SameSite = SameSiteMode.Strict;
+        });
         builder.Services.AddSingleton(options);
         builder.Services.AddSingleton(apiHttpClient);
         builder.Services.AddSingleton<PrivateTreeApiClient>();
@@ -155,6 +246,7 @@ internal static class PrivateTreeModeAssertions
 
         var disabledBuilder = WebApplication.CreateBuilder();
         disabledBuilder.WebHost.UseTestServer();
+        disabledBuilder.Services.AddAntiforgery();
         using var disabledApiHttpClient = new HttpClient(new LocalApiHandler());
         disabledBuilder.Services.AddSingleton(new PrivateTreeModeOptions(false, null));
         disabledBuilder.Services.AddSingleton(disabledApiHttpClient);
@@ -222,6 +314,321 @@ internal static class PrivateTreeModeAssertions
             "depth eight traverses the complete synthetic graph without truncation");
     }
 
+    private static async Task VerifyAuthenticatedWorkspaceAsync(string verifiedSessionCookie)
+        {
+            var clientHandler = new LocalApiHandler
+            {
+                Authenticated = true,
+                ExpectedSessionCookie = verifiedSessionCookie
+            };
+            using var apiHttpClient = new HttpClient(clientHandler);
+            var options = new PrivateTreeModeOptions(true, new Uri("https://localhost:5043/"));
+            var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+            {
+                EnvironmentName = "Development"
+            });
+            builder.WebHost.UseTestServer();
+            builder.Services.AddAntiforgery(antiforgery =>
+            {
+                antiforgery.Cookie.Name = "FamilyTreeWebAntiforgery";
+                antiforgery.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+                antiforgery.Cookie.SameSite = SameSiteMode.Strict;
+            });
+            builder.Services.AddSingleton(options);
+            builder.Services.AddSingleton(apiHttpClient);
+            builder.Services.AddSingleton<PrivateTreeApiClient>();
+            var app = builder.Build();
+            app.Use(async (context, next) =>
+            {
+                context.Connection.RemoteIpAddress = IPAddress.Loopback;
+                await next(context);
+            });
+            PrivateTreeRoutes.Map(app);
+            await app.StartAsync();
+            try
+            {
+                using var client = app.GetTestClient();
+                using var initial = await GetPrivateAsync(client, verifiedSessionCookie);
+                var initialHtml = await initial.Content.ReadAsStringAsync();
+                var antiCookie = GetCookie(initial, "FamilyTreeWebAntiforgery");
+                var requestToken = GetFormToken(initialHtml);
+                Ensure(initialHtml.Contains("Select family and branch", StringComparison.Ordinal) &&
+                    initialHtml.Contains("Open family and branch", StringComparison.Ordinal) &&
+                    !initialHtml.Contains("Fictional Center", StringComparison.Ordinal) &&
+                    initial.Headers.CacheControl?.NoStore == true,
+                    "authenticated session shows a scoped selector without fetching or exposing records");
+
+                var scope = new Dictionary<string, string>
+                {
+                    ["action"] = "open",
+                    ["familyId"] = LocalApiHandler.FamilyId.ToString("D"),
+                    ["branchId"] = LocalApiHandler.BranchId.ToString("D"),
+                    ["above"] = "4",
+                    ["below"] = "4"
+                };
+                using var opened = await PostAsync(client, scope, requestToken, antiCookie,
+                    verifiedSessionCookie);
+                var openedHtml = await opened.Content.ReadAsStringAsync();
+                Ensure(opened.StatusCode == HttpStatusCode.OK &&
+                    openedHtml.Contains("Search visible people", StringComparison.Ordinal) &&
+                    !openedHtml.Contains("Fictional Center", StringComparison.Ordinal),
+                    "selected family and branch show controls but do not imply API-granted records");
+
+                clientHandler.RegistrationStatus = HttpStatusCode.NotFound;
+                var unregisteredSearch = new Dictionary<string, string>(scope)
+                {
+                    ["action"] = "search",
+                    ["query"] = "Fictional"
+                };
+                var readsBeforeUnregisteredSearch = clientHandler.RequestUris.Count;
+                using var unregistered = await PostAsync(client, unregisteredSearch,
+                    requestToken, antiCookie, verifiedSessionCookie);
+                var unregisteredHtml = await unregistered.Content.ReadAsStringAsync();
+                Ensure(unregisteredHtml.Contains("Private records are unavailable",
+                        StringComparison.Ordinal) &&
+                    !unregisteredHtml.Contains("Fictional Center", StringComparison.Ordinal) &&
+                    !clientHandler.RequestUris.Skip(readsBeforeUnregisteredSearch)
+                        .Any(uri => uri.AbsolutePath.EndsWith("/search", StringComparison.Ordinal)),
+                    "unavailable verified-identity registration fails closed before private reads");
+                clientHandler.RegistrationStatus = HttpStatusCode.OK;
+
+                var search = new Dictionary<string, string>(scope)
+                {
+                    ["action"] = "search",
+                    ["query"] = "Fictional"
+                };
+                using var searched = await PostAsync(client, search, requestToken, antiCookie,
+                    verifiedSessionCookie);
+                var searchHtml = await searched.Content.ReadAsStringAsync();
+                Ensure(searched.StatusCode == HttpStatusCode.OK &&
+                    searchHtml.Contains("Fictional Center", StringComparison.Ordinal) &&
+                    searchHtml.Contains("Fictional &lt;script&gt;Guest&lt;/script&gt;", StringComparison.Ordinal) &&
+                    !searchHtml.Contains("<script>Guest</script>", StringComparison.Ordinal) &&
+                    searchHtml.Contains("<button type='submit'>Center on Fictional Center</button>", StringComparison.Ordinal) &&
+                    searched.RequestMessage?.RequestUri?.Query.Length == 0,
+                    "real API search contract results are rendered as encoded HTML and recenter without URL state");
+                var searchApiUri = clientHandler.RequestUris.Single(uri =>
+                    uri.AbsolutePath.EndsWith("/search", StringComparison.Ordinal));
+                Ensure(searchApiUri.Query == "?q=Fictional" &&
+                    clientHandler.SessionCookies.LastOrDefault() == verifiedSessionCookie &&
+                    clientHandler.RequestCookies.Any(cookie =>
+                        cookie == verifiedSessionCookie + "; __Host-FamilyTreeAntiforgery=synthetic-api-csrf-cookie"),
+                    "search uses only the verified server-forwarded session cookie and API antiforgery cookie");
+
+                var treePost = new Dictionary<string, string>
+                {
+                    ["action"] = "tree",
+                    ["familyId"] = LocalApiHandler.FamilyId.ToString("D"),
+                    ["branchId"] = LocalApiHandler.BranchId.ToString("D"),
+                    ["centerId"] = LocalApiHandler.CenterId.ToString("D"),
+                    ["above"] = "0",
+                    ["below"] = "1"
+                };
+                using var treeResponse = await PostAsync(client, treePost, requestToken, antiCookie,
+                    verifiedSessionCookie);
+                var treeHtml = await treeResponse.Content.ReadAsStringAsync();
+                Ensure(treeHtml.Contains("Fictional Center", StringComparison.Ordinal) &&
+                    treeHtml.Contains("Fictional Child", StringComparison.Ordinal) &&
+                    !treeHtml.Contains("Fictional Parent", StringComparison.Ordinal) &&
+                    treeHtml.Contains("Generations above", StringComparison.Ordinal) &&
+                    treeHtml.Contains("Generations below", StringComparison.Ordinal) &&
+                    treeHtml.Contains("Authorized people in the selected generations", StringComparison.Ordinal) &&
+                    !treeHtml.Contains(LocalApiHandler.HiddenId.ToString("D"), StringComparison.Ordinal),
+                    "tree route renders only authorized nodes within selected depth with keyboard recenter forms");
+                Ensure(clientHandler.RequestUris.Any(uri =>
+                    uri.AbsolutePath.EndsWith("/tree/" + LocalApiHandler.CenterId.ToString("D"),
+                        StringComparison.Ordinal)),
+                    "center-tree request uses the API family/branch route contract");
+
+                await VerifyIndistinguishableDenialsAsync(
+                    client, clientHandler, requestToken, antiCookie, verifiedSessionCookie);
+                await VerifyTreeExceptionIsPrivateAsync(verifiedSessionCookie);
+
+                using var invalidCsrf = new HttpRequestMessage(HttpMethod.Post, "https://localhost/private")
+                {
+                    Content = new FormUrlEncodedContent(scope)
+                };
+                invalidCsrf.Headers.TryAddWithoutValidation("Cookie",
+                    verifiedSessionCookie + "; " + antiCookie);
+                using var rejected = await client.SendAsync(invalidCsrf);
+                Ensure(rejected.StatusCode == HttpStatusCode.BadRequest,
+                    "private selection POST rejects missing antiforgery tokens");
+
+                clientHandler.Authenticated = false;
+                var revokedSessionForm = new Dictionary<string, string>(treePost);
+                var requestsBeforeRevokedSession = clientHandler.RequestUris.Count;
+                using var revokedSession = await PostAsync(client, revokedSessionForm,
+                    requestToken, antiCookie, verifiedSessionCookie);
+                var revokedSessionHtml = await revokedSession.Content.ReadAsStringAsync();
+                Ensure(revokedSession.StatusCode == HttpStatusCode.OK &&
+                    revokedSessionHtml.Contains("Sign in with Google", StringComparison.Ordinal) &&
+                    !revokedSessionHtml.Contains("Fictional Center", StringComparison.Ordinal) &&
+                    !revokedSessionHtml.Contains(LocalApiHandler.CenterId.ToString("D"),
+                        StringComparison.Ordinal) &&
+                    clientHandler.RequestUris.Count == requestsBeforeRevokedSession + 2,
+                    "a revoked session returns to sign-in without reaching tree reads or showing previously authorized data");
+            }
+            finally
+            {
+                await app.StopAsync();
+                await app.DisposeAsync();
+            }
+        }
+
+        private static async Task VerifyIndistinguishableDenialsAsync(
+            HttpClient client,
+            LocalApiHandler handler,
+            string requestToken,
+            string antiCookie,
+            string sessionCookie)
+        {
+            async Task<string> DeniedPageAsync(HttpClient client,
+                Dictionary<string, string> scope, string token, string cookie, Guid centerId)
+            {
+                var request = new Dictionary<string, string>(scope)
+                {
+                    ["action"] = "tree",
+                    ["centerId"] = centerId.ToString("D"),
+                    ["above"] = "4",
+                    ["below"] = "4"
+                };
+                using var response = await PostAsync(client, request, token, cookie, sessionCookie);
+                Ensure(response.StatusCode == HttpStatusCode.OK &&
+                    response.Headers.CacheControl?.NoStore == true,
+                    "unknown and forbidden reads are non-cacheable generic responses");
+                return await response.Content.ReadAsStringAsync();
+            }
+
+            var scope = new Dictionary<string, string>
+            {
+                ["action"] = "open",
+                ["familyId"] = LocalApiHandler.FamilyId.ToString("D"),
+                ["branchId"] = LocalApiHandler.BranchId.ToString("D"),
+                ["above"] = "4",
+                ["below"] = "4"
+            };
+            handler.TreeStatus = HttpStatusCode.NotFound;
+            var forbidden = await DeniedPageAsync(client, scope, requestToken, antiCookie,
+                LocalApiHandler.ParentId);
+            var unknown = await DeniedPageAsync(client, scope, requestToken, antiCookie,
+                LocalApiHandler.HiddenId);
+            var revokedMember = await DeniedPageAsync(client, scope, requestToken, antiCookie,
+                LocalApiHandler.ChildId);
+            static string NormalizeToken(string html) => Regex.Replace(html,
+                "(?<=name='__RequestVerificationToken' value=')[^']+", "TOKEN");
+            Ensure(NormalizeToken(forbidden) == NormalizeToken(unknown) &&
+                NormalizeToken(unknown) == NormalizeToken(revokedMember) &&
+                !unknown.Contains(LocalApiHandler.HiddenId.ToString("D"), StringComparison.Ordinal) &&
+                !unknown.Contains("Fictional Parent", StringComparison.Ordinal),
+                "forbidden, unknown, and membership-revoked API results are identical and reveal no identifiers");
+        }
+
+        private static async Task VerifyTreeExceptionIsPrivateAsync(string verifiedSessionCookie)
+        {
+            var handler = new LocalApiHandler
+            {
+                Authenticated = true,
+                ExpectedSessionCookie = verifiedSessionCookie,
+                ThrowOnTree = true
+            };
+            using var apiHttpClient = new HttpClient(handler);
+            var options = new PrivateTreeModeOptions(true, new Uri("https://localhost:5043/"));
+            var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+            {
+                EnvironmentName = "Development"
+            });
+            builder.WebHost.UseTestServer();
+            builder.Services.AddAntiforgery(antiforgery =>
+            {
+                antiforgery.Cookie.Name = "FamilyTreeWebAntiforgery";
+                antiforgery.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+                antiforgery.Cookie.SameSite = SameSiteMode.Strict;
+            });
+            builder.Services.AddSingleton(options);
+            builder.Services.AddSingleton(apiHttpClient);
+            builder.Services.AddSingleton<PrivateTreeApiClient>();
+            var app = builder.Build();
+            app.Use(async (context, next) =>
+            {
+                context.Connection.RemoteIpAddress = IPAddress.Loopback;
+                await next(context);
+            });
+            PrivateTreeRoutes.Map(app);
+            await app.StartAsync();
+            try
+            {
+                using var client = app.GetTestClient();
+                using var initial = await GetPrivateAsync(client, verifiedSessionCookie);
+                var antiCookie = GetCookie(initial, "FamilyTreeWebAntiforgery");
+                var requestToken = GetFormToken(await initial.Content.ReadAsStringAsync());
+                var request = new Dictionary<string, string>
+                {
+                    ["action"] = "tree",
+                    ["familyId"] = LocalApiHandler.FamilyId.ToString("D"),
+                    ["branchId"] = LocalApiHandler.BranchId.ToString("D"),
+                    ["centerId"] = LocalApiHandler.CenterId.ToString("D"),
+                    ["above"] = "4",
+                    ["below"] = "4"
+                };
+                using var response = await PostAsync(client, request, requestToken, antiCookie,
+                    verifiedSessionCookie);
+                var html = await response.Content.ReadAsStringAsync();
+                Ensure(response.StatusCode == HttpStatusCode.OK &&
+                    html.Contains("Private records are unavailable", StringComparison.Ordinal) &&
+                    !html.Contains("PRIVATE_EXCEPTION_SENTINEL", StringComparison.Ordinal) &&
+                    !html.Contains("Fictional Center", StringComparison.Ordinal),
+                    "API exceptions fail closed without leaking exception messages or data");
+            }
+            finally
+            {
+                await app.StopAsync();
+                await app.DisposeAsync();
+            }
+        }
+
+        private static async Task<HttpResponseMessage> PostAsync(HttpClient client,
+            Dictionary<string, string> values, string token, string antiCookie,
+            string sessionCookie)
+        {
+            var form = new Dictionary<string, string>(values)
+            {
+                ["__RequestVerificationToken"] = token
+            };
+            using var request = new HttpRequestMessage(HttpMethod.Post, "https://localhost/private")
+            {
+                Content = new FormUrlEncodedContent(form)
+            };
+            request.Headers.TryAddWithoutValidation("Cookie", sessionCookie + "; " + antiCookie);
+            return await client.SendAsync(request);
+        }
+
+        private static Task<HttpResponseMessage> GetPrivateAsync(
+            HttpClient client, string sessionCookie)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "https://localhost/private");
+            request.Headers.TryAddWithoutValidation("Cookie", sessionCookie);
+            return client.SendAsync(request);
+        }
+
+        private static string GetCookie(HttpResponseMessage response, string name)
+        {
+            var header = response.Headers.GetValues("Set-Cookie")
+                .First(value => value.StartsWith(name + "=", StringComparison.Ordinal));
+            return header.Split(';', 2)[0];
+        }
+
+        private static string GetFormToken(string html)
+        {
+            const string prefix = "name='__RequestVerificationToken' value='";
+            var start = html.IndexOf(prefix, StringComparison.Ordinal);
+            if (start < 0)
+                throw new InvalidOperationException("Antiforgery form token not rendered.");
+            start += prefix.Length;
+            var end = html.IndexOf('\'', start);
+            if (end < 0)
+                throw new InvalidOperationException("Antiforgery form token is malformed.");
+            return WebUtility.HtmlDecode(html[start..end]);
+        }
     private static IConfiguration CreateUnsafeApiConfiguration(string value) =>
         new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?>

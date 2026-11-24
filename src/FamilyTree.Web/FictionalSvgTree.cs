@@ -17,10 +17,10 @@ public static class FictionalSvgTree
     private const int ColWidth = 172;
 
     public static string Render(PersonTreeProjection? tree, TreeOptions options)
-        => Render(tree, options, "/demo", true);
+        => Render(tree, options, "/demo", true, true);
 
     internal static string Render(PersonTreeProjection? tree, TreeOptions options,
-        string path, bool fictional)
+        string path, bool fictional, bool recenterLinks = true)
     {
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
@@ -163,8 +163,11 @@ public static class FictionalSvgTree
                 "&amp;spouses=" + (options.Spouses ? "yes" : "no") +
                 "&amp;siblings=" + (options.SiblingBranches ? "yes" : "no") +
                 "&amp;social=" + (options.SocialConnections ? "yes" : "no");
-            html.Append("<a href='").Append(query).Append("' tabindex='0' aria-label='Center on ")
-                .Append(escaped).Append("'>");
+            if (recenterLinks)
+                html.Append("<a href='").Append(query)
+                    .Append("' tabindex='0' aria-label='Center on ").Append(escaped).Append("'>");
+            else
+                html.Append("<g role='group' aria-label='").Append(escaped).Append("'>");
             html.Append("<rect x='").Append(x).Append("' y='").Append(y)
                 .Append("' width='").Append(NodeWidth).Append("' height='")
                 .Append(NodeHeight).Append("' rx='10' stroke='#465c93' ")
@@ -175,7 +178,8 @@ public static class FictionalSvgTree
                 .Append("' font-family='system-ui' font-size='13' fill='#1f2937' ")
                 .Append("text-anchor='middle'>").Append(shortName).Append("</text>");
             html.Append("<title>").Append(escaped).Append(" (generation ")
-                .Append(node.Generation).Append(")</title></a>");
+                .Append(node.Generation).Append(")</title>")
+                .Append(recenterLinks ? "</a>" : "</g>");
         }
 
         html.Append("</svg></div>");

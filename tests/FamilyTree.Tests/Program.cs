@@ -33,12 +33,12 @@ await MembershipAuthorizationAssertions.RunAsync();
 // CLR type-initialization locks blocking the request continuations.
 await FictionalWorkbenchHttpAssertions.RunAsync();
 await AuthorizedTreeExplorerHttpAssertions.RunAsync();
-await PrivateTreeModeAssertions.RunAsync();
 
 // Keep HTTP integration off module initializers to avoid CLR startup locks.
 await ApiLoopbackIntegrationAssertions.RunAsync();
 
-await VerifiedCookieHandlerAssertions.RunAsync();
+var verifiedSessionCookie = await VerifiedCookieHandlerAssertions.RunAsync();
+await PrivateTreeModeAssertions.RunAsync(verifiedSessionCookie);
 
 await SqliteRelationshipConcurrencyAssertions.RunAsync();
 await SqliteSchemaMigrationConcurrencyAssertions.RunAsync();
