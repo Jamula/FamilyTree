@@ -11,12 +11,13 @@ public sealed record FamilyFieldGrant(Guid PrincipalId, Guid FamilyId, Guid Pers
 public sealed class FieldPrivacyPolicy(Guid familyId, IEnumerable<FamilyFieldGrant> trustedGrants)
 {
     public Guid FamilyId { get; } = familyId;
-    private readonly FamilyFieldGrant[] _grants =
-        (trustedGrants ?? throw new ArgumentNullException(nameof(trustedGrants))).ToArray();
+    private readonly HashSet<(Guid Principal, Guid Person, ProfileField Field)> _grants =
+        (trustedGrants ?? throw new ArgumentNullException(nameof(trustedGrants)))
+        .Where(g => g.FamilyId == familyId && g.State == MembershipState.Active)
+        .SelectMany(g => g.AllowedFields.Select(field => (g.PrincipalId, g.PersonId, field)))
+        .ToHashSet();
 
     public bool CanRead(Guid principalId, Guid personId, ProfileField field) =>
         principalId != Guid.Empty && personId != Guid.Empty &&
-        _grants.Any(g => g.PrincipalId == principalId &&
-            g.FamilyId == FamilyId && g.PersonId == personId &&
-            g.State == MembershipState.Active && g.AllowedFields.Contains(field));
+        _grants.Contains((principalId, personId, field));
 }
