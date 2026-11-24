@@ -1,3 +1,4 @@
+using System.Text;
 using FamilyTree.Domain;
 using Microsoft.Data.Sqlite;
 
@@ -71,12 +72,11 @@ public sealed partial class SqliteFamilyStore
     }
 
     public IReadOnlyList<PendingRelationshipReview> ListPendingRelationships(
-        Guid familyId, Guid moderatorId, string? afterProposalCursor = null)
+        Guid familyId, Guid moderatorId, string? afterCursor = null)
     {
         RequireIds(familyId, moderatorId);
-        if (afterProposalCursor is not null && afterProposalCursor.Length == 0)
-            throw new ArgumentException("Pagination cursor cannot be empty.",
-                nameof(afterProposalCursor));
+        var afterId = afterCursor is null
+            ? null : DecodeRelationshipProposalCursor(afterCursor);
         using var con = Open();
         using var tx = con.BeginTransaction();
         RequireMember(con, tx, familyId, moderatorId, administrator: true);
@@ -86,11 +86,11 @@ public sealed partial class SqliteFamilyStore
                    identity_envelope
             FROM relationship_proposals
             WHERE family_id=$f AND state='Pending' AND submitter<>$moderator
-                AND id>$after
+                AND ($after IS NULL OR id>$after)
             ORDER BY id LIMIT 100;
             """, ("$f", familyId.ToString("D")),
             ("$moderator", moderatorId.ToString("D")),
-            ("$after", afterProposalCursor ?? "")))
+            ("$after", (object?)afterId ?? DBNull.Value)))
         using (var reader = cmd.ExecuteReader())
             while (reader.Read())
             {
@@ -121,7 +121,7 @@ public sealed partial class SqliteFamilyStore
                     }
                 }
                 results.Add(new(proposalId, edge, submitter, unreadable,
-                    reader.GetString(0)));
+                    EncodeRelationshipProposalCursor(reader.GetString(0))));
             }
         tx.Commit();
         return results;
@@ -210,12 +210,11 @@ public sealed partial class SqliteFamilyStore
         bool ContentUnreadable, string Cursor);
 
     public IReadOnlyList<ApprovedRelationshipUndo> ListApprovedRelationshipsForUndo(
-        Guid familyId, Guid moderatorId, string? afterProposalCursor = null)
+        Guid familyId, Guid moderatorId, string? afterCursor = null)
     {
         RequireIds(familyId, moderatorId);
-        if (afterProposalCursor is not null && afterProposalCursor.Length == 0)
-            throw new ArgumentException("Pagination cursor cannot be empty.",
-                nameof(afterProposalCursor));
+        var afterId = afterCursor is null
+            ? null : DecodeRelationshipProposalCursor(afterCursor);
         using var con = Open();
         using var tx = con.BeginTransaction();
         RequireMember(con, tx, familyId, moderatorId, administrator: true);
@@ -224,11 +223,11 @@ public sealed partial class SqliteFamilyStore
             SELECT id,relation_id,from_id,to_id,kind,encrypted_label,submitter,
                    identity_envelope
             FROM relationship_proposals WHERE family_id=$f AND state='Approved'
-                AND submitter<>$moderator AND id>$after
+                AND submitter<>$moderator AND ($after IS NULL OR id>$after)
             ORDER BY id LIMIT 100;
             """, ("$f", familyId.ToString("D")),
             ("$moderator", moderatorId.ToString("D")),
-            ("$after", afterProposalCursor ?? "")))
+            ("$after", (object?)afterId ?? DBNull.Value)))
         using (var reader = cmd.ExecuteReader())
             while (reader.Read())
             {
@@ -257,10 +256,37 @@ public sealed partial class SqliteFamilyStore
                     }
                 }
                 result.Add(new ApprovedRelationshipUndo(
-                    proposalId, edge, submitter, unreadable, reader.GetString(0)));
+                    proposalId, edge, submitter, unreadable,
+                    EncodeRelationshipProposalCursor(reader.GetString(0))));
             }
         tx.Commit();
         return result;
+    }
+
+    private const string RelationshipProposalCursorPrefix = "rp:";
+
+    private static string EncodeRelationshipProposalCursor(string orderingKey) =>
+        RelationshipProposalCursorPrefix +
+        Convert.ToBase64String(Encoding.UTF8.GetBytes(orderingKey));
+
+    private static string DecodeRelationshipProposalCursor(string cursor)
+    {
+        if (!cursor.StartsWith(RelationshipProposalCursorPrefix,
+                StringComparison.Ordinal))
+            throw new ArgumentException("Invalid relationship proposal cursor.",
+                nameof(cursor));
+        try
+        {
+            return new UTF8Encoding(false, true).GetString(
+                Convert.FromBase64String(
+                    cursor[RelationshipProposalCursorPrefix.Length..]));
+        }
+        catch (Exception exception) when (
+            exception is FormatException or DecoderFallbackException)
+        {
+            throw new ArgumentException("Invalid relationship proposal cursor.",
+                nameof(cursor), exception);
+        }
     }
 
     public IReadOnlyList<Relationship> ReadRelationships(Guid familyId, Guid viewerId)

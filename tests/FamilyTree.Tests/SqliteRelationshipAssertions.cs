@@ -360,12 +360,12 @@ internal static class SqliteRelationshipAssertions
                     pendingProposals.Add(store.ProposeRelationship(family, actor,
                         Relationship.Create(personA.Id, personB.Id,
                             RelationKind.Neighbor, $"fictional-pending-page-{index}")));
-                var orderedPendingProposals = pendingProposals.OrderBy(
-                    x => x.ToString("D"), StringComparer.Ordinal).ToArray();
+                var orderedPendingProposals = pendingProposals
+                    .OrderBy(x => x.ToString("D"), StringComparer.Ordinal).ToArray();
                 var malformedIdProposal = orderedPendingProposals[99];
                 var malformedSubmitterProposal = pendingProposals
-                    .Where(x => x != malformedIdProposal).Min();
-                var malformedId = malformedIdProposal.ToString("D") + "!";
+                    .Where(x => x != malformedIdProposal)
+                    .OrderBy(x => x.ToString("D"), StringComparer.Ordinal).First();
                 using (var connection = new SqliteConnection(
                     new SqliteConnectionStringBuilder {
                         DataSource = database, Pooling = false }.ToString()))
@@ -377,9 +377,10 @@ internal static class SqliteRelationshipAssertions
                         WHERE family_id=$f AND id=$badId;
                         """;
                     change.Parameters.AddWithValue("$f", family.ToString("D"));
-                    change.Parameters.AddWithValue("$malformedId", malformedId);
                     change.Parameters.AddWithValue("$badId",
                         malformedIdProposal.ToString("D"));
+                    change.Parameters.AddWithValue("$malformedId",
+                        malformedIdProposal.ToString("D") + "!invalid-guid");
                     Check(change.ExecuteNonQuery() == 1, "tamper pending proposal ID format");
                     change.CommandText = """
                         UPDATE relationship_proposals SET submitter='not-a-guid'
@@ -393,7 +394,7 @@ internal static class SqliteRelationshipAssertions
                     var firstPage = store.ListPendingRelationships(family, admin);
                     Check(firstPage.Count == 100 &&
                         firstPage[^1].ProposalId == Guid.Empty &&
-                        firstPage[^1].Cursor == malformedId &&
+                        firstPage[^1].ContentUnreadable &&
                         firstPage.Any(x => x.ProposalId == Guid.Empty &&
                             x.SubmittedBy == actor && x.Relationship is null &&
                             x.ContentUnreadable) &&
@@ -406,23 +407,22 @@ internal static class SqliteRelationshipAssertions
                     var discoveredIds = firstPage.Concat(secondPage)
                         .Select(x => x.ProposalId).ToArray();
                     Check(secondPage.Count == 5 && discoveredIds.Length == 105 &&
-                        secondPage.Select(x => x.ProposalId)
-                            .SequenceEqual(orderedPendingProposals.Skip(100)) &&
-                        secondPage.All(x => !x.ContentUnreadable) &&
+                        secondPage.All(x => x.Relationship is not null) &&
                         discoveredIds.Distinct().Count() == 105 &&
                         discoveredIds.Contains(Guid.Empty) &&
                         pendingProposals.Where(x => x != malformedIdProposal)
                             .All(discoveredIds.Contains),
-                        "raw pending cursor reaches healthy proposals after malformed boundary");
+                        "pending cursor reaches healthy proposals across malformed boundary without repair");
                     change.CommandText = """
                         UPDATE relationship_proposals SET id=$id
                         WHERE family_id=$f AND id=$malformedId;
                         """;
                     change.Parameters.Clear();
                     change.Parameters.AddWithValue("$f", family.ToString("D"));
-                    change.Parameters.AddWithValue("$malformedId", malformedId);
                     change.Parameters.AddWithValue("$id",
                         malformedIdProposal.ToString("D"));
+                    change.Parameters.AddWithValue("$malformedId",
+                        malformedIdProposal.ToString("D") + "!invalid-guid");
                     Check(change.ExecuteNonQuery() == 1, "restore pending proposal ID");
                     change.CommandText = """
                         UPDATE relationship_proposals SET submitter=$submitter

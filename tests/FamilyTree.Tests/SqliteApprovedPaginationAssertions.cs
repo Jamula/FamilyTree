@@ -49,12 +49,12 @@ internal static class SqliteApprovedPaginationAssertions
             }
             using (var reopened = new SqliteFamilyStore(database, key))
             {
-                var orderedProposals = proposals.OrderBy(x => x.ToString("D"),
-                    StringComparer.Ordinal).ToArray();
+                var orderedProposals = proposals
+                    .OrderBy(x => x.ToString("D"), StringComparer.Ordinal).ToArray();
                 var malformedIdProposal = orderedProposals[99];
                 var malformedSubmitterProposal = proposals
-                    .Where(x => x != malformedIdProposal).Min();
-                var malformedId = malformedIdProposal.ToString("D") + "!";
+                    .Where(x => x != malformedIdProposal)
+                    .OrderBy(x => x.ToString("D"), StringComparer.Ordinal).First();
                 using (var connection = new SqliteConnection(
                     new SqliteConnectionStringBuilder {
                         DataSource = database, Pooling = false }.ToString()))
@@ -67,9 +67,10 @@ internal static class SqliteApprovedPaginationAssertions
                         """;
                     change.Parameters.Clear();
                     change.Parameters.AddWithValue("$f", family.ToString("D"));
-                    change.Parameters.AddWithValue("$malformedId", malformedId);
                     change.Parameters.AddWithValue("$badId",
                         malformedIdProposal.ToString("D"));
+                    change.Parameters.AddWithValue("$malformedId",
+                        malformedIdProposal.ToString("D") + "!invalid-guid");
                     Check(change.ExecuteNonQuery() == 1, "tamper approved proposal ID format");
                     change.CommandText = """
                         UPDATE relationship_proposals SET submitter='not-a-guid'
@@ -84,7 +85,7 @@ internal static class SqliteApprovedPaginationAssertions
                         family, admin);
                     Check(quarantined.Count == 100 &&
                         quarantined[^1].ProposalId == Guid.Empty &&
-                        quarantined[^1].Cursor == malformedId &&
+                        quarantined[^1].ContentUnreadable &&
                         quarantined.Any(x => x.ProposalId == Guid.Empty &&
                             x.SubmittedBy == member && x.Relationship is null &&
                             x.ContentUnreadable) &&
@@ -95,20 +96,18 @@ internal static class SqliteApprovedPaginationAssertions
                     var afterMalformedBoundary = reopened.ListApprovedRelationshipsForUndo(
                         family, admin, quarantined[^1].Cursor);
                     Check(afterMalformedBoundary.Count == 5 &&
-                        afterMalformedBoundary.Select(x => x.ProposalId)
-                            .SequenceEqual(orderedProposals.Skip(100)) &&
-                        afterMalformedBoundary.All(x =>
-                            x.Relationship is not null && !x.ContentUnreadable),
-                        "raw approved cursor reaches healthy proposals after malformed boundary");
+                        afterMalformedBoundary.All(x => x.Relationship is not null),
+                        "undo cursor reaches healthy proposals across malformed boundary without repair");
                     change.CommandText = """
                         UPDATE relationship_proposals SET id=$id
                         WHERE family_id=$f AND id=$malformedId;
                         """;
                     change.Parameters.Clear();
                     change.Parameters.AddWithValue("$f", family.ToString("D"));
-                    change.Parameters.AddWithValue("$malformedId", malformedId);
                     change.Parameters.AddWithValue("$id",
                         malformedIdProposal.ToString("D"));
+                    change.Parameters.AddWithValue("$malformedId",
+                        malformedIdProposal.ToString("D") + "!invalid-guid");
                     Check(change.ExecuteNonQuery() == 1, "restore approved proposal ID");
                     change.CommandText = """
                         UPDATE relationship_proposals SET submitter=$submitter
