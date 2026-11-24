@@ -35,6 +35,7 @@ public static class GedcomLegacyCompatibility
         var familyIds = new HashSet<string>(StringComparer.Ordinal);
         var links = new List<(string Tag, string Pointer)>();
         var currentRecordKind = "";
+        var currentSection = "";
 
         for (var i = 1; i < lines.Length; i++)
         {
@@ -63,29 +64,44 @@ public static class GedcomLegacyCompatibility
                 if (record.Length > 1 && record[1] is ("INDI" or "FAM"))
                     return Reject("Missing genealogy record pointer");
                 currentRecordKind = record.Length == 3 ? record[2] : "";
+                currentSection = "";
                 if (record.Length == 3 && record[1].StartsWith('@'))
                 {
                     if (record[2] == "INDI") individualIds.Add(record[1]);
                     if (record[2] == "FAM") familyIds.Add(record[1]);
                 }
             }
-            if (!inHeader)
+            if (tokens.Length > 1 && tokens[0] == "1")
+                currentSection = tokens[1];
+            if (tokens.Length > 1 &&
+                tokens[1] is ("FAMC" or "FAMS" or "HUSB" or "WIFE" or "CHIL"))
             {
-                var entry = line.Split(' ', 3);
-                if (entry.Length > 1 &&
-                    entry[1] is ("FAMC" or "FAMS" or "HUSB" or "WIFE" or "CHIL"))
+                var spouseDetail = !inHeader && currentRecordKind == "FAM" &&
+                    tokens[0] == "2" && tokens[1] is ("HUSB" or "WIFE") &&
+                    currentSection is ("ANUL" or "CENS" or "DIV" or "DIVF" or "ENGA" or
+                        "MARB" or "MARC" or "MARL" or "MARR" or "MARS" or "EVEN" or
+                        "NCHI" or "RESI" or "FACT");
+                if (spouseDetail)
                 {
-                    if (entry[0] != "1" || entry.Length != 3 ||
-                        !Pointer.IsMatch(entry[2]))
+                    if (tokens.Length != 2 || i + 1 >= lines.Length ||
+                        !lines[i + 1].StartsWith("3 AGE ", StringComparison.Ordinal) ||
+                        string.IsNullOrWhiteSpace(lines[i + 1]["3 AGE ".Length..]))
+                        return Reject("Malformed family event spouse detail");
+                }
+                else
+                {
+                    if (inHeader || tokens[0] != "1" || tokens.Length != 3 ||
+                        !Pointer.IsMatch(tokens[2]))
                         return Reject("Malformed relationship pointer");
-                    var familyPointer = entry[1] is "FAMC" or "FAMS";
+                    var familyPointer = tokens[1] is "FAMC" or "FAMS";
                     if ((familyPointer && currentRecordKind != "INDI") ||
                         (!familyPointer && currentRecordKind != "FAM"))
                         return Reject("Relationship pointer in incorrect record");
-                    links.Add((entry[1], entry[2]));
+                    links.Add((tokens[1], tokens[2]));
                 }
-                continue;
             }
+            if (!inHeader)
+                continue;
             if (line.StartsWith("1 ", StringComparison.Ordinal))
                 headerSection = line.Split(' ', 3)[1];
             // SOUR/VERS describes the exporter. Only GEDC/VERS declares

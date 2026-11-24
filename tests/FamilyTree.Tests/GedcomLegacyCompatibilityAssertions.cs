@@ -148,6 +148,39 @@ internal static class GedcomLegacyCompatibilityAssertions
         Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
             "1 FAMC @F1@", "1 @X@ FAMC @I1@", StringComparison.Ordinal)).Valid,
             "level-one cross-reference cannot disguise a relationship pointer");
+        Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+            "1 FAMC @F1@", "1 @X@ FAMC @F1", StringComparison.Ordinal)).Valid,
+            "level-one cross-reference cannot disguise an unterminated pointer");
+        foreach (var source in new[] { converted, fixture })
+        {
+            foreach (var headerLink in new[] { "1 FAMC @MISSING", "1 CHIL @I1@",
+                         "1 FAMS @F1@", "2 HUSB @I1@" })
+                Check(!GedcomLegacyCompatibility.Preview(source.Replace(
+                    "1 SOUR FamilyTreeSyntheticFixtures",
+                    "1 SOUR FamilyTreeSyntheticFixtures\n" + headerLink,
+                    StringComparison.Ordinal)).Valid,
+                    "header relationship tags are rejected");
+
+            var eventDetails = source.Replace("1 CHIL @I3@",
+                "1 CHIL @I3@\n1 MARR\n2 HUSB\n3 AGE 30y\n2 WIFE\n3 AGE 29y",
+                StringComparison.Ordinal);
+            var eventReport = GedcomLegacyCompatibility.Preview(eventDetails);
+            Check(eventReport.Valid && eventReport.Families.Single().ParentPointers.Count == 2 &&
+                  eventReport.Warnings.Any(x => x.Contains("family", StringComparison.Ordinal)),
+                "family event spouse ages are previewable but require review");
+            foreach (var badDetail in new[] { "2 HUSB @I1@\n3 AGE 30y",
+                         "2 HUSB @I1\n3 AGE 30y", "2 HUSB\n3 NOTE ignored",
+                         "2 HUSB\n3 AGE " })
+                Check(!GedcomLegacyCompatibility.Preview(eventDetails.Replace(
+                    "2 HUSB\n3 AGE 30y", badDetail, StringComparison.Ordinal)).Valid,
+                    "malformed spouse details are rejected");
+            Check(!GedcomLegacyCompatibility.Preview(eventDetails.Replace(
+                "1 MARR\n2 HUSB", "1 NOTE\n2 HUSB", StringComparison.Ordinal)).Valid,
+                "spouse detail requires a family event parent");
+            Check(!GedcomLegacyCompatibility.Preview(eventDetails.Replace(
+                "2 HUSB\n3 AGE 30y", "2 FAMC @F1@", StringComparison.Ordinal)).Valid,
+                "family event cannot conceal a relationship pointer");
+        }
         Console.WriteLine("PASS GEDCOM 5.5.1 UTF8 bounded preview, round-trip and invalid-input tests");
     }
     private static void Check(bool condition, string message)
