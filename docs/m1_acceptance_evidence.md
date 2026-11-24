@@ -34,24 +34,29 @@ uniform empty 501 responses for reserved private paths. It also prints
 
 | Acceptance area | Status | Evidence / limitation |
 | --- | --- | --- |
-| Actual API process and HTTP startup | Verified locally; CI pending | `tests/FamilyTree.AcceptanceHarness/Program.cs`; the process-level CI step is wired, and this changeset's result remains unaccepted until it runs. |
+| Actual API process and HTTP startup | Verified locally and in CI | `tests/FamilyTree.AcceptanceHarness/Program.cs`; PR #103 run 45330602101 passed the process-level acceptance step. |
 | Anonymous and malformed/forged session denial | Verified baseline | `/auth/session` returns 401 without a cookie and for invalid cookie values. |
 | Valid expired or revoked session-cookie denial | **Unaccepted** | A real trusted session and revocation path are not available; invalid cookie text is not an expired/revoked-session test. |
 | Private GET/search/tree/export and write behavior | Verified fail-closed baseline only | Reserved paths and POST return uniform empty 501 responses; no handler is claimed to work. |
 | Forbidden versus unknown record equivalence | **Unaccepted** | The current API has no authorized record handlers or seeded known record, so this harness only confirms reserved paths remain uniformly blocked. |
 | Verified OIDC, membership/invitations, family/person CRUD, authorized tree, editing/moderation, GEDCOM, persistence/restart, backup/restore, browser workflow, Windows UI | **Unaccepted** | These integration behaviors are not yet wired into the live API workflow. |
-| Full negative privacy/error matrix and >=90% per-component coverage | **Unaccepted** | Requires the integrated workflows and independent acceptance evidence; this baseline does not close #90 or constituent feature issues. |
+| CI line-coverage gates | Verified for this changeset | PR #103 run 45330602101 measured 98.3% aggregate line coverage and passed every component's >=90% line threshold; aggregate branch coverage was 78.0%. Branch coverage by component was not measured. |
+| Full negative privacy/error matrix | **Unaccepted** | Requires the integrated workflows and independent acceptance evidence; this baseline does not close #90 or constituent feature issues. |
 | Owner demonstration and private-MVP approval | **Unaccepted** | No owner acceptance or version change is implied. Product version remains 0.1.0. |
 
 ## CI evidence snapshot
 
 As of 2026-11-24, the latest observed `main` build/test workflow completed
-successfully on commit [`b5516a4`](https://github.com/Jamula/FamilyTree/commit/b5516a4a6265047db8017d9f68b39df6b6ea9f86)
-([workflow run 45329962572](https://github.com/Jamula/FamilyTree/actions/runs/45329962572)).
-It predates this harness and is not evidence that the new integration step has
-passed. This branch's integration CI remains **unaccepted** until the checks
-for this changeset complete successfully. The process-level harness checks
-are intentionally distinct from the existing component coverage gates.
+successfully on commit [`bd8e67e`](https://github.com/Jamula/FamilyTree/commit/bd8e67e1271a311282563297c255d98348685267)
+([workflow run 45330317828](https://github.com/Jamula/FamilyTree/actions/runs/45330317828)).
+This integration branch's build/test workflow also passed on commit
+[`46a69bf`](https://github.com/Jamula/FamilyTree/commit/46a69bfdabb86c55e38727772d0efb7f91b106ce)
+([PR #103 run 45330602101](https://github.com/Jamula/FamilyTree/actions/runs/45330602101)),
+including the new process-level acceptance step. That run reported 98.3%
+aggregate line coverage, 78.0% aggregate branch coverage, and component line
+coverage above 90% for each measured component. These green CI results are not
+proof that the private-family MVP is complete; the remaining gates above stay
+unaccepted.
 
 ## Expansion rule
 
