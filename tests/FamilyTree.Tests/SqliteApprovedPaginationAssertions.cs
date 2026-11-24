@@ -92,6 +92,11 @@ internal static class SqliteApprovedPaginationAssertions
                             x.SubmittedBy == Guid.Empty && x.Relationship is null &&
                             x.ContentUnreadable),
                         "malformed approved identities are quarantined without hiding healthy items");
+                    var afterMalformedBoundary = reopened.ListApprovedRelationshipsForUndo(
+                        family, admin, quarantined[^1].Cursor);
+                    Check(afterMalformedBoundary.Count == 5 &&
+                        afterMalformedBoundary.All(x => x.Relationship is not null),
+                        "raw approved cursor reaches healthy proposals after malformed boundary");
                     change.CommandText = """
                         UPDATE relationship_proposals SET id=$id
                         WHERE family_id=$f AND id=$malformedId;

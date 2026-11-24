@@ -401,6 +401,16 @@ internal static class SqliteRelationshipAssertions
                             x.SubmittedBy == Guid.Empty && x.Relationship is null &&
                             x.ContentUnreadable),
                         "malformed pending identities are quarantined without hiding healthy items");
+                    var secondPage = store.ListPendingRelationships(
+                        family, admin, firstPage[^1].Cursor);
+                    var discoveredIds = firstPage.Concat(secondPage)
+                        .Select(x => x.ProposalId).ToArray();
+                    Check(secondPage.Count == 5 && discoveredIds.Length == 105 &&
+                        discoveredIds.Distinct().Count() == 105 &&
+                        discoveredIds.Contains(Guid.Empty) &&
+                        pendingProposals.Where(x => x != malformedIdProposal)
+                            .All(discoveredIds.Contains),
+                        "raw pending cursor reaches healthy proposals after malformed boundary");
                     change.CommandText = """
                         UPDATE relationship_proposals SET id=$id
                         WHERE family_id=$f AND id=$malformedId;
@@ -421,16 +431,6 @@ internal static class SqliteRelationshipAssertions
                     change.Parameters.AddWithValue("$id",
                         malformedSubmitterProposal.ToString("D"));
                     Check(change.ExecuteNonQuery() == 1, "restore pending submitter ID");
-                    var secondPage = store.ListPendingRelationships(
-                        family, admin, firstPage[^1].Cursor);
-                    var discoveredIds = firstPage.Concat(secondPage)
-                        .Select(x => x.ProposalId).ToArray();
-                    Check(secondPage.Count == 5 && discoveredIds.Length == 105 &&
-                        discoveredIds.Distinct().Count() == 105 &&
-                        discoveredIds.Contains(Guid.Empty) &&
-                        pendingProposals.Where(x => x != malformedIdProposal)
-                            .All(discoveredIds.Contains),
-                        "pending cursor discovers every item beyond the first bounded page");
                 }
                 foreach (var proposal in pendingProposals)
                     store.ReviewRelationship(family, admin, proposal, false);

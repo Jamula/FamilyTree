@@ -29,7 +29,9 @@ public sealed partial class SqliteFamilyStore : IDisposable
         _key = (byte[])encryptionKey.Clone();
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         using var connection = Open();
+        using var transaction = connection.BeginTransaction(deferred: false);
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             CREATE TABLE IF NOT EXISTS families (
                 id TEXT PRIMARY KEY NOT NULL
@@ -92,13 +94,14 @@ public sealed partial class SqliteFamilyStore : IDisposable
             );
             """;
         command.ExecuteNonQuery();
-        EnsureAuditTimestampColumn(connection);
-        VerifyDatabaseKey(connection);
+        EnsureAuditTimestampColumn(connection, transaction);
+        VerifyDatabaseKey(connection, transaction);
+        transaction.Commit();
     }
 
-    private static void EnsureAuditTimestampColumn(SqliteConnection connection)
+    private static void EnsureAuditTimestampColumn(SqliteConnection connection,
+        SqliteTransaction transaction)
     {
-        using var transaction = connection.BeginTransaction(deferred: false);
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = "PRAGMA table_info(audit);";
@@ -107,23 +110,18 @@ public sealed partial class SqliteFamilyStore : IDisposable
         while (reader.Read())
             hasTimestamp |= reader.GetString(1) == "created_utc";
         reader.Close();
-        if (hasTimestamp)
-        {
-            transaction.Commit();
-            return;
-        }
+        if (hasTimestamp) return;
         using var migrate = connection.CreateCommand();
         migrate.Transaction = transaction;
         migrate.CommandText = "ALTER TABLE audit ADD COLUMN created_utc TEXT;";
         migrate.ExecuteNonQuery();
-        transaction.Commit();
     }
 
     // Bind an on-disk family database to the verified key before any write.
     // Populated legacy DBs without a marker require explicit migration.
-    private void VerifyDatabaseKey(SqliteConnection connection)
+    private void VerifyDatabaseKey(SqliteConnection connection,
+        SqliteTransaction tx)
     {
-        using var tx = connection.BeginTransaction();
         byte[]? envelope;
         using (var command = Cmd(connection, tx,
             "SELECT envelope FROM key_verifier WHERE id=1;"))
@@ -140,7 +138,6 @@ public sealed partial class SqliteFamilyStore : IDisposable
             Decrypt(Guid.Empty, Guid.Empty, envelope), expected,
             StringComparison.Ordinal))
             throw new InvalidDataException("Invalid database encryption key.");
-        tx.Commit();
     }
 
     /// <summary>

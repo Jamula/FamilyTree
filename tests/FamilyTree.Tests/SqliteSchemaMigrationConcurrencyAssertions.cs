@@ -10,7 +10,9 @@ internal static class SqliteSchemaMigrationConcurrencyAssertions
             "familytree-schema-race-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var database = Path.Join(directory, "legacy.sqlite");
+        var rollbackDatabase = Path.Join(directory, "legacy-wrong-key.sqlite");
         var key = RandomNumberGenerator.GetBytes(32);
+        var wrongKey = RandomNumberGenerator.GetBytes(32);
 
         try
         {
@@ -53,11 +55,63 @@ internal static class SqliteSchemaMigrationConcurrencyAssertions
             while (reader.Read())
                 hasTimestamp |= reader.GetString(1) == "created_utc";
             Check(hasTimestamp, "legacy audit timestamp migration is durable");
+
+            using (new SqliteFamilyStore(rollbackDatabase, key))
+            {
+            }
+            using (var legacy = new SqliteConnection(
+                new SqliteConnectionStringBuilder {
+                    DataSource = rollbackDatabase, Pooling = false }.ToString()))
+            {
+                legacy.Open();
+                using var downgrade = legacy.CreateCommand();
+                downgrade.CommandText = """
+                    DROP TABLE relationship_proposals;
+                    DROP TABLE relationships;
+                    ALTER TABLE audit DROP COLUMN created_utc;
+                    """;
+                downgrade.ExecuteNonQuery();
+            }
+            Expect<InvalidDataException>(
+                () => new SqliteFamilyStore(rollbackDatabase, wrongKey),
+                "wrong database key rejects legacy open");
+            using (var rolledBack = new SqliteConnection(
+                new SqliteConnectionStringBuilder {
+                    DataSource = rollbackDatabase, Pooling = false }.ToString()))
+            {
+                rolledBack.Open();
+                using var inspect = rolledBack.CreateCommand();
+                inspect.CommandText = """
+                    SELECT COUNT(*) FROM sqlite_master
+                    WHERE type='table' AND name IN ('relationships',
+                        'relationship_proposals');
+                    """;
+                Check(Convert.ToInt64(inspect.ExecuteScalar()) == 0 &&
+                    !HasAuditTimestamp(rolledBack),
+                    "wrong-key open rolls back every schema change");
+            }
+            using (var reopened = new SqliteFamilyStore(rollbackDatabase, key))
+            using (var migrated = new SqliteConnection(
+                new SqliteConnectionStringBuilder {
+                    DataSource = rollbackDatabase, Pooling = false }.ToString()))
+            {
+                migrated.Open();
+                using var inspect = migrated.CreateCommand();
+                inspect.CommandText = """
+                    SELECT COUNT(*) FROM sqlite_master
+                    WHERE type='table' AND name IN ('relationships',
+                        'relationship_proposals');
+                    """;
+                Check(Convert.ToInt64(inspect.ExecuteScalar()) == 2 &&
+                    HasAuditTimestamp(migrated),
+                    "valid key completes deferred schema migration");
+            }
             Console.WriteLine("PASS concurrent SQLite legacy audit schema migration");
         }
         finally
         {
             CryptographicOperations.ZeroMemory(key);
+            CryptographicOperations.ZeroMemory(wrongKey);
             if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
@@ -65,5 +119,22 @@ internal static class SqliteSchemaMigrationConcurrencyAssertions
     private static void Check(bool accepted, string reason)
     {
         if (!accepted) throw new InvalidOperationException(reason);
+    }
+
+    private static bool HasAuditTimestamp(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA table_info(audit);";
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            if (reader.GetString(1) == "created_utc") return true;
+        return false;
+    }
+
+    private static void Expect<T>(Action action, string reason) where T : Exception
+    {
+        try { action(); }
+        catch (T) { return; }
+        throw new InvalidOperationException(reason);
     }
 }
