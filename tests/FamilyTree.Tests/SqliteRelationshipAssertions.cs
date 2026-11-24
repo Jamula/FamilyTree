@@ -270,6 +270,91 @@ internal static class SqliteRelationshipAssertions
                     change.Parameters.AddWithValue("$original", admin.ToString("D"));
                     Check(change.ExecuteNonQuery() == 1, "restore authenticated submitter");
                 }
+                var identityTarget = store.ProposeRelationship(family, actor,
+                    Relationship.Create(personA.Id, personB.Id,
+                        RelationKind.Neighbor, "fictional-envelope-target"));
+                var identitySource = store.ProposeRelationship(family, actor,
+                    Relationship.Create(personA.Id, personB.Id,
+                        RelationKind.Parent, "fictional-envelope-source"));
+                var auditBeforeEnvelopeSubstitution = store.CountAudit(family, admin);
+                using (var connection = new SqliteConnection(
+                    new SqliteConnectionStringBuilder {
+                        DataSource = database, Pooling = false }.ToString()))
+                {
+                    connection.Open();
+                    string relationId, fromId, toId, kind, submitter;
+                    byte[] label, identity;
+                    using (var original = connection.CreateCommand())
+                    {
+                        original.CommandText = """
+                            SELECT relation_id,from_id,to_id,kind,encrypted_label,
+                                   submitter,identity_envelope
+                            FROM relationship_proposals WHERE family_id=$f AND id=$id;
+                            """;
+                        original.Parameters.AddWithValue("$f", family.ToString("D"));
+                        original.Parameters.AddWithValue("$id", identityTarget.ToString("D"));
+                        using var reader = original.ExecuteReader();
+                        Check(reader.Read(), "read the original pending proposal envelope");
+                        relationId = reader.GetString(0);
+                        fromId = reader.GetString(1);
+                        toId = reader.GetString(2);
+                        kind = reader.GetString(3);
+                        label = reader.GetFieldValue<byte[]>(4);
+                        submitter = reader.GetString(5);
+                        identity = reader.GetFieldValue<byte[]>(6);
+                    }
+                    using var change = connection.CreateCommand();
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET
+                            relation_id=(SELECT relation_id FROM relationship_proposals
+                                         WHERE family_id=$f AND id=$source),
+                            from_id=(SELECT from_id FROM relationship_proposals
+                                     WHERE family_id=$f AND id=$source),
+                            to_id=(SELECT to_id FROM relationship_proposals
+                                   WHERE family_id=$f AND id=$source),
+                            kind=(SELECT kind FROM relationship_proposals
+                                  WHERE family_id=$f AND id=$source),
+                            encrypted_label=(SELECT encrypted_label
+                                             FROM relationship_proposals
+                                             WHERE family_id=$f AND id=$source),
+                            submitter=(SELECT submitter FROM relationship_proposals
+                                       WHERE family_id=$f AND id=$source),
+                            identity_envelope=(SELECT identity_envelope
+                                               FROM relationship_proposals
+                                               WHERE family_id=$f AND id=$source)
+                        WHERE family_id=$f AND id=$target;
+                        """;
+                    change.Parameters.AddWithValue("$source", identitySource.ToString("D"));
+                    change.Parameters.AddWithValue("$f", family.ToString("D"));
+                    change.Parameters.AddWithValue("$target", identityTarget.ToString("D"));
+                    Check(change.ExecuteNonQuery() == 1,
+                        "substitute complete pending proposal envelope");
+                    Expect<InvalidDataException>(() => store.ReviewRelationship(
+                        family, admin, identityTarget, true),
+                        "proposal-ID envelope substitution cannot be approved");
+                    Expect<InvalidDataException>(() => store.ReviewRelationship(
+                        family, admin, identityTarget, false),
+                        "proposal-ID envelope substitution cannot be rejected");
+                    Check(store.CountAudit(family, admin) == auditBeforeEnvelopeSubstitution,
+                        "failed proposal-envelope substitutions append no audit events");
+                    change.CommandText = """
+                        UPDATE relationship_proposals SET relation_id=$relation,
+                            from_id=$from,to_id=$to,kind=$kind,encrypted_label=$label,
+                            submitter=$submitter,identity_envelope=$identity
+                        WHERE family_id=$f AND id=$target;
+                        """;
+                    change.Parameters.AddWithValue("$relation", relationId);
+                    change.Parameters.AddWithValue("$from", fromId);
+                    change.Parameters.AddWithValue("$to", toId);
+                    change.Parameters.AddWithValue("$kind", kind);
+                    change.Parameters.AddWithValue("$label", label);
+                    change.Parameters.AddWithValue("$submitter", submitter);
+                    change.Parameters.AddWithValue("$identity", identity);
+                    Check(change.ExecuteNonQuery() == 1,
+                        "restore original pending proposal envelope");
+                }
+                store.ReviewRelationship(family, admin, identityTarget, false);
+                store.ReviewRelationship(family, admin, identitySource, false);
                 Check(!store.ListPendingRelationships(family, admin).Any(x =>
                     x.ProposalId == adminOwned),
                     "self-submitted items do not occupy independent review inbox");
@@ -466,6 +551,40 @@ internal static class SqliteRelationshipAssertions
                     "rejecting bad proposal preserves healthy approved links");
                 Expect<UnauthorizedAccessException>(() => store.UndoRelationship(
                     family, actor, Guid.NewGuid()), "unauthorized undo denied");
+                var originalLinks = store.ReadRelationships(family, admin);
+                var paginationProposals = new List<Guid>();
+                var paginationRelationshipIds = new HashSet<Guid>();
+                for (var index = 0; index < 105; index++)
+                {
+                    var edge = Relationship.Create(personA.Id, personB.Id,
+                        RelationKind.Friend, $"fictional-pagination-{index}");
+                    var proposal = store.ProposeRelationship(family, actor, edge);
+                    store.ReviewRelationship(family, admin, proposal, true);
+                    paginationProposals.Add(proposal);
+                    paginationRelationshipIds.Add(edge.Id);
+                }
+                var discovered = new List<SqliteFamilyStore.ApprovedRelationshipUndo>();
+                Guid? cursor = null;
+                while (true)
+                {
+                    var page = store.ListApprovedRelationshipsForUndo(
+                        family, admin, cursor);
+                    discovered.AddRange(page);
+                    if (page.Count < 100) break;
+                    cursor = page[^1].ProposalId;
+                }
+                var discoveredIds = discovered.Select(x => x.ProposalId).ToArray();
+                Check(discovered.Count == 107 && discoveredIds.Distinct().Count() == 107 &&
+                    paginationProposals.All(discoveredIds.Contains),
+                    "cursor pagination discovers every eligible approval beyond 100");
+                Check(store.ReadRelationships(family, admin).Count == 107 &&
+                    store.ReadRelationships(family, admin).Where(x =>
+                        !paginationRelationshipIds.Contains(x.Id)).SequenceEqual(originalLinks),
+                    "reading approval pages leaves existing graph links unchanged");
+                foreach (var proposal in paginationProposals)
+                    store.UndoRelationship(family, admin, proposal);
+                Check(store.ReadRelationships(family, admin).SequenceEqual(originalLinks),
+                    "undoing pagination fixtures preserves all original links");
                 store.RevokeMember(family, admin, actor);
                 Expect<UnauthorizedAccessException>(() => store.ReadRelationships(
                     family, actor), "member revocation blocks saved links");
