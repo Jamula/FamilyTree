@@ -23,7 +23,7 @@ production connector. Never expose it as an unauthenticated HTTP service.
 - Reassess connector capabilities at deployment time. Do not assume an arbitrary localhost MCP server is accessible in a ChatGPT browser session.
 
 ## Local capability groundwork
-- MCP tool discovery explicitly registers only `FamilyDemoTools`; do not switch back to assembly-wide discovery or add private-data tools to this type.
+- MCP startup verifies that `FamilyDemoTools` is the only attributed MCP tool type and that it contains exactly the reviewed tool methods before SDK discovery; any additional type or method fails startup. Do not add private-data tools to the synthetic class.
 - Capability negotiation intersects agent requests with explicit consent and the local synthetic capability set. Private reads, private proposals and publication are always denied; caller-supplied identity and consent are not authenticated authorization.
 - `ScopedDemoDraftStore` provides bounded, process-local partitions for fictional drafts with scope deletion. Its generated scope IDs are not identity credentials, and the store is not wired to MCP client identity or durable storage.
 - Prompt-like proposal text remains inert synthetic draft text. The local demo has no model or private-data path; these checks do not establish end-to-end prompt-injection or cross-family protections.
