@@ -29,7 +29,9 @@ public sealed partial class SqliteFamilyStore : IDisposable
         _key = (byte[])encryptionKey.Clone();
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         using var connection = Open();
+        using var transaction = connection.BeginTransaction(deferred: false);
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             CREATE TABLE IF NOT EXISTS families (
                 id TEXT PRIMARY KEY NOT NULL
@@ -62,22 +64,64 @@ public sealed partial class SqliteFamilyStore : IDisposable
             CREATE TABLE IF NOT EXISTS audit (
                 seq INTEGER PRIMARY KEY AUTOINCREMENT,
                 family_id TEXT NOT NULL, subject_id TEXT NOT NULL,
-                reviewer TEXT NOT NULL, action TEXT NOT NULL
+                reviewer TEXT NOT NULL, action TEXT NOT NULL,
+                created_utc TEXT
             );
             CREATE TABLE IF NOT EXISTS key_verifier (
                 id INTEGER PRIMARY KEY CHECK(id=1),
                 envelope BLOB NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS relationships (
+                family_id TEXT NOT NULL, id TEXT NOT NULL,
+                from_id TEXT NOT NULL, to_id TEXT NOT NULL,
+                kind TEXT NOT NULL, encrypted_label BLOB NOT NULL,
+                proposal_id TEXT NOT NULL, submitter TEXT NOT NULL,
+                PRIMARY KEY(family_id, id),
+                FOREIGN KEY(family_id) REFERENCES families(id),
+                FOREIGN KEY(family_id,from_id) REFERENCES people(family_id,id),
+                FOREIGN KEY(family_id,to_id) REFERENCES people(family_id,id)
+            );
+            CREATE TABLE IF NOT EXISTS relationship_proposals (
+                id TEXT PRIMARY KEY, family_id TEXT NOT NULL,
+                relation_id TEXT NOT NULL, from_id TEXT NOT NULL,
+                to_id TEXT NOT NULL, kind TEXT NOT NULL,
+                encrypted_label BLOB NOT NULL, submitter TEXT NOT NULL,
+                identity_envelope BLOB NOT NULL,
+                state TEXT NOT NULL CHECK(state IN
+                    ('Pending','Approved','Rejected','Undone')),
+                reviewer TEXT NULL,
+                FOREIGN KEY(family_id) REFERENCES families(id)
+            );
             """;
         command.ExecuteNonQuery();
-        VerifyDatabaseKey(connection);
+        EnsureAuditTimestampColumn(connection, transaction);
+        VerifyDatabaseKey(connection, transaction);
+        transaction.Commit();
+    }
+
+    private static void EnsureAuditTimestampColumn(SqliteConnection connection,
+        SqliteTransaction transaction)
+    {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "PRAGMA table_info(audit);";
+        using var reader = command.ExecuteReader();
+        var hasTimestamp = false;
+        while (reader.Read())
+            hasTimestamp |= reader.GetString(1) == "created_utc";
+        reader.Close();
+        if (hasTimestamp) return;
+        using var migrate = connection.CreateCommand();
+        migrate.Transaction = transaction;
+        migrate.CommandText = "ALTER TABLE audit ADD COLUMN created_utc TEXT;";
+        migrate.ExecuteNonQuery();
     }
 
     // Bind an on-disk family database to the verified key before any write.
     // Populated legacy DBs without a marker require explicit migration.
-    private void VerifyDatabaseKey(SqliteConnection connection)
+    private void VerifyDatabaseKey(SqliteConnection connection,
+        SqliteTransaction tx)
     {
-        using var tx = connection.BeginTransaction();
         byte[]? envelope;
         using (var command = Cmd(connection, tx,
             "SELECT envelope FROM key_verifier WHERE id=1;"))
@@ -94,7 +138,6 @@ public sealed partial class SqliteFamilyStore : IDisposable
             Decrypt(Guid.Empty, Guid.Empty, envelope), expected,
             StringComparison.Ordinal))
             throw new InvalidDataException("Invalid database encryption key.");
-        tx.Commit();
     }
 
     /// <summary>
@@ -464,12 +507,15 @@ public sealed partial class SqliteFamilyStore : IDisposable
     private static void Audit(SqliteConnection con, SqliteTransaction tx,
         Guid family, Guid subject, Guid actor, string action)
         => Exec(con, tx, """
-            INSERT INTO audit(family_id,subject_id,reviewer,action)
-            VALUES($f,$subject,$actor,$action);
+            INSERT INTO audit(family_id,subject_id,reviewer,action,created_utc)
+            VALUES($f,$subject,$actor,$action,$created);
             """, ("$f", family.ToString("D")), ("$subject", subject.ToString("D")),
-            ("$actor", actor.ToString("D")), ("$action", action));
+            ("$actor", actor.ToString("D")), ("$action", action),
+            ("$created", DateTimeOffset.UtcNow.ToString("O",
+                System.Globalization.CultureInfo.InvariantCulture)));
 
-    private byte[] Encrypt(Guid familyId, Guid personId, string name)
+    private byte[] Encrypt(Guid familyId, Guid personId, string name,
+        byte[]? additionalContext = null)
     {
         var clear = Encoding.UTF8.GetBytes(name);
         try
@@ -478,13 +524,15 @@ public sealed partial class SqliteFamilyStore : IDisposable
             var cipher = new byte[clear.Length];
             var tag = new byte[16];
             using var aes = new AesGcm(_key, 16);
-            aes.Encrypt(nonce, clear, cipher, tag, AssociatedData(familyId, personId));
+            aes.Encrypt(nonce, clear, cipher, tag,
+                AssociatedData(familyId, personId, additionalContext));
             return [..nonce, ..tag, ..cipher];
         }
         finally { CryptographicOperations.ZeroMemory(clear); }
     }
 
-    private string Decrypt(Guid familyId, Guid personId, byte[] envelope)
+    private string Decrypt(Guid familyId, Guid personId, byte[] envelope,
+        byte[]? additionalContext = null)
     {
         if (envelope.Length < 28)
             throw new InvalidDataException("Encrypted person record invalid.");
@@ -493,7 +541,8 @@ public sealed partial class SqliteFamilyStore : IDisposable
         {
             using var aes = new AesGcm(_key, 16);
             aes.Decrypt(envelope.AsSpan(0, 12), envelope.AsSpan(28),
-                envelope.AsSpan(12, 16), clear, AssociatedData(familyId, personId));
+                envelope.AsSpan(12, 16), clear,
+                AssociatedData(familyId, personId, additionalContext));
             return Encoding.UTF8.GetString(clear);
         }
         catch (CryptographicException)
@@ -503,8 +552,10 @@ public sealed partial class SqliteFamilyStore : IDisposable
         finally { CryptographicOperations.ZeroMemory(clear); }
     }
 
-    private static byte[] AssociatedData(Guid family, Guid person)
-        => [..family.ToByteArray(), ..person.ToByteArray()];
+    private static byte[] AssociatedData(Guid family, Guid person,
+        byte[]? additionalContext = null)
+        => [..family.ToByteArray(), ..person.ToByteArray(),
+            ..(additionalContext ?? [])];
 
     public void Dispose()
     {
