@@ -68,13 +68,16 @@ public static class GedcomLegacyCompatibility
                 var recordTag = record.Length == 3 && record[1].StartsWith('@')
                     ? record[2].Split(' ', 2)[0] : record[1];
                 if (recordTag is "REPO" or "SUBN" or "SUBM" or "SOUR" or "OBJE" &&
-                    (record.Length != 3 || !Pointer.IsMatch(record[1]) || record[2] != recordTag))
+                    !((record.Length == 2 && record[1] == recordTag) ||
+                      (record.Length == 3 && Pointer.IsMatch(record[1]) && record[2] == recordTag)))
                     return Reject("Malformed reference record");
                 if (recordTag is "FAMC" or "FAMS" or "HUSB" or "WIFE" or "CHIL" or
                     "ASSO" or "ALIA" or "ANCI" or "DESI")
                     return Reject("Pointer tag outside a record");
                 currentRecordKind = record.Length == 3 && Pointer.IsMatch(record[1])
-                    ? record[2] : "";
+                    ? record[2] : record.Length == 2 &&
+                        recordTag is ("REPO" or "SUBN" or "SUBM" or "SOUR" or "OBJE")
+                        ? recordTag : "";
                 currentSection = "";
                 if (record.Length == 3 && record[1].StartsWith('@'))
                 {

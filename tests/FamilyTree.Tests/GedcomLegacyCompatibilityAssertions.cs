@@ -252,10 +252,18 @@ internal static class GedcomLegacyCompatibilityAssertions
             Check(GedcomLegacyCompatibility.Preview(submission).Valid == (source == converted),
                 "legacy submission may reference its submitter");
             foreach (var tag in new[] { "SUBM", "SUBN", "REPO", "SOUR", "OBJE" })
+            {
                 foreach (var record in new[] { $"0 {tag} @MISSING@", $"0 @X@ {tag} @MISSING@" })
                     Check(!GedcomLegacyCompatibility.Preview(source.Replace(
                         "0 TRLR", record + "\n0 TRLR", StringComparison.Ordinal)).Valid,
-                        "reference records require an ID and cannot carry pointer payloads");
+                        "reference records cannot carry pointer payloads");
+                Check(GedcomLegacyCompatibility.Preview(source.Replace(
+                    "0 TRLR", $"0 {tag}\n0 TRLR", StringComparison.Ordinal)).Valid,
+                    "unreferenced records without IDs remain previewable");
+            }
+            Check(GedcomLegacyCompatibility.Preview(source.Replace("0 TRLR",
+                "0 SOUR\n1 REPO @R1@\n0 @R1@ REPO\n0 TRLR", StringComparison.Ordinal)).Valid,
+                "unreferenced source can cite a repository");
             foreach (var tag in new[] { "SUBN", "REPO" })
                 Check(!GedcomLegacyCompatibility.Preview(source.Replace(
                     "1 NAME Alex /Example/", $"1 NAME Alex /Example/\n1 {tag} @I1@",
