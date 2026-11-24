@@ -63,14 +63,20 @@ public sealed partial class SqliteFamilyStore
         using var tx = con.BeginTransaction();
         EnsureProfileClaimSchema(con, tx);
         RequireMember(con, tx, familyId, reviewerId, administrator: true);
+        RequireVisibleProfileClaim(con, tx, familyId, reviewerId, claimId);
         var claim = FindPendingProfileClaim(con, tx, familyId, claimId);
-        RequireMember(con, tx, familyId, claim.PrincipalId, administrator: false);
-        if (Scalar<long>(con, tx, """
-            SELECT COUNT(*) FROM person_visibility
-            WHERE family_id=$f AND branch_id=$b AND principal_id=$p AND person_id=$person;
-            """, ("$f", familyId.ToString("D")), ("$b", claim.BranchId.ToString("D")),
-            ("$p", claim.PrincipalId.ToString("D")), ("$person", claim.PersonId.ToString("D"))) != 1)
+        if (claim.PrincipalId == reviewerId)
             throw new UnauthorizedAccessException("Access denied.");
+        if (approve)
+        {
+            RequireMember(con, tx, familyId, claim.PrincipalId, administrator: false);
+            if (Scalar<long>(con, tx, """
+                SELECT COUNT(*) FROM person_visibility
+                WHERE family_id=$f AND branch_id=$b AND principal_id=$p AND person_id=$person;
+                """, ("$f", familyId.ToString("D")), ("$b", claim.BranchId.ToString("D")),
+                ("$p", claim.PrincipalId.ToString("D")), ("$person", claim.PersonId.ToString("D"))) != 1)
+                throw new UnauthorizedAccessException("Access denied.");
+        }
         var reviewed = ProfileClaim.Submit(familyId, claim.PrincipalId, claim.PersonId,
             activeFamilyMember: true, canViewPerson: true)
             .Review(reviewerId, familyId, canApproveClaims: true, approve);
@@ -121,10 +127,13 @@ public sealed partial class SqliteFamilyStore
         RequireMember(con, tx, familyId, administratorId, administrator: true);
         var claims = new List<StoredProfileClaim>();
         using (var query = Cmd(con, tx, """
-            SELECT id,person_id,principal_id,branch_id,reviewed_by,identity_envelope
-            FROM profile_claims WHERE family_id=$f AND state='Pending'
-            ORDER BY id LIMIT 100;
-            """, ("$f", familyId.ToString("D"))))
+            SELECT c.id,c.person_id,c.principal_id,c.branch_id,c.reviewed_by,c.identity_envelope
+            FROM profile_claims c WHERE c.family_id=$f AND c.state='Pending'
+              AND EXISTS (SELECT 1 FROM person_visibility v
+                  WHERE v.family_id=c.family_id AND v.branch_id=c.branch_id
+                    AND v.person_id=c.person_id AND v.principal_id=$admin)
+            ORDER BY c.id LIMIT 100;
+            """, ("$f", familyId.ToString("D")), ("$admin", administratorId.ToString("D"))))
         using (var reader = query.ExecuteReader())
             while (reader.Read())
             {
@@ -151,6 +160,7 @@ public sealed partial class SqliteFamilyStore
         using var tx = con.BeginTransaction();
         EnsureProfileClaimSchema(con, tx);
         RequireMember(con, tx, familyId, administratorId, administrator: true);
+        RequireVisibleProfileClaim(con, tx, familyId, administratorId, claimId);
         var entries = new List<ProfileClaimAuditEntry>();
         using (var query = Cmd(con, tx, """
             SELECT seq,reviewer,action FROM audit
@@ -166,6 +176,26 @@ public sealed partial class SqliteFamilyStore
         return entries;
     }
 
+    private void RequireVisibleProfileClaim(
+        SqliteConnection con, SqliteTransaction tx, Guid familyId, Guid viewerId, Guid claimId)
+    {
+        using var query = Cmd(con, tx, """
+            SELECT c.branch_id,c.person_id,c.principal_id,c.identity_envelope
+            FROM profile_claims c
+            WHERE c.family_id=$f AND c.id=$id AND EXISTS (
+                SELECT 1 FROM person_visibility v
+                WHERE v.family_id=c.family_id AND v.branch_id=c.branch_id
+                  AND v.person_id=c.person_id AND v.principal_id=$viewer);
+            """, ("$f", familyId.ToString("D")), ("$id", claimId.ToString("D")),
+            ("$viewer", viewerId.ToString("D")));
+        using var reader = query.ExecuteReader();
+        if (!reader.Read())
+            throw new UnauthorizedAccessException("Access denied.");
+        VerifyProfileClaimIdentity(familyId, claimId, Guid.Parse(reader.GetString(0)),
+            Guid.Parse(reader.GetString(1)), Guid.Parse(reader.GetString(2)),
+            reader.GetFieldValue<byte[]>(3));
+    }
+
     private StoredProfileClaim FindPendingProfileClaim(
         SqliteConnection con, SqliteTransaction tx, Guid familyId, Guid claimId)
     {
@@ -175,7 +205,7 @@ public sealed partial class SqliteFamilyStore
             """, ("$f", familyId.ToString("D")), ("$id", claimId.ToString("D")));
         using var reader = query.ExecuteReader();
         if (!reader.Read())
-            throw new InvalidOperationException("Pending profile claim unavailable.");
+            throw new UnauthorizedAccessException("Access denied.");
         var branchId = Guid.Parse(reader.GetString(0));
         var personId = Guid.Parse(reader.GetString(1));
         var principalId = Guid.Parse(reader.GetString(2));
