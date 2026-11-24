@@ -49,5 +49,12 @@ In the dashboard inspect both resources' traces and `familytree.http.requests` /
 
 Issue [#41](https://github.com/Jamula/FamilyTree/issues/41) remains open: end-to-end dashboard/export verification, unreachable-exporter behavior, privacy review and coverage targets require evidence; real authorized GEDCOM, identity, moderation and AI workflows must not be claimed before they exist. Managed telemetry remains subject to reviewed sampling, retention, quotas, TLS, scrubbers and explicit $0 owner approval.
 
+### Linux verification (2026-11-24, PR #116)
+The actual AppHost reported API and Web healthy through `aspire wait`, and both HTTP health requests succeeded. The sandbox's HTTPS development certificates were not trusted. The dashboard telemetry API returned no spans, both with its default HTTPS OTLP endpoint and with a temporary loopback-only HTTP OTLP endpoint; dashboard delivery remains **unverified**, not a pass. No Windows dashboard inspection was performed.
+
+Separately, the assertion suite sent synthetic requests through the Web middleware to the real OTLP/HTTP exporter and a temporary loopback test receiver. It verified trace and metric payloads, bounded result labels, absence of synthetic sensitive markers, and that requests still work after the receiver stops. Existing configuration tests cover disabled and malformed exporters; these tests do not establish dashboard delivery, gRPC behavior, process-log scrubbing, or private API behavior.
+
+The local CI-equivalent `dotnet-coverage` run measured source line coverage: Domain 96.2%, Persistence 97.6%, API 96.9%, Web 96.5%, MCP 97.7%, ServiceDefaults 100%, SyntheticDemo 100%. The collector reported 77.1% aggregate branches across instrumented assemblies, including tests, and supplied no per-component branch conditions; the 90% per-component branch target and AppHost coverage remain unverified. These measurements precede integration with [#107](https://github.com/Jamula/FamilyTree/pull/107) and [#108](https://github.com/Jamula/FamilyTree/pull/108); both modify shared application/test composition and require a fresh integrated privacy and coverage run.
+
 ## Zero-cost and privacy gates
 Use only localhost, with only synthetic people. Aspire does not authorize provisioning cloud services. Never `aspire publish` or deploy without a separately reviewed $0 plan and owner approval. No family data may be inserted into public logs, console output or telemetry.

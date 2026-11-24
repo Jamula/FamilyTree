@@ -34,6 +34,7 @@ await MembershipAuthorizationAssertions.RunAsync();
 await FictionalWorkbenchHttpAssertions.RunAsync();
 await AuthorizedTreeExplorerHttpAssertions.RunAsync();
 await WebRequestTelemetryAssertions.RunAsync();
+await OtlpDeliveryAssertions.RunAsync();
 
 // Keep HTTP integration off module initializers to avoid CLR startup locks.
 await ApiLoopbackIntegrationAssertions.RunAsync();

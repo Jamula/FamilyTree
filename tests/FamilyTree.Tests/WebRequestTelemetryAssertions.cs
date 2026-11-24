@@ -46,12 +46,17 @@ internal static class WebRequestTelemetryAssertions
         Check((await client.GetAsync("/denied/synthetic-secret")).StatusCode == HttpStatusCode.NotFound, "unknown path");
         Check((await client.GetAsync("/denied")).StatusCode == HttpStatusCode.Forbidden, "denial");
         Check((await client.GetAsync("/failure")).StatusCode == HttpStatusCode.ServiceUnavailable, "failure");
+        var exceptionObserved = false;
         try
         {
             await client.GetAsync("/exception");
             throw new InvalidOperationException("exception did not propagate");
         }
-        catch (InvalidOperationException ex) when (ex.Message == "synthetic-secret-message") { }
+        catch (InvalidOperationException ex) when (ex.Message == "synthetic-secret-message")
+        {
+            exceptionObserved = true;
+        }
+        Check(exceptionObserved, "exception propagated");
 
         Check(measurements.Count == 5 && measurements.Count(x => x.Contains("server_error", StringComparison.Ordinal)) == 2 &&
             measurements.Count(x => x.Contains("client_error", StringComparison.Ordinal)) == 2 &&
