@@ -50,7 +50,7 @@ public sealed partial class SqliteFamilyStore
         if (viewer == Guid.Empty || family == Guid.Empty || branch == Guid.Empty || person == Guid.Empty)
             return Task.FromResult<AuthorizedPersonSummary?>(null);
         using var con = Open();
-        using var tx = con.BeginTransaction();
+        using var tx = con.BeginTransaction(deferred: true);
         using var q = Cmd(con, tx, AuthorizedPeopleSql + " AND visibility.person_id=$id;",
             ("$f", family.ToString("D")), ("$b", branch.ToString("D")),
             ("$p", viewer.ToString("D")), ("$id", person.ToString("D")));
@@ -70,7 +70,7 @@ public sealed partial class SqliteFamilyStore
         if (viewer == Guid.Empty || family == Guid.Empty || branch == Guid.Empty)
             return Task.FromResult<IReadOnlyList<AuthorizedPersonSummary>>(results);
         using var con = Open();
-        using var tx = con.BeginTransaction();
+        using var tx = con.BeginTransaction(deferred: true);
         var after = "";
         while (true)
         {

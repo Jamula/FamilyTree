@@ -173,6 +173,15 @@ internal static class SqliteTreeReadSourceAssertions
         }
         using var source = new SqliteTreeReadSource(path, key);
         var people = new SqlitePersonReadService(source);
+        using (var db = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = path, Pooling = false }.ToString()))
+        {
+            db.Open();
+            using var writer = db.BeginTransaction();
+            Check(people.GetAsync(member, family, branch, Id(1)).GetAwaiter().GetResult() is not null &&
+                people.SearchAsync(member, family, branch, "common").GetAwaiter().GetResult().Count == 25,
+                "read transactions do not compete for a write reservation");
+        }
         Check(people.GetAsync(member, family, branch, Id(10019)).GetAwaiter().GetResult()?.DisplayName
             == "Fictional Needle", "targeted lookup does not decrypt unrelated corrupt records");
         var first = people.SearchAsync(member, family, branch, "common").GetAwaiter().GetResult();
