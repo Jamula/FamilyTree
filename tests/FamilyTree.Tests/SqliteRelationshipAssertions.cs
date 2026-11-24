@@ -407,7 +407,10 @@ internal static class SqliteRelationshipAssertions
                     var discoveredIds = firstPage.Concat(secondPage)
                         .Select(x => x.ProposalId).ToArray();
                     Check(secondPage.Count == 5 && discoveredIds.Length == 105 &&
-                        secondPage.All(x => x.Relationship is not null) &&
+                        secondPage.Select(x => x.ProposalId)
+                            .SequenceEqual(orderedPendingProposals.Skip(100)) &&
+                        secondPage.All(x =>
+                            x.Relationship is not null && !x.ContentUnreadable) &&
                         discoveredIds.Distinct().Count() == 105 &&
                         discoveredIds.Contains(Guid.Empty) &&
                         pendingProposals.Where(x => x != malformedIdProposal)

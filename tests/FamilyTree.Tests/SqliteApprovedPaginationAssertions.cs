@@ -96,7 +96,10 @@ internal static class SqliteApprovedPaginationAssertions
                     var afterMalformedBoundary = reopened.ListApprovedRelationshipsForUndo(
                         family, admin, quarantined[^1].Cursor);
                     Check(afterMalformedBoundary.Count == 5 &&
-                        afterMalformedBoundary.All(x => x.Relationship is not null),
+                        afterMalformedBoundary.Select(x => x.ProposalId)
+                            .SequenceEqual(orderedProposals.Skip(100)) &&
+                        afterMalformedBoundary.All(x =>
+                            x.Relationship is not null && !x.ContentUnreadable),
                         "undo cursor reaches healthy proposals across malformed boundary without repair");
                     change.CommandText = """
                         UPDATE relationship_proposals SET id=$id
