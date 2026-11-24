@@ -6,7 +6,8 @@ using ModelContextProtocol.Server;
 namespace FamilyTree.Mcp;
 
 /// <summary>
-/// Real stdio-only MCP registration shared by production and tests.
+/// Real stdio-only registration shared by production and tests. Register only
+/// the explicitly reviewed synthetic tool type; do not discover tools assembly-wide.
 /// Does not create a listener or grant approval/persistence authority.
 /// </summary>
 public static class McpHostConfiguration
@@ -21,7 +22,7 @@ public static class McpHostConfiguration
         });
         builder.Services.AddMcpServer()
             .WithStdioServerTransport()
-            .WithToolsFromAssembly();
+            .WithTools(new[] { typeof(FamilyDemoTools) });
         return builder;
     }
 }

@@ -21,3 +21,11 @@ production connector. Never expose it as an unauthenticated HTTP service.
 - Before remote access: test OIDC/JWT identity binding, denial equivalence, CSRF/Origin, TLS and host validation, per-agent scopes, data exfiltration, bounded responses, audit redaction and rate limiting.
 - Keep provider tokens, all private datasets and raw prompts out of public source and telemetry.
 - Reassess connector capabilities at deployment time. Do not assume an arbitrary localhost MCP server is accessible in a ChatGPT browser session.
+
+## Local capability groundwork
+- MCP tool discovery explicitly registers only `FamilyDemoTools`; do not switch back to assembly-wide discovery or add private-data tools to this type.
+- Capability negotiation intersects agent requests with explicit consent and the local synthetic capability set. Private reads, private proposals and publication are always denied; caller-supplied identity and consent are not authenticated authorization.
+- `ScopedDemoDraftStore` provides bounded, process-local partitions for fictional drafts with scope deletion. Its generated scope IDs are not identity credentials, and the store is not wired to MCP client identity or durable storage.
+- Prompt-like proposal text remains inert synthetic draft text. The local demo has no model or private-data path; these checks do not establish end-to-end prompt-injection or cross-family protections.
+
+The local capability and draft scope work is partial M1/M2 groundwork only. Identity-bound scopes, verified consent, private read/write authorization, approval/audit, encrypted per-user persistence, production HTTP controls and deployment-time connector review remain blocked on #9, #10, #12, #15 and #90 plus independent security review. Keep #46 open.

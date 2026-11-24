@@ -7,6 +7,7 @@ internal static class McpAdversarialAssertions
 {
     internal static void Run()
     {
+        McpSecurityPolicyAssertions.Run();
         using (var overview = JsonDocument.Parse(FamilyDemoTools.FamilyOverview()))
         {
             Check(overview.RootElement.GetProperty("syntheticOnly").GetBoolean() &&
@@ -26,8 +27,8 @@ internal static class McpAdversarialAssertions
             Check(noResults.RootElement.GetArrayLength() == 0, "not found search");
         using (var matches = JsonDocument.Parse(FamilyDemoTools.SearchDemoPeople(" VALE ")))
             Check(matches.RootElement.GetArrayLength() > 0, "case-fold and trim search");
-        Expect<ArgumentException>(() =>
-            FamilyDemoTools.SearchDemoPeople(new string('x', 81)), "oversized search");
+        ExpectRedacted(FamilyDemoTools.SearchDemoPeople(new string('x', 81)),
+            "oversized search");
 
         using (var malformed = JsonDocument.Parse(FamilyDemoTools.InspectDemoPerson("not-a-guid")))
             Check(!malformed.RootElement.GetProperty("found").GetBoolean(), "malformed person");
@@ -44,23 +45,21 @@ internal static class McpAdversarialAssertions
             Check(many.RootElement.GetArrayLength() == SyntheticFamilyCatalog.Relationships.Count,
                 "relationship large limit bounded");
 
-        Expect<ArgumentException>(()=>FamilyDemoTools.ProposeDemoPerson("  "), "blank name");
-        Expect<ArgumentException>(()=>FamilyDemoTools.ProposeDemoPerson(new string('a',81)),
-            "long name");
-        Expect<ArgumentException>(()=>FamilyDemoTools.ProposeDemoPerson("Fictional\nName"),
+        ExpectRedacted(FamilyDemoTools.ProposeDemoPerson("  "), "blank name");
+        ExpectRedacted(FamilyDemoTools.ProposeDemoPerson(new string('a',81)), "long name");
+        ExpectRedacted(FamilyDemoTools.ProposeDemoPerson("Fictional\nName"),
             "control in name");
-        Expect<ArgumentException>(()=>FamilyDemoTools.ProposeDemoRelationship("bad", "bad", "Parent"),
+        ExpectRedacted(FamilyDemoTools.ProposeDemoRelationship("bad", "bad", "Parent"),
             "malformed endpoints");
         var from=SyntheticFamilyCatalog.PersonId(1).ToString();
         var to=SyntheticFamilyCatalog.PersonId(2).ToString();
-        Expect<ArgumentException>(()=>FamilyDemoTools.ProposeDemoRelationship(from,from,"Parent"),
-            "self-link");
-        Expect<ArgumentException>(()=>FamilyDemoTools.ProposeDemoRelationship(from,to,"Other"),
+        ExpectRedacted(FamilyDemoTools.ProposeDemoRelationship(from,from,"Parent"), "self-link");
+        ExpectRedacted(FamilyDemoTools.ProposeDemoRelationship(from,to,"Other"),
             "unsupported Other kind");
-        Expect<ArgumentException>(()=>FamilyDemoTools.ProposeDemoRelationship(from,to,"999"),
+        ExpectRedacted(FamilyDemoTools.ProposeDemoRelationship(from,to,"999"),
             "invalid numeric relationship");
-        Expect<ArgumentException>(()=>FamilyDemoTools.ProposeDemoRelationship(
-            from,Guid.NewGuid().ToString(),"Parent"),"foreign endpoint");
+        ExpectRedacted(FamilyDemoTools.ProposeDemoRelationship(
+            from,Guid.NewGuid().ToString(),"Parent"), "foreign endpoint");
         using (var draft = JsonDocument.Parse(FamilyDemoTools.ProposeDemoRelationship(
             from,to,"friend")))
             Check(!draft.RootElement.GetProperty("Approved").GetBoolean() &&
@@ -99,6 +98,13 @@ internal static class McpAdversarialAssertions
 
     private static void Check(bool value, string message)
     { if(!value) throw new InvalidOperationException(message); }
+
+    private static void ExpectRedacted(string response, string message)
+    {
+        using var error = JsonDocument.Parse(response);
+        Check(error.RootElement.GetProperty("error").GetString() ==
+              "The request could not be completed.", message);
+    }
 
     private static void Expect<T>(Action action, string message) where T:Exception
     {

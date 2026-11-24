@@ -36,7 +36,10 @@ public static class FamilyDemoTools
     }
 
     [McpServerTool, Description("Search by the name of a fictional demo person; case-insensitive, maximum 80 characters.")]
-    public static string SearchDemoPeople(string query)
+    public static string SearchDemoPeople(string query) =>
+        McpToolErrors.Invoke(() => SearchDemoPeopleCore(query));
+
+    private static string SearchDemoPeopleCore(string query)
     {
         if (string.IsNullOrWhiteSpace(query)) return "[]";
         if (query.Length > 80) throw new ArgumentException("Search text too long.");
@@ -75,7 +78,10 @@ public static class FamilyDemoTools
     }
 
     [McpServerTool, Description("Stage a fictional person suggestion in private, in-memory drafts. Never publishes records.")]
-    public static string ProposeDemoPerson(string displayName)
+    public static string ProposeDemoPerson(string displayName) =>
+        McpToolErrors.Invoke(() => ProposeDemoPersonCore(displayName));
+
+    private static string ProposeDemoPersonCore(string displayName)
     {
         if (string.IsNullOrWhiteSpace(displayName) || displayName.Length > 80 ||
             displayName.Any(char.IsControl))
@@ -85,7 +91,12 @@ public static class FamilyDemoTools
     }
 
     [McpServerTool, Description("Stage a fictional relationship suggestion between existing demo GUIDs. Never publishes records.")]
-    public static string ProposeDemoRelationship(string fromPersonId, string toPersonId, string relationKind)
+    public static string ProposeDemoRelationship(string fromPersonId, string toPersonId, string relationKind) =>
+        McpToolErrors.Invoke(() => ProposeDemoRelationshipCore(
+            fromPersonId, toPersonId, relationKind));
+
+    private static string ProposeDemoRelationshipCore(
+        string fromPersonId, string toPersonId, string relationKind)
     {
         if (!Guid.TryParse(fromPersonId, out var from) ||
             !Guid.TryParse(toPersonId, out var to) || from == to)

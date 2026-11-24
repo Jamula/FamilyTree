@@ -53,31 +53,19 @@ internal static class SyntheticDemoAssertions
             "draft proposals stay ephemeral");
         Ensure(DemoProposalQueue.All().All(p => !p.Approved && !p.Persisted),
             "no draft can be approved or persisted through MCP");
-        var selfLinkRejected = false;
-        try
-        {
-            FamilyDemoTools.ProposeDemoRelationship(
-                SyntheticFamilyCatalog.PersonId(1).ToString(),
-                SyntheticFamilyCatalog.PersonId(1).ToString(), "Parent");
-        }
-        catch (ArgumentException)
-        {
-            selfLinkRejected = true;
-        }
-        Ensure(selfLinkRejected, "self relationship proposals must be rejected");
+        using var selfLinkError = JsonDocument.Parse(FamilyDemoTools.ProposeDemoRelationship(
+            SyntheticFamilyCatalog.PersonId(1).ToString(),
+            SyntheticFamilyCatalog.PersonId(1).ToString(), "Parent"));
+        Ensure(selfLinkError.RootElement.GetProperty("error").GetString() ==
+               "The request could not be completed.",
+            "self relationship proposals are rejected without exposing tool errors");
 
-        var foreignIdRejected = false;
-        try
-        {
-            FamilyDemoTools.ProposeDemoRelationship(
-                SyntheticFamilyCatalog.PersonId(1).ToString(),
-                Guid.NewGuid().ToString(), "Friend");
-        }
-        catch (ArgumentException)
-        {
-            foreignIdRejected = true;
-        }
-        Ensure(foreignIdRejected, "unknown real or non-demo IDs must be rejected");
+        using var foreignIdError = JsonDocument.Parse(FamilyDemoTools.ProposeDemoRelationship(
+            SyntheticFamilyCatalog.PersonId(1).ToString(),
+            Guid.NewGuid().ToString(), "Friend"));
+        Ensure(foreignIdError.RootElement.GetProperty("error").GetString() ==
+               "The request could not be completed.",
+            "unknown real or non-demo IDs are rejected without identifying records");
 
         var beforeDraft = edges.Count;
         using var relationshipDraft = JsonDocument.Parse(FamilyDemoTools.ProposeDemoRelationship(
