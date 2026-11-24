@@ -14,6 +14,13 @@ internal static class GedcomLegacyCompatibilityAssertions
         var report = GedcomLegacyCompatibility.Preview(converted);
         Check(report.Valid && report.People.Count == 3 && report.Families.Count == 1,
             "synthetic GEDCOM 5.5.1 subset preview retains people and family");
+        var original = GedcomSevenSubset.Preview(fixture);
+        Check(original.Valid && original.People.Select(x => x.DisplayName).SequenceEqual(
+            new[] { "Alex Example", "Jordan Sample", "Taylor Example" }) &&
+            original.Families.Single().ParentPointers.SequenceEqual(new[] { "@I1@", "@I2@" }) &&
+            original.Families.Single().ChildPointers.SequenceEqual(new[] { "@I3@" }),
+            "synthetic GEDCOM 7 baseline contains expected people and links");
+        CheckSameGraph(original, report);
         Check(report.Warnings.Any(x => x.Contains("5.5.1", StringComparison.Ordinal)),
             "legacy file has explicit non-lossless warning");
         var withExporterVersion = converted.Replace(
@@ -145,6 +152,10 @@ internal static class GedcomLegacyCompatibilityAssertions
             "0 TRLR", "0 @X@ TRLR\\n0 TRLR", StringComparison.Ordinal)
             .Replace("\\n", "\n", StringComparison.Ordinal)).Valid,
             "spoofed level-zero TRLR with cross-reference denied");
+        foreach (var boundary in new[] { "HEAD", "TRLR" })
+            Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
+                "0 TRLR", $"0 @X@ {boundary} bogus\n0 TRLR", StringComparison.Ordinal)).Valid,
+                "cross-referenced boundary with payload denied");
         Check(!GedcomLegacyCompatibility.Preview(converted.Replace(
             "1 FAMC @F1@", "1 @X@ FAMC @I1@", StringComparison.Ordinal)).Valid,
             "level-one cross-reference cannot disguise a relationship pointer");
@@ -153,6 +164,14 @@ internal static class GedcomLegacyCompatibilityAssertions
             "level-one cross-reference cannot disguise an unterminated pointer");
         foreach (var source in new[] { converted, fixture })
         {
+            foreach (var record in new[] { "0 NOTE FAM\n1 CHIL @I1@",
+                         "0 NOTE INDI\n1 FAMS @F1@" })
+                Check(!GedcomLegacyCompatibility.Preview(source.Replace(
+                    "0 TRLR", record + "\n0 TRLR", StringComparison.Ordinal)).Valid,
+                    "record text cannot impersonate a genealogy record type");
+            Check(GedcomLegacyCompatibility.Preview(source.Replace(
+                "0 TRLR", "0 NOTE FAM\n0 TRLR", StringComparison.Ordinal)).Valid,
+                "ordinary note text remains previewable");
             foreach (var headerLink in new[] { "1 FAMC @MISSING", "1 CHIL @I1@",
                          "1 FAMS @F1@", "2 HUSB @I1@" })
                 Check(!GedcomLegacyCompatibility.Preview(source.Replace(
@@ -168,6 +187,7 @@ internal static class GedcomLegacyCompatibilityAssertions
             Check(eventReport.Valid && eventReport.Families.Single().ParentPointers.Count == 2 &&
                   eventReport.Warnings.Any(x => x.Contains("family", StringComparison.Ordinal)),
                 "family event spouse ages are previewable but require review");
+            CheckSameGraph(original, eventReport);
             foreach (var badDetail in new[] { "2 HUSB @I1@\n3 AGE 30y",
                          "2 HUSB @I1\n3 AGE 30y", "2 HUSB\n3 NOTE ignored",
                          "2 HUSB\n3 AGE " })
@@ -186,5 +206,16 @@ internal static class GedcomLegacyCompatibilityAssertions
     private static void Check(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private static void CheckSameGraph(GedcomPreviewReport expected, GedcomPreviewReport actual)
+    {
+        Check(actual.Valid && expected.People.SequenceEqual(actual.People) &&
+            expected.Families.Count == actual.Families.Count &&
+            expected.Families.Zip(actual.Families).All(pair =>
+                pair.First.Pointer == pair.Second.Pointer &&
+                pair.First.ParentPointers.SequenceEqual(pair.Second.ParentPointers) &&
+                pair.First.ChildPointers.SequenceEqual(pair.Second.ChildPointers)),
+            "preview preserves people and exact family pointers");
     }
 }

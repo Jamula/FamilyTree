@@ -63,7 +63,8 @@ public static class GedcomLegacyCompatibility
                 inHeader = false;
                 if (record.Length > 1 && record[1] is ("INDI" or "FAM"))
                     return Reject("Missing genealogy record pointer");
-                currentRecordKind = record.Length == 3 ? record[2] : "";
+                currentRecordKind = record.Length == 3 && Pointer.IsMatch(record[1])
+                    ? record[2] : "";
                 currentSection = "";
                 if (record.Length == 3 && record[1].StartsWith('@'))
                 {
