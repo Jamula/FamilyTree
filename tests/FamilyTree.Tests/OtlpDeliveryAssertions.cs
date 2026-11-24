@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using FamilyTree.ServiceDefaults;
@@ -54,9 +55,14 @@ internal static class OtlpDeliveryAssertions
         app.MapPost("/submit", () => Results.Ok());
         await app.StartAsync();
         using var client = app.GetTestClient();
+        using var parent = new Activity("synthetic-server-parent").SetIdFormat(ActivityIdFormat.W3C).Start();
+        Check(!parent.Recorded, "synthetic parent is not recorded");
         using var request = new HttpRequestMessage(HttpMethod.Get, "/health?value=synthetic-query-marker");
         request.Headers.Add("X-Synthetic", "synthetic-header-marker");
         Check((await client.SendAsync(request)).StatusCode == HttpStatusCode.OK, "success request");
+        Check(app.Services.GetRequiredService<TracerProvider>().ForceFlush(10000), "initial trace export");
+        Check(payloads.Any(bytes => Encoding.UTF8.GetString(bytes).Contains("familytree.http", StringComparison.Ordinal)),
+            "trace with unsampled server parent");
         using var sensitive = new HttpRequestMessage(HttpMethod.Post, "/submit?name=synthetic-name-marker")
         {
             Content = new StringContent("synthetic-payload-marker")
