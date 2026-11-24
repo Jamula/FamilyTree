@@ -62,7 +62,8 @@ public sealed partial class SqliteFamilyStore : IDisposable
             CREATE TABLE IF NOT EXISTS audit (
                 seq INTEGER PRIMARY KEY AUTOINCREMENT,
                 family_id TEXT NOT NULL, subject_id TEXT NOT NULL,
-                reviewer TEXT NOT NULL, action TEXT NOT NULL
+                reviewer TEXT NOT NULL, action TEXT NOT NULL,
+                created_utc TEXT
             );
             CREATE TABLE IF NOT EXISTS key_verifier (
                 id INTEGER PRIMARY KEY CHECK(id=1),
@@ -72,6 +73,7 @@ public sealed partial class SqliteFamilyStore : IDisposable
                 family_id TEXT NOT NULL, id TEXT NOT NULL,
                 from_id TEXT NOT NULL, to_id TEXT NOT NULL,
                 kind TEXT NOT NULL, encrypted_label BLOB NOT NULL,
+                proposal_id TEXT NOT NULL, submitter TEXT NOT NULL,
                 PRIMARY KEY(family_id, id),
                 FOREIGN KEY(family_id) REFERENCES families(id),
                 FOREIGN KEY(family_id,from_id) REFERENCES people(family_id,id),
@@ -82,6 +84,7 @@ public sealed partial class SqliteFamilyStore : IDisposable
                 relation_id TEXT NOT NULL, from_id TEXT NOT NULL,
                 to_id TEXT NOT NULL, kind TEXT NOT NULL,
                 encrypted_label BLOB NOT NULL, submitter TEXT NOT NULL,
+                identity_envelope BLOB NOT NULL,
                 state TEXT NOT NULL CHECK(state IN
                     ('Pending','Approved','Rejected','Undone')),
                 reviewer TEXT NULL,
@@ -89,7 +92,23 @@ public sealed partial class SqliteFamilyStore : IDisposable
             );
             """;
         command.ExecuteNonQuery();
+        EnsureAuditTimestampColumn(connection);
         VerifyDatabaseKey(connection);
+    }
+
+    private static void EnsureAuditTimestampColumn(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA table_info(audit);";
+        using var reader = command.ExecuteReader();
+        var hasTimestamp = false;
+        while (reader.Read())
+            hasTimestamp |= reader.GetString(1) == "created_utc";
+        reader.Close();
+        if (hasTimestamp) return;
+        using var migrate = connection.CreateCommand();
+        migrate.CommandText = "ALTER TABLE audit ADD COLUMN created_utc TEXT;";
+        migrate.ExecuteNonQuery();
     }
 
     // Bind an on-disk family database to the verified key before any write.
@@ -468,10 +487,12 @@ public sealed partial class SqliteFamilyStore : IDisposable
     private static void Audit(SqliteConnection con, SqliteTransaction tx,
         Guid family, Guid subject, Guid actor, string action)
         => Exec(con, tx, """
-            INSERT INTO audit(family_id,subject_id,reviewer,action)
-            VALUES($f,$subject,$actor,$action);
+            INSERT INTO audit(family_id,subject_id,reviewer,action,created_utc)
+            VALUES($f,$subject,$actor,$action,$created);
             """, ("$f", family.ToString("D")), ("$subject", subject.ToString("D")),
-            ("$actor", actor.ToString("D")), ("$action", action));
+            ("$actor", actor.ToString("D")), ("$action", action),
+            ("$created", DateTimeOffset.UtcNow.ToString("O",
+                System.Globalization.CultureInfo.InvariantCulture)));
 
     private byte[] Encrypt(Guid familyId, Guid personId, string name,
         byte[]? additionalContext = null)

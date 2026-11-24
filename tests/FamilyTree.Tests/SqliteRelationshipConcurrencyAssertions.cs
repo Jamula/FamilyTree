@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using System.Globalization;
 using FamilyTree.Domain;
 using FamilyTree.Persistence;
 using Microsoft.Data.Sqlite;
@@ -44,6 +45,7 @@ internal static class SqliteRelationshipConcurrencyAssertions
 
             using var store1 = new SqliteFamilyStore(path, key);
             using var store2 = new SqliteFamilyStore(path, key);
+            var auditBeforeDuplicates = ReadAudit(path, family);
 
             var duplicate = Relationship.Create(first.Id, second.Id, RelationKind.Friend,
                 "Fictional concurrent duplicate");
@@ -56,12 +58,14 @@ internal static class SqliteRelationshipConcurrencyAssertions
                 "losing duplicate submission rejected without corrupting storage");
             var winner = proposals.Single(x => x.Error is null).Value;
             Check(winner != Guid.Empty, "winning proposal has valid ID");
+            Check(auditBeforeDuplicates.SequenceEqual(ReadAudit(path, family)),
+                "competing duplicate submissions add no review audit events");
 
             using (var reopened = new SqliteFamilyStore(path, key))
             {
                 Check(reopened.ListPendingRelationships(family, admin).Count == 1,
                     "reopened store exposes exactly one pending duplicate");
-                var auditBefore = reopened.CountAudit(family, admin);
+                var auditBefore = ReadAudit(path, family);
                 var reviews = await Race(
                     () => {store1.ReviewRelationship(family, admin, winner, true); return true;},
                     () => {store2.ReviewRelationship(family, moderator, winner, true); return true;});
@@ -69,16 +73,18 @@ internal static class SqliteRelationshipConcurrencyAssertions
                     "competing moderators can approve a proposal exactly once");
                 Check(reviews.Count(x => x.Error is not null && ExpectedConflict(x.Error)) == 1,
                     "losing review rejected or retried without double publishing");
+                var reviewActor = reviews[0].Error is null ? admin : moderator;
                 using var checkedAgain = new SqliteFamilyStore(path, key);
                 Check(checkedAgain.ReadRelationships(family, actor).Count == 1 &&
-                      checkedAgain.CountAudit(family, admin) == auditBefore + 1,
-                    "competing approval has one relation and precisely one durable audit");
+                      VerifyAuditDelta(auditBefore, ReadAudit(path, family),
+                          (winner, reviewActor, "relationship-approved")),
+                    "competing approval persists one exact actor/subject/action audit");
             }
 
             var racedEdge = Relationship.Create(first.Id, second.Id, RelationKind.Neighbor,
                 "Fictional review-revoke race");
             var raceProposal = store1.ProposeRelationship(family, actor, racedEdge);
-            var auditPreRevoke = store1.CountAudit(family, admin);
+            var auditPreRevoke = ReadAudit(path, family);
             var race = await Race(
                 () => {store2.ReviewRelationship(family, moderator, raceProposal, true);
                     return true;},
@@ -92,9 +98,16 @@ internal static class SqliteRelationshipConcurrencyAssertions
             var approvedRace = race[0].Error is null;
             using (var reopened = new SqliteFamilyStore(path, key))
             {
-                Check(reopened.CountAudit(family, admin) ==
-                      auditPreRevoke + 1 + (approvedRace ? 1 : 0),
-                    "race audit reflects actual committed review and revocation");
+                var expectedEvents = approvedRace
+                    ? new[]
+                    {
+                        (raceProposal, moderator, "relationship-approved"),
+                        (moderator, admin, "member-revoked")
+                    }
+                    : new[] {(moderator, admin, "member-revoked")};
+                Check(VerifyAuditDelta(auditPreRevoke, ReadAudit(path, family),
+                        expectedEvents),
+                    "review/revocation audit has exact ordered committed transitions only");
                 Check(reopened.ReadRelationships(family, actor)
                     .Any(x => x.Id == racedEdge.Id) == approvedRace,
                     "reopened graph agrees with committed review outcome");
@@ -104,6 +117,9 @@ internal static class SqliteRelationshipConcurrencyAssertions
                 Expect<UnauthorizedAccessException>(
                     () => reopened.ReviewRelationship(family, moderator, raceProposal, true),
                     "revoked moderator cannot replay racing approval");
+                Check(VerifyAuditDelta(auditPreRevoke, ReadAudit(path, family),
+                        expectedEvents),
+                    "denied review replay adds no persisted audit event");
             }
 
             // Race undo against revocation of a second independent moderator.
@@ -115,7 +131,7 @@ internal static class SqliteRelationshipConcurrencyAssertions
             store1.AcceptInvitation(family, undoModerator, undoInvite, DateTimeOffset.UtcNow);
             store1.ApproveMember(family, admin, undoModerator);
             store1.PromoteAdministrator(family, admin, undoModerator);
-            var auditBeforeUndoRace = store1.CountAudit(family, admin);
+            var auditBeforeUndoRace = ReadAudit(path, family);
             var undoRace = await Race(
                 () => {store2.UndoRelationship(family, undoModerator, winner);
                     return true;},
@@ -133,12 +149,22 @@ internal static class SqliteRelationshipConcurrencyAssertions
                 Check(reopened.ReadRelationships(family, actor)
                     .Any(x => x.Id == duplicate.Id) != undoWon,
                     "reopened relation state matches the actual undo race winner");
-                Check(reopened.CountAudit(family, admin) ==
-                    auditBeforeUndoRace + 1 + (undoWon ? 1 : 0),
-                    "undo-vs-revocation audit has exactly committed transitions");
+                var expectedRaceEvents = undoWon
+                    ? new[]
+                    {
+                        (winner, undoModerator, "relationship-undone"),
+                        (undoModerator, admin, "member-revoked")
+                    }
+                    : new[] {(undoModerator, admin, "member-revoked")};
+                Check(VerifyAuditDelta(auditBeforeUndoRace, ReadAudit(path, family),
+                        expectedRaceEvents),
+                    "undo/revocation audit has exact ordered committed transitions only");
                 Expect<UnauthorizedAccessException>(
                     () => reopened.UndoRelationship(family, undoModerator, winner),
                     "revoked independent moderator can never replay undo");
+                Check(VerifyAuditDelta(auditBeforeUndoRace, ReadAudit(path, family),
+                        expectedRaceEvents),
+                    "denied revoked undo adds no persisted audit event");
                 if (!undoWon)
                     reopened.UndoRelationship(family, admin, winner);
                 Expect<InvalidOperationException>(
@@ -150,8 +176,20 @@ internal static class SqliteRelationshipConcurrencyAssertions
                 Check(!afterRestart.ReadRelationships(family, actor)
                     .Any(x => x.Id == duplicate.Id),
                     "undo survives second restart without resurrecting the relationship");
-                Check(afterRestart.CountAudit(family, admin) == auditBeforeUndoRace + 2,
-                    "durable audit has one moderator revoke and one successful undo");
+                var expectedFinalEvents = undoWon
+                    ? new[]
+                    {
+                        (winner, undoModerator, "relationship-undone"),
+                        (undoModerator, admin, "member-revoked")
+                    }
+                    : new[]
+                    {
+                        (undoModerator, admin, "member-revoked"),
+                        (winner, admin, "relationship-undone")
+                    };
+                Check(VerifyAuditDelta(auditBeforeUndoRace, ReadAudit(path, family),
+                        expectedFinalEvents),
+                    "reopened audit records exact successful undo and revocation sequence");
             }
             Console.WriteLine(
                 "PASS competing SQLite submissions/reviews, moderator revocation and durable undo");
@@ -166,6 +204,55 @@ internal static class SqliteRelationshipConcurrencyAssertions
     private static bool ExpectedConflict(Exception? error) =>
         error is InvalidOperationException ||
         error is SqliteException sql && sql.SqliteErrorCode is 5 or 6;
+
+    private sealed record AuditRow(long Sequence, Guid Subject, Guid Actor,
+        string Action, string CreatedUtc);
+
+    private static AuditRow[] ReadAudit(string path, Guid familyId)
+    {
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder {
+                DataSource = path, Pooling = false }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT seq,subject_id,reviewer,action,created_utc
+            FROM audit WHERE family_id=$family ORDER BY seq;
+            """;
+        command.Parameters.AddWithValue("$family", familyId.ToString("D"));
+        using var reader = command.ExecuteReader();
+        var rows = new List<AuditRow>();
+        while (reader.Read())
+            rows.Add(new(reader.GetInt64(0), Guid.Parse(reader.GetString(1)),
+                Guid.Parse(reader.GetString(2)), reader.GetString(3),
+                reader.GetString(4)));
+        return rows.ToArray();
+    }
+
+    private static bool VerifyAuditDelta(IReadOnlyList<AuditRow> before,
+        IReadOnlyList<AuditRow> after,
+        params (Guid Subject, Guid Actor, string Action)[] expected)
+    {
+        if (after.Count != before.Count + expected.Length ||
+            !before.SequenceEqual(after.Take(before.Count)))
+            return false;
+        var lastSequence = before.Count == 0 ? 0 : before[^1].Sequence;
+        var added = after.Skip(before.Count).ToArray();
+        for (var index = 0; index < added.Length; index++)
+        {
+            var actual = added[index];
+            var wanted = expected[index];
+            if (actual.Sequence <= lastSequence ||
+                actual.Subject != wanted.Subject || actual.Actor != wanted.Actor ||
+                actual.Action != wanted.Action ||
+                !DateTimeOffset.TryParse(actual.CreatedUtc, CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind, out var created) ||
+                created.Offset != TimeSpan.Zero)
+                return false;
+            lastSequence = actual.Sequence;
+        }
+        return true;
+    }
 
     private sealed record Outcome<T>(T Value, Exception? Error);
 
