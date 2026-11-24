@@ -10,8 +10,9 @@ remotely.
 Linux storage is restricted with owner-only Unix modes. Windows storage and the
 Data Protection certificate are restricted to the current Windows user with
 protected ACLs; startup verifies the resulting owner and access rules. The
-process-level private API assertions run on both platforms. Symlink rejection
-is also enforced for Windows reparse points.
+private API assertions include Windows-specific checks when run on Windows;
+the current CI job runs on Linux. Symlink rejection is also enforced for
+Windows reparse points.
 
 ## Local configuration
 
@@ -146,7 +147,8 @@ explicitly configured above; an ordinary verified OIDC login does not create a
 family or grant membership. GEDCOM routes remain disabled pending #104; #103's
 process-level baseline remains separately scoped.
 
-Until secure owner provisioning and the reviewed read/mutation contracts land,
-this is not a private-family deployment and must not be used with real family
-records. The default configuration and all unsupported private paths continue
-to return an empty, `no-store` `501`.
+Despite the local owner and read contracts, the reviewed durable mutation
+contract (#117), profile-claim integration (#112), and private web integration
+(#108) remain separate dependencies. This is not a private-family deployment
+and must not be used with real family records. The default configuration and
+all unsupported private paths continue to return an empty, `no-store` `501`.
