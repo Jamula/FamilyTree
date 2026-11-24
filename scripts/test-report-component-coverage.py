@@ -36,7 +36,8 @@ def check(xml, expected, *params):
         result = subprocess.run([sys.executable, str(SCRIPT), str(path), *params],
                                 capture_output=True, text=True, check=False, env=env)
         assert result.returncode == expected, (result.stdout, result.stderr, expected)
-        return result.stdout + result.stderr
+        summary = Path(env["GITHUB_STEP_SUMMARY"])
+        return result.stdout + result.stderr + (summary.read_text(encoding="utf-8") if summary.exists() else "")
 
 
 if __name__ == "__main__":
@@ -51,6 +52,11 @@ if __name__ == "__main__":
     check(SAMPLE, 0, "--min-overall-line", "50")
     check(SAMPLE, 0, "--min-overall-branch", "40")
     check(SAMPLE, 1, "--min-overall-branch", "60")
+    for option in ("--min-overall-line", "--min-overall-branch"):
+        for invalid in ("nan", "inf", "-inf", "-1", "101"):
+            check(SAMPLE, 2, f"{option}={invalid}")
+        check(SAMPLE, 0, f"{option}=0")
+        check(SAMPLE, 1, f"{option}=100")
     components = ("Domain", "Persistence", "Api", "Web", "Mcp", "ServiceDefaults", "SyntheticDemo")
     all_covered = '<coverage line-rate="1" branch-rate="1"><packages>' + "".join(
         f'<package name="FamilyTree.{component}"><classes>'
@@ -91,6 +97,24 @@ if __name__ == "__main__":
     check(SAMPLE.replace('branch="true"', 'branch="unknown"'), 2)
     check(SAMPLE.replace('condition-coverage="50% (1/2)"', 'condition-coverage="missing"'), 2)
     check(SAMPLE, 1, "--min-component-branch", "Web=90")
+    check(SAMPLE, 1, "--min-component-branch", "Api=90")
+    output = check(SAMPLE, 0, "--min-component-branch", "Api=90",
+                   "--allow-branchless", "Api")
+    assert "branchless exemption (explicitly allowed)" in output, output
+    assert "Not measured (branchless exemption: explicitly allowed)" in output, output
+    check(SAMPLE, 1, "--min-component-branch", "Web=90",
+          "--allow-branchless", "Web")
+    check(SAMPLE, 1, "--min-component-branch", "Domain=90",
+          "--allow-branchless", "Domain")
+    check(SAMPLE, 0, "--allow-branchless", "Api")
+    check(SAMPLE, 2, "--allow-branchless", "Unknown")
+    no_branches = SAMPLE.replace(' branch="true" condition-coverage="50% (1/2)"', '')
+    check(no_branches, 0, "--min-component-branch", "Domain=90",
+          "--allow-branchless", "Domain")
+    check(no_branches, 1, "--min-overall-branch", "0",
+          "--min-component-branch", "Api=90", "--allow-branchless", "Api")
+    check(SAMPLE.replace('condition-coverage="50% (1/2)"', 'condition-coverage="missing"'),
+          2, "--min-component-branch", "Domain=90", "--allow-branchless", "Domain")
     # Independent C# lambda/classes can share a file and source line while
     # contributing distinct conditional branches. Never overstate branch %.
     same_line = SAMPLE.replace('<class filename="src/FamilyTree.Domain/A.cs">',

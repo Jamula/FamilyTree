@@ -60,6 +60,9 @@ def main():
     parser.add_argument("--min-overall-branch", type=float, default=0)
     parser.add_argument("--min-domain", type=float, default=0)
     args = parser.parse_args()
+    for threshold in (args.min_overall, args.min_overall_branch, args.min_domain):
+        if not 0 <= threshold <= 100:
+            raise ValueError("Coverage threshold outside 0..100")
     if not args.path.is_file():
         raise ValueError("Missing coverage report")
     overall, branches, domain, domain_branches, count = summarize(args.path)

@@ -37,6 +37,11 @@ if __name__ == "__main__":
     check(GOOD, 1, "--min-overall", "90")
     check(GOOD, 0, "--min-overall-branch", "20")
     check(GOOD, 1, "--min-overall-branch", "30")
+    for option in ("--min-overall", "--min-overall-branch", "--min-domain"):
+        for invalid in ("nan", "inf", "-inf", "-1", "101"):
+            check(GOOD, 2, f"{option}={invalid}")
+        check(GOOD, 0, f"{option}=0")
+        check(GOOD, 1, f"{option}=100")
     check("<notcoverage/>", 2)
     check("<coverage line-rate='x' branch-rate='0'/>", 2)
     check("<coverage line-rate='2' branch-rate='0'/>", 2)

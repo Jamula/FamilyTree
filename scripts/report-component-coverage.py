@@ -120,7 +120,7 @@ def main():
     parser.add_argument("--min-overall-branch", type=float, default=None,
                         help="Require measured source branch coverage across all components")
     parser.add_argument("--allow-branchless", action="append", default=[],
-                        metavar="NAME", help="Explicitly justify a component with no measured branches")
+                        metavar="NAME", help="Explicitly allow a measured component with no branches")
     args = parser.parse_args()
     if not args.path.is_file():
         raise ValueError("Coverage XML file missing")
@@ -151,7 +151,7 @@ def main():
             raise ValueError("Branch coverage threshold outside 0..100")
         branch_requirements[component] = rate
     for component in args.allow_branchless:
-        if component not in COMPONENTS or component in branch_requirements:
+        if component not in COMPONENTS:
             raise ValueError("Invalid branchless component justification")
     if args.min_overall_line is not None and not 0 <= args.min_overall_line <= 100:
         raise ValueError("Overall line coverage threshold outside 0..100")
@@ -197,10 +197,13 @@ def main():
         branch_threshold = branch_requirements.get(component)
         if branch_threshold is not None:
             if branch is None:
-                if component not in args.allow_branchless:
+                if rate is None or component not in args.allow_branchless:
                     print(f"  FAIL: FamilyTree.{component} has no measured branches; "
-                          "provide an explicit branchless justification", file=sys.stderr)
+                          "component source lines and an explicit branchless justification are required",
+                          file=sys.stderr)
                     failure = True
+                else:
+                    print(f"  FamilyTree.{component}: branchless exemption (explicitly allowed)")
             elif branch * 100 < branch_threshold:
                 print(f"  FAIL: FamilyTree.{component} lacks measured "
                       f"{branch_threshold:.1f}% branch coverage", file=sys.stderr)
@@ -215,6 +218,9 @@ def main():
             for component, rate, count_lines, branch, _ in rows:
                 line_text = f"{rate*100:.1f}%" if rate is not None else "Not measured"
                 branch_text = f"{branch*100:.1f}%" if branch is not None else "Not measured"
+                if (branch is None and rate is not None and component in args.allow_branchless
+                        and component in branch_requirements):
+                    branch_text += " (branchless exemption: explicitly allowed)"
                 output.write(f"| FamilyTree.{component} | {count_lines} | {line_text} | {branch_text} |\n")
             output.write("\nUnmeasured means no instrumented source lines or branches, not 100%. "
                          "Smoke-test coverage is not included in these percentages.\n")

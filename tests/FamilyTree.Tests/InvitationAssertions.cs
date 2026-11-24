@@ -20,10 +20,33 @@ internal static class InvitationAssertions
               "decline transition");
         Check(invite.Expire(now.AddHours(2)).Stage == InvitationStage.Expired,
               "expiry transition");
+        var family = invite.FamilyId;
+        foreach (var invalid in new (Guid Family, Guid Issuer, Guid Intended, DateTimeOffset Expiry)[]
+        {
+            (Guid.Empty, admin, member, now.AddHours(1)),
+            (family, Guid.Empty, member, now.AddHours(1)),
+            (family, admin, Guid.Empty, now.AddHours(1)),
+            (family, admin, admin, now.AddHours(1)),
+            (family, admin, member, now)
+        })
+            Throws<ArgumentException>(() => FamilyInvitation.Issue(
+                invalid.Family, invalid.Issuer, invalid.Intended, invalid.Expiry, now),
+                "invalid issuance denied");
+        Denied(() => invite.Decline(admin), "wrong principal cannot decline");
+        Denied(() => pending.Decline(member), "pending invitation cannot be declined");
+        Throws<InvalidOperationException>(() => invite.Expire(now.AddHours(1)),
+            "invitation cannot expire early");
+        Throws<InvalidOperationException>(() => pending.Expire(now.AddHours(3)),
+            "pending invitation cannot expire");
+        Check(invite.Stage == InvitationStage.Offered && pending.Stage == InvitationStage.PendingApproval,
+            "denied transitions leave both immutable states unchanged");
         Console.WriteLine("PASS invitation lifecycle safety checks");
     }
     private static void Check(bool pass, string msg) { if (!pass) throw new Exception(msg); }
     private static void Denied(Action action, string msg)
     { try { action(); } catch (UnauthorizedAccessException) { return; }
+      throw new Exception(msg); }
+    private static void Throws<T>(Action action, string msg) where T : Exception
+    { try { action(); } catch (T) { return; }
       throw new Exception(msg); }
 }
