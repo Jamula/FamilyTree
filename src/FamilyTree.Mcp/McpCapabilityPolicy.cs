@@ -20,9 +20,49 @@ public sealed record McpCapabilityOffer(
     IReadOnlySet<McpCapability> Requested,
     IReadOnlySet<McpCapability> UserConsented);
 
-public sealed record McpNegotiatedCapabilities(
-    string AgentId,
-    IReadOnlySet<McpCapability> Granted);
+public sealed class McpNegotiatedCapabilities
+{
+    private readonly object _gate = new();
+    private readonly FrozenSet<McpCapability> _initialGrants;
+    private readonly HashSet<McpCapability> _revoked = new();
+
+    public McpNegotiatedCapabilities(string agentId,
+        IReadOnlySet<McpCapability> granted)
+    {
+        AgentId = agentId;
+        _initialGrants = (granted ?? Array.Empty<McpCapability>().ToFrozenSet())
+            .ToFrozenSet();
+    }
+
+    public string AgentId { get; }
+
+    public IReadOnlySet<McpCapability> Granted
+    {
+        get
+        {
+            lock (_gate)
+                return _initialGrants.Where(capability => !_revoked.Contains(capability))
+                    .ToFrozenSet();
+        }
+    }
+
+    public bool Revoke(McpCapability capability)
+    {
+        lock (_gate)
+            return _initialGrants.Contains(capability) && _revoked.Add(capability);
+    }
+
+    public void RevokeAll()
+    {
+        lock (_gate) _revoked.UnionWith(_initialGrants);
+    }
+
+    internal bool Allows(McpCapability capability)
+    {
+        lock (_gate)
+            return _initialGrants.Contains(capability) && !_revoked.Contains(capability);
+    }
+}
 
 /// <summary>
 /// Negotiates only local synthetic capabilities. Private access and publication
@@ -59,8 +99,7 @@ public static class McpCapabilityPolicy
         McpCapability capability) =>
         negotiated is not null &&
         LocalCapabilities.Contains(capability) &&
-        negotiated.Granted is not null &&
-        negotiated.Granted.Contains(capability);
+        negotiated.Allows(capability);
 
     public static bool AllowsPrivateAccess(McpNegotiatedCapabilities? negotiated) => false;
 }

@@ -8,6 +8,7 @@ internal static class McpAdversarialAssertions
     internal static void Run()
     {
         McpSecurityPolicyAssertions.Run();
+        McpLifecycleRevocationAssertions.Run();
         using (var overview = JsonDocument.Parse(FamilyDemoTools.FamilyOverview()))
         {
             Check(overview.RootElement.GetProperty("syntheticOnly").GetBoolean() &&
