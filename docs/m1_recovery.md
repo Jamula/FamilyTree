@@ -91,6 +91,24 @@ The existing `FamilyTree.Tests` executable invokes this recovery suite as a
 child process, so the normal CI coverage run includes the recovery implementation
 and enforces the repository's 90% Persistence component floor.
 
+## Verification evidence
+
+On 2026-11-25, the focused recovery suite passed on Ubuntu 24.04 x64 with
+.NET SDK 11.0.100. The run exercises the backup and restore CLI as separate
+processes and reopens restored membership, grants, revocations and audit state
+from a fresh process. Wrong-key, authenticated-corruption, truncated-backup,
+existing-target rollback, and isolated-target assertions passed. The Linux
+filesystem allowed the symlink assertions to run.
+
+GitHub Actions `build-test` for commit `3994add` also passed on
+`ubuntu-latest` (run 45500801114). **No Windows execution has been performed
+or verified.** The PowerShell commands and Windows ACL guidance above are
+instructions only; Windows backup/restore behavior and ACL/key-provisioning
+acceptance remain outstanding. Do not treat Linux results as Windows
+validation or as completion of #109's Windows acceptance. An independent
+security-focused review of key separation, authenticated encryption and path
+safety found no vulnerabilities; it does not establish Windows behavior.
+
 This evidence is partial work for #90 and does not close or sign off the M1
 private-family MVP. Have the independent security review and coordinate
 process-level evidence with #103 before treating recovery as accepted.
