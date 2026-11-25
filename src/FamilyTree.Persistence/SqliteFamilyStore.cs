@@ -95,6 +95,8 @@ public sealed partial class SqliteFamilyStore : IDisposable
             """;
         command.ExecuteNonQuery();
         EnsureAuditTimestampColumn(connection, transaction);
+        EnsureScopedRelationshipSchema(connection, transaction);
+        EnsureRelationshipVisibilitySchema(connection, transaction);
         VerifyDatabaseKey(connection, transaction);
         transaction.Commit();
     }
@@ -421,7 +423,17 @@ public sealed partial class SqliteFamilyStore : IDisposable
         using var tx = con.BeginTransaction();
         RequireMember(con, tx, familyId, viewerId, administrator: false);
         var people = new List<Person>();
-        using (var q = Cmd(con, tx, """
+        var scopedInstalled = Scalar<long>(con, tx, """
+            SELECT COUNT(*) FROM sqlite_master
+            WHERE type='table' AND name='scoped_person_proposals';
+            """) != 0;
+        using (var q = Cmd(con, tx, scopedInstalled ? """
+            SELECT id, encrypted_name, living FROM people
+            WHERE family_id=$f AND NOT EXISTS (
+                SELECT 1 FROM scoped_person_proposals s
+                WHERE s.family_id=people.family_id AND s.person_id=people.id)
+            ORDER BY id;
+            """ : """
             SELECT id, encrypted_name, living FROM people
             WHERE family_id=$f ORDER BY id;
             """, ("$f", familyId.ToString("D"))))

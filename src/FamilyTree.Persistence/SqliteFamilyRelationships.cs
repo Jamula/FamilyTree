@@ -8,6 +8,9 @@ namespace FamilyTree.Persistence;
 /// Local synthetic-only transactional relationship review. All caller IDs
 /// must come from a verified, server-trusted identity and persisted membership.
 /// No endpoint enables these methods for private records yet.
+/// Legacy relationship APIs are family-wide and unsafe for private scoped data.
+/// Granting any scoped relationship permission permanently disables those APIs
+/// for that family; revoking the grant does not restore legacy access.
 /// </summary>
 public sealed partial class SqliteFamilyStore
 {
@@ -25,8 +28,17 @@ public sealed partial class SqliteFamilyStore
             (edge.Kind == RelationKind.Other && string.IsNullOrWhiteSpace(edge.Label)))
             throw new ArgumentException("Invalid genealogy relationship.");
         using var con = Open();
-        using var tx = con.BeginTransaction();
+        using var tx = con.BeginTransaction(deferred: false);
         RequireMember(con, tx, familyId, authorId, administrator: false);
+        DenyLegacyRelationshipsForScopedFamily(con, tx, familyId);
+        EnsureScopedPersonSchema(con, tx);
+        if (Scalar<long>(con, tx, """
+            SELECT COUNT(*) FROM scoped_person_proposals WHERE family_id=$f
+            AND person_id IN ($from,$to);
+            """, ("$f", familyId.ToString("D")),
+            ("$from", edge.FromPersonId.ToString("D")),
+            ("$to", edge.ToPersonId.ToString("D"))) != 0)
+            throw new InvalidOperationException("Approved endpoints unavailable.");
         var endpoints = Scalar<long>(con, tx, """
             SELECT COUNT(*) FROM people WHERE family_id=$f AND
                 id IN ($from,$to);
@@ -78,8 +90,9 @@ public sealed partial class SqliteFamilyStore
         var afterId = afterCursor is null
             ? null : DecodeRelationshipProposalCursor(afterCursor);
         using var con = Open();
-        using var tx = con.BeginTransaction();
+        using var tx = con.BeginTransaction(deferred: false);
         RequireMember(con, tx, familyId, moderatorId, administrator: true);
+        DenyLegacyRelationshipsForScopedFamily(con, tx, familyId);
         var results = new List<PendingRelationshipReview>();
         using (var cmd = Cmd(con, tx, """
             SELECT id,relation_id,from_id,to_id,kind,encrypted_label,submitter,
@@ -132,8 +145,9 @@ public sealed partial class SqliteFamilyStore
     {
         RequireIds(familyId, moderatorId, proposalId);
         using var con = Open();
-        using var tx = con.BeginTransaction();
+        using var tx = con.BeginTransaction(deferred: false);
         RequireMember(con, tx, familyId, moderatorId, administrator: true);
+        DenyLegacyRelationshipsForScopedFamily(con, tx, familyId);
         string relationId, fromId, toId, kind;
         Guid submitter;
         byte[] encrypted, identityEnvelope;
@@ -216,8 +230,9 @@ public sealed partial class SqliteFamilyStore
         var afterId = afterCursor is null
             ? null : DecodeRelationshipProposalCursor(afterCursor);
         using var con = Open();
-        using var tx = con.BeginTransaction();
+        using var tx = con.BeginTransaction(deferred: false);
         RequireMember(con, tx, familyId, moderatorId, administrator: true);
+        DenyLegacyRelationshipsForScopedFamily(con, tx, familyId);
         var result = new List<ApprovedRelationshipUndo>();
         using (var cmd = Cmd(con, tx, """
             SELECT id,relation_id,from_id,to_id,kind,encrypted_label,submitter,
@@ -293,8 +308,9 @@ public sealed partial class SqliteFamilyStore
     {
         RequireIds(familyId, viewerId);
         using var con = Open();
-        using var tx = con.BeginTransaction();
+        using var tx = con.BeginTransaction(deferred: false);
         RequireMember(con, tx, familyId, viewerId, administrator: false);
+        DenyLegacyRelationshipsForScopedFamily(con, tx, familyId);
         var result = new List<Relationship>();
         using (var cmd = Cmd(con, tx, """
             SELECT id,from_id,to_id,kind,encrypted_label,proposal_id,submitter
@@ -318,8 +334,9 @@ public sealed partial class SqliteFamilyStore
     {
         RequireIds(familyId, moderatorId, proposalId);
         using var con = Open();
-        using var tx = con.BeginTransaction();
+        using var tx = con.BeginTransaction(deferred: false);
         RequireMember(con, tx, familyId, moderatorId, administrator: true);
+        DenyLegacyRelationshipsForScopedFamily(con, tx, familyId);
         string relationId, from, to, kind;
         Guid submitter;
         byte[] authenticatedEnvelope, identityEnvelope;
@@ -402,6 +419,15 @@ public sealed partial class SqliteFamilyStore
             ..from.ToByteArray(), ..to.ToByteArray(),
             ..System.Text.Encoding.ASCII.GetBytes(
                 ((int)kind).ToString(System.Globalization.CultureInfo.InvariantCulture))];
+
+    private static void DenyLegacyRelationshipsForScopedFamily(
+        SqliteConnection con, SqliteTransaction tx, Guid familyId)
+    {
+        if (Scalar<long>(con, tx,
+            "SELECT COUNT(*) FROM scoped_relationship_families WHERE family_id=$f;",
+            ("$f", familyId.ToString("D"))) != 0)
+            throw new UnauthorizedAccessException("Access denied.");
+    }
 
     private byte[] EncryptRelationshipProposalIdentity(Guid familyId,
         Guid proposalId, Guid submitter, Guid relationId, Guid from, Guid to,

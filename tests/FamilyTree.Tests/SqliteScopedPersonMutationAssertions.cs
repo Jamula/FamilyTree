@@ -1,0 +1,409 @@
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using FamilyTree.Domain;
+using FamilyTree.Persistence;
+using Microsoft.Data.Sqlite;
+using Permission = FamilyTree.Persistence.SqliteFamilyStore.ScopedPersonPermission;
+
+internal static class SqliteScopedPersonMutationAssertions
+{
+    [ModuleInitializer]
+    internal static void Run()
+    {
+        var directory = Path.Join(Path.GetTempPath(), "scoped-person-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Join(directory, "synthetic.sqlite");
+        var key = RandomNumberGenerator.GetBytes(32);
+        var family = Guid.NewGuid();
+        var branch = Guid.NewGuid();
+        var otherBranch = Guid.NewGuid();
+        var admin = Guid.NewGuid();
+        var author = Guid.NewGuid();
+        var reviewer = Guid.NewGuid();
+        try
+        {
+            using var store = new SqliteFamilyStore(path, key);
+            store.CreateFictionalFamily(family, admin);
+            Join(store, family, admin, author);
+            Join(store, family, admin, reviewer);
+            var visibility = new SqliteGraphGrantStore(path);
+            var seed = new Person(Guid.NewGuid(), "Synthetic Seed");
+            var legacy = store.ProposePerson(family, author, seed);
+            store.ReviewPerson(family, admin, legacy, true);
+            visibility.GrantPerson(family, branch, admin, author, seed.Id);
+            const string name = "Synthetic Scoped Person";
+            Expect<UnauthorizedAccessException>(() => store.ProposeScopedPerson(family, branch, author, name));
+            Expect<UnauthorizedAccessException>(() => store.GrantScopedPersonPermission(
+                family, branch, author, author, Permission.CreatePerson));
+            store.GrantScopedPersonPermission(family, branch, admin, author, Permission.CreatePerson);
+            store.GrantScopedPersonPermission(family, branch, admin, reviewer, Permission.ReviewPerson);
+            store.GrantScopedPersonPermission(family, branch, admin, reviewer, Permission.UndoPerson);
+            Expect<UnauthorizedAccessException>(() => store.ProposeScopedPerson(family, otherBranch, author, name));
+            var proposal = store.ProposeScopedPerson(family, branch, author, name, false);
+            byte[] pendingSeal;
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = "SELECT state_envelope FROM scoped_person_proposals WHERE id=$id;";
+                cmd.Parameters.AddWithValue("$id", proposal.ToString("D"));
+                pendingSeal = (byte[])cmd.ExecuteScalar()!;
+            }
+            var person = store.ListScopedPendingPeople(family, branch, reviewer).Single().Person;
+            Check(person.Id != Guid.Empty && person.DisplayName == name && !person.IsLiving,
+                "server generated identity and exact payload");
+            Expect<SqliteException>(() => store.ProposePerson(family, author, person));
+            Expect<InvalidOperationException>(() => store.ReviewPerson(family, admin, proposal, true));
+            Expect<UnauthorizedAccessException>(() => store.ReviewScopedPerson(family, otherBranch, reviewer, proposal, true));
+            store.GrantScopedPersonPermission(family, branch, admin, author, Permission.ReviewPerson);
+            Expect<UnauthorizedAccessException>(() => store.ReviewScopedPerson(family, branch, author, proposal, true));
+            Check(store.ListScopedPendingPeople(family, branch, reviewer).Single().Person == person, "exact pending content");
+            Check(store.ListScopedPendingPeople(family, branch, author).Count == 0, "self excluded");
+            var legacyPerson = new Person(Guid.NewGuid(), "Synthetic Legacy");
+            var legacyPending = store.ProposePerson(family, author, legacyPerson);
+            Expect<InvalidOperationException>(() => store.ReviewScopedPerson(family, branch, reviewer, legacyPending, true));
+            store.ReviewScopedPerson(family, branch, reviewer, proposal, true);
+            Check(!store.ReadPeople(family, admin).Any(x => x == person) &&
+                !store.ReadPeople(family, reviewer).Any(x => x == person), "legacy reader excludes scoped person");
+            Check(!visibility.ReadVisiblePersonIds(family, branch, author).Contains(person.Id),
+                "no implicit visibility");
+            Expect<InvalidOperationException>(() => store.ReviewScopedPerson(family, branch, reviewer, proposal, true));
+            visibility.GrantPerson(family, branch, admin, author, person.Id);
+            visibility.GrantDisplayName(family, branch, admin, author, person.Id);
+            using (var source = new SqliteTreeReadSource(path, key))
+            {
+                var read = new SqlitePersonReadService(source).GetAsync(author, family, branch, person.Id)
+                    .GetAwaiter().GetResult();
+                Check(read is not null && read.DisplayName == name, "explicitly granted reader decrypts standard ciphertext");
+            }
+
+            Expect<SqliteException>(() => store.UndoScopedPerson(family, branch, reviewer, proposal));
+            visibility.RevokePerson(family, branch, admin, author, person.Id);
+            Expect<InvalidOperationException>(() => store.ProposeRelationship(family, author,
+                Relationship.Create(person.Id, seed.Id, RelationKind.Friend)));
+            Expect<InvalidOperationException>(() => store.ProposeRelationship(family, author,
+                Relationship.Create(Guid.NewGuid(), seed.Id, RelationKind.Friend)));
+            store.UndoScopedPerson(family, branch, reviewer, proposal);
+            Check(!store.ReadPeople(family, admin).Any(x => x.Id == person.Id), "undo removed person");
+            Expect<InvalidOperationException>(() => store.UndoScopedPerson(family, branch, reviewer, proposal));
+            using (var db = Connect(path))
+                Execute(db, "UPDATE scoped_person_proposals SET state='Pending',reviewer=NULL,state_envelope=$seal WHERE id=$id;",
+                    ("$seal", pendingSeal), ("$id", proposal.ToString("D")));
+            using (var reopened = new SqliteFamilyStore(path, key))
+                Expect<InvalidDataException>(() => reopened.ReviewScopedPerson(family, branch, reviewer, proposal, true));
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM people WHERE id=$id;";
+                cmd.Parameters.AddWithValue("$id", person.Id.ToString("D"));
+                Check((long)cmd.ExecuteScalar()! == 0, "undo replay publishes nothing");
+                Execute(db, "UPDATE scoped_person_proposals SET state='Undone' WHERE id=$id;", ("$id", proposal.ToString("D")));
+            }
+
+            var replacedProposal = store.ProposeScopedPerson(family, branch, author, "Synthetic Replacement");
+            var replaced = store.ListScopedPendingPeople(family, branch, reviewer).Single().Person;
+            store.ReviewScopedPerson(family, branch, reviewer, replacedProposal, true);
+            using (var db = Connect(path))
+            {
+                Execute(db, "DELETE FROM people WHERE family_id=$f AND id=$p;", ("$f", family.ToString("D")), ("$p", replaced.Id.ToString("D")));
+            }
+            var replacementLegacy = store.ProposePerson(family, author, replaced);
+            store.ReviewPerson(family, admin, replacementLegacy, true);
+            Expect<InvalidOperationException>(() => store.UndoScopedPerson(family, branch, reviewer, replacedProposal));
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM people WHERE family_id=$f AND id=$p;";
+                cmd.Parameters.AddWithValue("$f", family.ToString("D"));
+                cmd.Parameters.AddWithValue("$p", replaced.Id.ToString("D"));
+                Check((long)cmd.ExecuteScalar()! == 1, "replacement survives undo");
+            }
+
+            var tampered = store.ProposeScopedPerson(family, branch, author, "Synthetic Tamper");
+            byte[] rejectedPendingSeal;
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = "SELECT state_envelope FROM scoped_person_proposals WHERE id=$id;";
+                cmd.Parameters.AddWithValue("$id", tampered.ToString("D"));
+                rejectedPendingSeal = (byte[])cmd.ExecuteScalar()!;
+            }
+            using (var db = Connect(path))
+            {
+                Execute(db, "UPDATE scoped_person_proposals SET submitter=$p WHERE id=$id;",
+                    ("$p", reviewer.ToString("D")), ("$id", tampered.ToString("D")));
+            }
+            Expect<InvalidDataException>(() => store.ReviewScopedPerson(family, branch, reviewer, tampered, true));
+            using (var db = Connect(path))
+            {
+                Execute(db, "UPDATE scoped_person_proposals SET submitter=$p,state='Approved' WHERE id=$id;",
+                    ("$p", author.ToString("D")), ("$id", tampered.ToString("D")));
+            }
+            Expect<InvalidDataException>(() => store.UndoScopedPerson(family, branch, reviewer, tampered));
+            using (var db = Connect(path))
+            {
+                Execute(db, "UPDATE scoped_person_proposals SET state='Pending',living=1-living WHERE id=$id;",
+                    ("$id", tampered.ToString("D")));
+            }
+            Expect<InvalidDataException>(() => store.ReviewScopedPerson(family, branch, reviewer, tampered, false));
+            using (var db = Connect(path))
+            {
+                Execute(db, "UPDATE scoped_person_proposals SET living=1-living WHERE id=$id;",
+                    ("$id", tampered.ToString("D")));
+            }
+            var changedPersonId = Guid.NewGuid();
+            var changedProposalId = Guid.NewGuid();
+            store.GrantScopedPersonPermission(family, otherBranch, admin, reviewer, Permission.ReviewPerson);
+            using (var db = Connect(path))
+            {
+                Execute(db, "UPDATE scoped_person_proposals SET branch_id=$b WHERE id=$id;",
+                    ("$b", otherBranch.ToString("D")), ("$id", tampered.ToString("D")));
+                Expect<InvalidDataException>(() => store.ReviewScopedPerson(family, otherBranch, reviewer, tampered, true));
+                Execute(db, "UPDATE scoped_person_proposals SET branch_id=$b WHERE id=$id;",
+                    ("$b", branch.ToString("D")), ("$id", tampered.ToString("D")));
+                using var query = db.CreateCommand();
+                query.CommandText = "SELECT person_id,payload FROM scoped_person_proposals WHERE id=$id;";
+                query.Parameters.AddWithValue("$id", tampered.ToString("D"));
+                using var reader = query.ExecuteReader();
+                Check(reader.Read(), "tamper proposal exists");
+                var originalPerson = reader.GetString(0);
+                var originalPayload = reader.GetFieldValue<byte[]>(1);
+                reader.Close();
+                Execute(db, "UPDATE scoped_person_proposals SET person_id=$p WHERE id=$id;",
+                    ("$p", changedPersonId.ToString("D")), ("$id", tampered.ToString("D")));
+                Expect<InvalidDataException>(() => store.ReviewScopedPerson(family, branch, reviewer, tampered, true));
+                Execute(db, "UPDATE scoped_person_proposals SET person_id=$p,id=$new WHERE id=$id;",
+                    ("$p", originalPerson), ("$new", changedProposalId.ToString("D")),
+                    ("$id", tampered.ToString("D")));
+                Expect<InvalidDataException>(() => store.ReviewScopedPerson(family, branch, reviewer, changedProposalId, true));
+                Execute(db, "UPDATE scoped_person_proposals SET id=$id,payload=X'01' WHERE id=$new;",
+                    ("$id", tampered.ToString("D")), ("$new", changedProposalId.ToString("D")));
+                Expect<InvalidDataException>(() => store.ReviewScopedPerson(family, branch, reviewer, tampered, true));
+                Execute(db, "UPDATE scoped_person_proposals SET payload=$payload WHERE id=$id;",
+                    ("$payload", originalPayload), ("$id", tampered.ToString("D")));
+            }
+            store.ReviewScopedPerson(family, branch, reviewer, tampered, false);
+            Check(!store.ReadPeople(family, admin).Any(x => x.DisplayName == "Synthetic Tamper"), "rejection publishes nothing");
+            using (var db = Connect(path))
+                Execute(db, "UPDATE scoped_person_proposals SET state='Pending',reviewer=NULL,state_envelope=$seal WHERE id=$id;",
+                    ("$seal", rejectedPendingSeal), ("$id", tampered.ToString("D")));
+            using (var reopened = new SqliteFamilyStore(path, key))
+                Expect<InvalidDataException>(() => reopened.ReviewScopedPerson(family, branch, reviewer, tampered, true));
+            using (var db = Connect(path))
+                Execute(db, """
+                    DELETE FROM scoped_person_events WHERE proposal_id=$id AND seq>
+                    (SELECT MIN(seq) FROM scoped_person_events WHERE proposal_id=$id);
+                    """, ("$id", tampered.ToString("D")));
+            Expect<InvalidDataException>(() => store.ReviewScopedPerson(family, branch, reviewer, tampered, true));
+            using (var db = Connect(path))
+                Execute(db, "UPDATE scoped_person_proposals SET state='Rejected' WHERE id=$id;", ("$id", tampered.ToString("D")));
+            Check(!store.ReadPeople(family, admin).Any(x => x.DisplayName == "Synthetic Tamper"),
+                "rejection replay publishes nothing");
+
+            var corrupt = store.ProposeScopedPerson(family, branch, author, "Synthetic Corrupt");
+            var readable = store.ProposeScopedPerson(family, branch, author, "Synthetic Readable");
+            var corruptPerson = store.ListScopedPendingPeople(family, branch, reviewer)
+                .Single(x => x.ProposalId == corrupt).Person.Id;
+            byte[] corruptPayload, corruptPendingSeal;
+            using (var db = Connect(path))
+            {
+                using (var query = db.CreateCommand())
+                {
+                    query.CommandText = "SELECT payload,state_envelope FROM scoped_person_proposals WHERE id=$id;";
+                    query.Parameters.AddWithValue("$id", corrupt.ToString("D"));
+                    using var reader = query.ExecuteReader();
+                    Check(reader.Read(), "corrupt proposal exists");
+                    corruptPayload = reader.GetFieldValue<byte[]>(0);
+                    corruptPendingSeal = reader.GetFieldValue<byte[]>(1);
+                }
+                Execute(db, "UPDATE scoped_person_proposals SET payload=X'01' WHERE id=$id;", ("$id", corrupt.ToString("D")));
+                using var cmd = db.CreateCommand();
+                cmd.CommandText = """
+                    WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<100)
+                    INSERT INTO scoped_person_proposals
+                      (id,family_id,branch_id,person_id,submitter,living,payload,state,state_envelope)
+                    SELECT printf('00000000-0000-0000-0000-%012x',n.i),family_id,branch_id,
+                      printf('!forged-%03d',n.i),submitter,living,payload,state,state_envelope
+                    FROM scoped_person_proposals,n WHERE id=$id;
+                    """;
+                cmd.Parameters.AddWithValue("$id", corrupt.ToString("D"));
+                Check(cmd.ExecuteNonQuery() == 100, "insert unauthenticated synthetic rows");
+            }
+            using (var reopened = new SqliteFamilyStore(path, key))
+            {
+                var empty = reopened.ListScopedPendingPeoplePage(family, branch, reviewer);
+                Check(empty.Entries.Count == 0 && empty.QuarantineIds.Count == 0 && empty.NextCursor is not null,
+                    "empty corrupt page has continuation");
+                Check(reopened.ListScopedPendingPeople(family, branch, reviewer).Single().ProposalId == readable,
+                    "legacy inbox reaches readable proposals past an empty page");
+                var continued = reopened.ListScopedPendingPeoplePage(family, branch, reviewer, empty.NextCursor);
+                Check(continued.Entries.Single().ProposalId == readable && continued.QuarantineIds.SequenceEqual([corrupt]),
+                    "continuation reaches readable and authenticated corrupt proposals");
+                Expect<UnauthorizedAccessException>(() => reopened.QuarantineScopedPerson(family, branch, author, corrupt));
+                Expect<InvalidDataException>(() => reopened.QuarantineScopedPerson(family, otherBranch, reviewer, corrupt));
+                Expect<InvalidDataException>(() => reopened.QuarantineScopedPerson(family, branch, reviewer, readable));
+                reopened.QuarantineScopedPerson(family, branch, reviewer, corrupt);
+                Check(reopened.ListScopedPendingPeoplePage(family, branch, reviewer, empty.NextCursor)
+                    .Entries.Single().ProposalId == readable, "quarantine preserves readable proposals");
+                Expect<InvalidOperationException>(() => reopened.ReviewScopedPerson(family, branch, reviewer, corrupt, true));
+                reopened.ReviewScopedPerson(family, branch, reviewer, readable, false);
+            }
+            using (var db = Connect(path))
+                Execute(db, """
+                    UPDATE scoped_person_proposals SET payload=$payload,state='Pending',reviewer=NULL,state_envelope=$seal
+                    WHERE id=$id;
+                    """, ("$payload", corruptPayload), ("$seal", corruptPendingSeal), ("$id", corrupt.ToString("D")));
+            using (var reopened = new SqliteFamilyStore(path, key))
+                Expect<InvalidDataException>(() => reopened.ReviewScopedPerson(family, branch, reviewer, corrupt, true));
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = """
+                    SELECT (SELECT COUNT(*) FROM people WHERE id=$person),
+                           (SELECT COUNT(*) FROM audit WHERE subject_id=$id AND action='scoped-person-quarantined'),
+                           (SELECT COUNT(*) FROM audit WHERE subject_id=$id AND action='scoped-person-approved');
+                    """;
+                cmd.Parameters.AddWithValue("$person", corruptPerson.ToString("D"));
+                cmd.Parameters.AddWithValue("$id", corrupt.ToString("D"));
+                using var reader = cmd.ExecuteReader();
+                Check(reader.Read() && reader.GetInt64(0) == 0 && reader.GetInt64(1) == 1 && reader.GetInt64(2) == 0,
+                    "quarantine replay does not publish or add an approval audit");
+            }
+            using (var db = Connect(path))
+                Execute(db, "UPDATE scoped_person_proposals SET state='Rejected' WHERE id=$id;", ("$id", corrupt.ToString("D")));
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = "DELETE FROM scoped_person_proposals WHERE person_id GLOB '!forged-*';";
+                Check(cmd.ExecuteNonQuery() == 100, "remove unauthenticated synthetic rows");
+            }
+
+            var corruptSeal = store.ProposeScopedPerson(family, branch, author, "Synthetic Corrupt Seal");
+            var noHistory = store.ProposeScopedPerson(family, branch, author, "Synthetic Old Proposal");
+            using (var db = Connect(path))
+            {
+                Execute(db, "UPDATE scoped_person_proposals SET state_envelope=X'01' WHERE id=$id;",
+                    ("$id", corruptSeal.ToString("D")));
+                Execute(db, "DELETE FROM scoped_person_events WHERE proposal_id=$id;", ("$id", noHistory.ToString("D")));
+            }
+            var corruptPage = store.ListScopedPendingPeoplePage(family, branch, reviewer);
+            Check(corruptPage.QuarantineIds.SequenceEqual([corruptSeal]) &&
+                corruptPage.Entries.All(x => x.ProposalId != noHistory), "unauthenticated legacy history fails closed");
+            Expect<InvalidDataException>(() => store.ReviewScopedPerson(family, branch, reviewer, noHistory, true));
+            Expect<InvalidDataException>(() => store.QuarantineScopedPerson(family, branch, reviewer, noHistory));
+            store.QuarantineScopedPerson(family, branch, reviewer, corruptSeal);
+            using (var db = Connect(path))
+            {
+                Execute(db, "UPDATE scoped_person_proposals SET state='Rejected' WHERE id=$id;", ("$id", noHistory.ToString("D")));
+                using var cmd = db.CreateCommand();
+                cmd.CommandText = "SELECT COUNT(*) FROM audit WHERE subject_id=$id AND action='scoped-person-quarantined';";
+                cmd.Parameters.AddWithValue("$id", corruptSeal.ToString("D"));
+                Check((long)cmd.ExecuteScalar()! == 1, "quarantine is audited");
+            }
+
+            var stale = store.ProposeScopedPerson(family, branch, author, "Synthetic Stale");
+            store.RevokeMember(family, admin, author);
+            Expect<UnauthorizedAccessException>(() => store.ReviewScopedPerson(family, branch, reviewer, stale, true));
+            Join(store, family, admin, author);
+            Expect<UnauthorizedAccessException>(() => store.ProposeScopedPerson(family, branch, author, "Synthetic Rejoin"));
+            Expect<UnauthorizedAccessException>(() => store.ReviewScopedPerson(family, branch, reviewer, stale, true));
+            store.ReviewScopedPerson(family, branch, reviewer, stale, false);
+            store.GrantScopedPersonPermission(family, branch, admin, author, Permission.CreatePerson);
+            store.GrantScopedPersonPermission(family, branch, admin, reviewer, Permission.CreatePerson);
+            for (var i = 0; i < 101; i++)
+                store.ProposeScopedPerson(family, branch, reviewer, "Synthetic Own");
+            for (var i = 0; i < 101; i++)
+                store.ProposeScopedPerson(family, branch, author, "Synthetic Page");
+            var firstPage = store.ListScopedPendingPeople(family, branch, reviewer);
+            var nextPage = store.ListScopedPendingPeople(family, branch, reviewer, firstPage[^1].ProposalId);
+            Check(firstPage.Count == 100 && nextPage.Count == 1 &&
+                firstPage.Concat(nextPage).Select(x => x.ProposalId).Distinct().Count() == 101,
+                "keyset pagination excludes own proposals before limit");
+            store.RevokeScopedPersonPermission(family, branch, admin, author, Permission.CreatePerson);
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = "DROP INDEX scoped_person_family_person;";
+                cmd.ExecuteNonQuery();
+            }
+            using (var reopened = new SqliteFamilyStore(path, key))
+            {
+                Expect<UnauthorizedAccessException>(() => reopened.ProposeScopedPerson(family, branch, author, "Synthetic Restart"));
+                Check(!reopened.ReadPeople(family, admin).Any(x => x.Id == replaced.Id), "restart preserves legacy isolation");
+                // A successful scoped operation upgrades previously installed schemas.
+                _ = reopened.ListScopedPendingPeople(family, branch, reviewer);
+            }
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = """
+                    EXPLAIN QUERY PLAN SELECT id, encrypted_name, living FROM people
+                    WHERE family_id=$f AND NOT EXISTS (
+                      SELECT 1 FROM scoped_person_proposals s
+                      WHERE s.family_id=people.family_id AND s.person_id=people.id)
+                    ORDER BY id;
+                    """;
+                cmd.Parameters.AddWithValue("$f", family.ToString("D"));
+                using var reader = cmd.ExecuteReader();
+                var usesIndex = false;
+                while (reader.Read())
+                    usesIndex |= reader.GetString(3).Contains("scoped_person_family_person", StringComparison.Ordinal);
+                Check(usesIndex, "legacy reader uses non-partial family/person index after schema upgrade");
+            }
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = """
+                    SELECT COUNT(*) FROM scoped_person_grant_audit
+                    WHERE family_id=$f AND branch_id=$b AND recipient_id=$p
+                      AND permission='CreatePerson' AND action IN ('granted','membership-changed','revoked');
+                    """;
+                cmd.Parameters.AddWithValue("$f", family.ToString("D"));
+                cmd.Parameters.AddWithValue("$b", branch.ToString("D"));
+                cmd.Parameters.AddWithValue("$p", author.ToString("D"));
+                Check((long)cmd.ExecuteScalar()! == 4, "grant audit contains branch and permission");
+            }
+            Console.WriteLine("PASS SQLite scoped person grants, review, undo, isolation and tamper");
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static void Join(SqliteFamilyStore store, Guid family, Guid admin, Guid member)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var invite = store.IssueInvitation(family, admin, member, now.AddHours(1), now);
+        store.AcceptInvitation(family, member, invite, now);
+        store.ApproveMember(family, admin, member);
+    }
+
+    private static SqliteConnection Connect(string path)
+    {
+        var db = new SqliteConnection(new SqliteConnectionStringBuilder
+        { DataSource = path, Pooling = false, ForeignKeys = true }.ToString());
+        db.Open();
+        return db;
+    }
+
+    private static void Execute(SqliteConnection db, string sql, params (string, object)[] args)
+    {
+        using var cmd = db.CreateCommand();
+        cmd.CommandText = sql;
+        foreach (var (name, value) in args) cmd.Parameters.AddWithValue(name, value);
+        Check(cmd.ExecuteNonQuery() == 1, "tamper affected one row");
+    }
+
+    private static void Check(bool result, string message)
+    {
+        if (!result) throw new Exception(message);
+    }
+
+    private static void Expect<T>(Action action) where T : Exception
+    {
+        try { action(); }
+        catch (T) { return; }
+        throw new Exception("Expected " + typeof(T).Name);
+    }
+}
