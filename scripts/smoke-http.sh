@@ -7,10 +7,12 @@ TMP="$(mktemp -d)"
 API_PID=""
 WEB_PID=""
 PROVIDER_API_PID=""
+PRIVATE_WEB_PID=""
 cleanup() {
   [[ -z "$API_PID" ]] || kill "$API_PID" 2>/dev/null || true
   [[ -z "$WEB_PID" ]] || kill "$WEB_PID" 2>/dev/null || true
   [[ -z "$PROVIDER_API_PID" ]] || kill "$PROVIDER_API_PID" 2>/dev/null || true
+  [[ -z "$PRIVATE_WEB_PID" ]] || kill "$PRIVATE_WEB_PID" 2>/dev/null || true
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -42,6 +44,7 @@ grep -q '"publicFamilyRecords":false' "$TMP/response.txt" || { echo "FAIL: priva
 [[ "$(status "$API/api/v1/people")" == 501 ]] || { echo "FAIL: people API must fail closed"; exit 1; }
 [[ "$(status "$API/api/v1/tree")" == 501 ]] || { echo "FAIL: tree API must fail closed"; exit 1; }
 [[ "$(status "$WEB/")" == 200 ]] || { echo "FAIL: home page"; exit 1; }
+[[ "$(status "$WEB/private")" == 404 ]] || { echo "FAIL: private mode must be hidden by default"; exit 1; }
 [[ "$(status "$WEB/demo")" == 200 ]] || { echo "FAIL: fictional explorer"; exit 1; }
 grep -q 'Fictional family explorer' "$TMP/response.txt" || { echo "FAIL: demo fixture marker"; exit 1; }
 grep -q 'Fictional family generation diagram' "$TMP/response.txt" || { echo "FAIL: SVG diagram absent"; exit 1; }
@@ -99,6 +102,39 @@ grep -q '"providers":\["google"\]' "$TMP/response.txt" || { echo "FAIL: only exp
 [[ "$(status "$PROVIDER_API/auth/session")" == 401 ]] || { echo "FAIL: configured provider cannot grant anonymous session"; exit 1; }
 [[ "$(status "$PROVIDER_API/api/v1/people")" == 501 ]] || { echo "FAIL: provider registration cannot unlock private family APIs"; exit 1; }
 printf 'PASS HTTP smoke: configured synthetic OIDC provider and privacy boundary\n'
+
+# An explicitly enabled private page still fails closed on plain HTTP. It
+# never contacts an HTTPS API from an insecure browser request.
+PRIVATE_WEB="http://127.0.0.1:5184"
+FAMILYTREE_PRIVATE_MODE=true \
+FAMILYTREE_API_BASE_URL=https://localhost:5181 \
+  dotnet run --project src/FamilyTree.Web/FamilyTree.Web.csproj \
+    --no-restore --no-build -c Release --urls "$PRIVATE_WEB" \
+    >"$TMP/web-private.log" 2>&1 &
+PRIVATE_WEB_PID=$!
+private_web_ready=0
+for i in $(seq 1 25); do
+  if curl --silent --max-time 1 -o /dev/null "$PRIVATE_WEB/health"; then
+    private_web_ready=1
+    break
+  fi
+  sleep 1
+done
+[[ "$private_web_ready" == 1 ]] || { echo "FAIL: opt-in private web startup"; exit 1; }
+[[ "$(status "$PRIVATE_WEB/")" == 200 ]] || { echo "FAIL: private-mode landing page"; exit 1; }
+grep -q 'Sign in to your private family space' "$TMP/response.txt" || { echo "FAIL: private-mode navigation"; exit 1; }
+private_status="$(curl --silent --max-time 5 --dump-header "$TMP/private-headers.txt" \
+  --output "$TMP/private.html" --write-out '%{http_code}' \
+  --resolve localhost:5184:127.0.0.1 "http://localhost:5184/private")"
+[[ "$private_status" == 200 ]] || { echo "FAIL: local private-mode page"; exit 1; }
+grep -qi '^Cache-Control:.*no-store' "$TMP/private-headers.txt" || { echo "FAIL: private page cache policy"; exit 1; }
+grep -q 'could not be reached securely' "$TMP/private.html" || { echo "FAIL: insecure browser request must fail closed"; exit 1; }
+! grep -q 'Fictional family explorer\|Fictional 32-person demo' "$TMP/private.html" || { echo "FAIL: private page included demo data"; exit 1; }
+private_wrong_host="$(curl --silent --max-time 5 --resolve public.example:5184:127.0.0.1 \
+  -H 'Host: public.example' -o "$TMP/response.txt" -w '%{http_code}' \
+  "http://public.example:5184/private")"
+[[ "$private_wrong_host" == 404 ]] || { echo "FAIL: public Host exposed opt-in private page"; exit 1; }
+printf 'PASS HTTP smoke: opt-in private page is local-only, non-cacheable and fails closed on HTTP\n'
 
 # Local-only fictional edit -> moderator review -> link -> undo E2E.
 # Never submit actual family names, user input, or credentials here.

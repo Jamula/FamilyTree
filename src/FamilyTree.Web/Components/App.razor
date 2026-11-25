@@ -1,3 +1,4 @@
+@inject FamilyTree.Web.PrivateTreeModeOptions PrivateTreeMode
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10,6 +11,10 @@
     <h1>🌳 FamilyTree</h1>
     <p>Preserve family history. Connect generations. Celebrate people. Control your data.</p>
     <p>Privacy-first open-source genealogy. The family tree will be available after authentication, authorization, and import functionality are implemented.</p>
+    @if (PrivateTreeMode.Enabled)
+    {
+      <p><a href="/private">Sign in to your private family space</a></p>
+    }
   <p><a href="/demo">Explore the fictional 32-person demo</a></p>
   </main>
 </body>

@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 internal static class VerifiedCookieHandlerAssertions
 {
-    internal static async Task RunAsync()
+    internal static async Task<string> RunAsync()
     {
         var provider = new InteractiveOidc.Provider("google", "GoogleOidc",
             "https://accounts.google.com", "synthetic-client", "synthetic-secret",
@@ -114,6 +114,7 @@ internal static class VerifiedCookieHandlerAssertions
             "request headers or injected User cannot bypass a missing cookie");
         foreach (var scope in requestScopes) scope.Dispose();
         Console.WriteLine("PASS real cookie handler: verified, expired, tampered, removed-provider, and forged identity");
+        return goodCookie;
     }
 
     private static void Check(bool condition, string message)
