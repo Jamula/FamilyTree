@@ -63,6 +63,19 @@ without relationship or date/source grants. The relationship review work in
 yet construct a complete authorized GEDCOM projection or apply an approved
 reconciliation atomically.
 
+The local `GedcomAuthorizedPersonSlice` provides a narrower synthetic
+building block, not a private route or approval mechanism. Its viewer ID must
+come from a verified server session, never request data. Each operation loads
+one current SQLite snapshot using persisted active membership, branch, person
+and display-name grants. Unavailable and revoked people return the same null
+result. Export contains only that person's name; dates, events, sources, links
+and media are omitted. Preview compares incoming synthetic data only against
+that person's authorized name, not a complete family or a birth date. Existing
+warnings are retained and an incompleteness warning is added. If a persisted
+name cannot be represented in the subset, both operations fail explicitly
+without returning a partial export or a misleading no-match preview. Neither
+operation persists or approves edits. Real-data use remains unapproved.
+
 After the remaining contracts are merged and reviewed, integration must bind
 the verified principal from #107 to a single current, persisted authorization
 snapshot; build the export projection only from permitted records, links and
