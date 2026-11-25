@@ -6,6 +6,7 @@ var defaults = new TreeOptions();
 Check(defaults.GenerationsAbove == 4 && defaults.GenerationsBelow == 4, "default depths");
 Check(defaults.Spouses && defaults.SiblingBranches && !defaults.SocialConnections, "default toggles");
 Check(new TreeOptions(0, 8).Validate().GenerationsBelow == 8, "bounds");
+PwaManifestAssertions.Run();
 try { new TreeOptions(9, 1).Validate(); throw new Exception("invalid depth accepted"); }
 catch (ArgumentOutOfRangeException) { assertions++; }
 var a = Guid.NewGuid(); var b = Guid.NewGuid();

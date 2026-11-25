@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "FamilyTree",
+  "short_name": "FamilyTree",
+  "description": "A privacy-first genealogy project.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1f5d43",
+  "icons": [
+    {
+      "src": "/icons/familytree.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
