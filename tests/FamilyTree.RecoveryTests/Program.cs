@@ -329,6 +329,35 @@ static void TestMalformedSchemas(string source, string directory, string restore
         placeholders, Path.Combine(directory, "placeholder.backup"), key),
         "table names alone do not constitute a valid schema");
 
+    foreach (var (table, sql, label) in new[]
+             {
+                 ("key_verifier", "DELETE FROM key_verifier;", "missing-family"),
+                 ("identity_key_verifier", "DELETE FROM identity_key_verifier;", "missing-identity"),
+                 ("key_verifier", "UPDATE key_verifier SET envelope=x'';", "invalid-family"),
+                 ("key_verifier", "UPDATE key_verifier SET envelope=zeroblob(54);", "truncated-family"),
+                 ("identity_key_verifier", "UPDATE identity_key_verifier SET digest='invalid';", "invalid-identity")
+             })
+    {
+        var missingVerifier = Path.Combine(directory, $"{label}.sqlite");
+        File.Copy(source, missingVerifier);
+        using (var connection = new SqliteConnection($"Data Source={missingVerifier};Pooling=False"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            Check(command.ExecuteNonQuery() == 1, $"synthetic {table} verifier was changed");
+        }
+        var invalidBackup = Path.Combine(directory, $"{label}.backup");
+        Expect<InvalidDataException>(() => SqliteRecovery.CreateBackup(missingVerifier, invalidBackup, key),
+            "backup rejects missing or malformed key metadata");
+        Check(!File.Exists(invalidBackup), "invalid verifier is not backed up");
+        File.WriteAllBytes(invalidBackup, EncryptTestSnapshot(File.ReadAllBytes(missingVerifier), key));
+        var invalidTarget = Path.Combine(restoreDirectory, $"{label}.sqlite");
+        Expect<InvalidDataException>(() => SqliteRecovery.Restore(invalidBackup, invalidTarget, key),
+            "restore rejects missing or malformed key metadata");
+        Check(!File.Exists(invalidTarget), "invalid verifier is not published");
+    }
+
     var triggerDatabase = Path.Combine(directory, "trigger.sqlite");
     File.Copy(source, triggerDatabase);
     using (var connection = new SqliteConnection($"Data Source={triggerDatabase};Pooling=False"))

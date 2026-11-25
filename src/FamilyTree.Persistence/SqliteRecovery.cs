@@ -330,6 +330,28 @@ public static class SqliteRecovery
             present.Contains("person_visibility") != present.Contains("person_display_name_visibility") ||
             present.Contains("relationships") != present.Contains("relationship_proposals"))
             throw new InvalidDataException("SQLite snapshot schema is incomplete.");
+
+        using var verifiers = connection.CreateCommand();
+        verifiers.CommandText = """
+            SELECT (EXISTS(SELECT 1 FROM families) AND
+                    NOT EXISTS(SELECT 1 FROM key_verifier WHERE id=1))
+                   OR EXISTS(SELECT 1 FROM key_verifier
+                             WHERE typeof(envelope) != 'blob' OR length(envelope) != 55);
+            """;
+        if (Convert.ToInt64(verifiers.ExecuteScalar()) != 0)
+            throw new InvalidDataException("SQLite snapshot key metadata is incomplete.");
+        if (present.Contains("external_principals"))
+        {
+            verifiers.CommandText = """
+                SELECT (EXISTS(SELECT 1 FROM external_principals) AND
+                        NOT EXISTS(SELECT 1 FROM identity_key_verifier WHERE id=1))
+                       OR EXISTS(SELECT 1 FROM identity_key_verifier
+                                 WHERE typeof(digest) != 'text' OR length(digest) != 64
+                                    OR digest GLOB '*[^0-9A-F]*');
+                """;
+            if (Convert.ToInt64(verifiers.ExecuteScalar()) != 0)
+                throw new InvalidDataException("SQLite snapshot key metadata is incomplete.");
+        }
     }
 
     private static string NormalizeSchema(string sql)

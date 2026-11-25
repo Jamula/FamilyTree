@@ -32,6 +32,8 @@ the current or supported legacy schema; optional identity, grant, and legacy
 relationship table pairs are checked when present. Unexpected triggers, views,
 and explicit indexes are rejected. Schema changes require an explicit recovery
 compatibility update.
+Recovery checks verifier presence and format, but cannot authenticate the
+database and identity keys; verify those separately by reopening the restore.
 The 1 GiB snapshot limit is checked before copying and serialization, but a
 concurrently growing source can still consume memory during the SQLite backup.
 
@@ -75,14 +77,16 @@ if (-not $verified.AreAccessRulesProtected -or $allowed.Count -ne 1 -or
         [Security.AccessControl.FileSystemRights]::FullControl) {
     throw 'Key directory ACL is not restricted to the current user.'
 }
-$key = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+$key = New-Object byte[] 32
+$random = [Security.Cryptography.RandomNumberGenerator]::Create()
 try {
+    $random.GetBytes($key)
     $stream = [IO.File]::Open($keyPath, [IO.FileMode]::CreateNew,
         [IO.FileAccess]::Write, [IO.FileShare]::None)
     try { $stream.Write($key, 0, $key.Length); $stream.Flush($true) }
     finally { $stream.Dispose() }
 }
-finally { [Array]::Clear($key, 0, $key.Length) }
+finally { $random.Dispose(); [Array]::Clear($key, 0, $key.Length) }
 ```
 
 The create-new operation fails if a key already exists; preserve and reuse the
