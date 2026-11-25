@@ -110,10 +110,11 @@ internal static class DomainValidationBoundaryAssertions
             Expect<InvalidDataException>(() =>
                 store.LoadAsync().GetAwaiter().GetResult(),
                 "undersized encrypted envelope rejected");
-            File.WriteAllBytes(path, new byte[32]);
+            File.WriteAllBytes(path, new byte[33]);
             Expect<InvalidDataException>(() =>
                 store.LoadAsync().GetAwaiter().GetResult(),
-                "invalid snapshot magic rejected");
+                "invalid snapshot magic rejected",
+                error => error.Message == "Snapshot envelope invalid.");
             File.WriteAllBytes(path, new byte[2_000_033]);
             Expect<InvalidDataException>(() =>
                 store.LoadAsync().GetAwaiter().GetResult(),
@@ -198,10 +199,11 @@ internal static class DomainValidationBoundaryAssertions
         if (!condition) throw new InvalidOperationException(reason);
     }
 
-    private static void Expect<T>(Action action, string reason) where T : Exception
+    private static void Expect<T>(Action action, string reason,
+        Func<T, bool>? predicate = null) where T : Exception
     {
         try { action(); }
-        catch (T) { return; }
+        catch (T error) when (predicate?.Invoke(error) ?? true) { return; }
         throw new InvalidOperationException(reason);
     }
 

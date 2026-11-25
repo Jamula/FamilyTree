@@ -125,6 +125,7 @@ if __name__ == "__main__":
     check(branchless_api, 1, "--min-component-branch", "Api=90")
     output = check(branchless_api, 0, "--min-component-branch", "Api=90",
                    "--allow-branchless", "Api")
+    assert "FamilyTree.Api: branchless exemption (explicitly allowed)" in output, output
     assert "branchless exemption (explicitly allowed)" in output, output
     assert "Not measured (branchless exemption: explicitly allowed)" in output, output
     check(SAMPLE, 1, "--min-component-branch", "Domain=90",
@@ -162,7 +163,7 @@ if __name__ == "__main__":
         '<package name="FamilyTree.Api"><classes><class filename="src/FamilyTree.Api/Test.cs">'
         '<lines><line number="1" hits="1" branch="true" condition-coverage="100% (1/1)"/>'
         '</lines></class></classes></package>', ''),
-        1, "--allow-branchless", "Api")
+        1, "--min-component-branch", "Api=90", "--allow-branchless", "Api")
     check(SAMPLE.replace('condition-coverage="50% (1/2)"', 'condition-coverage="missing"'),
           2, "--min-component-branch", "Domain=90", "--allow-branchless", "Domain")
     # Independent C# lambda/classes can share a file and source line while
