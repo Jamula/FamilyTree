@@ -13,9 +13,34 @@ For #10, an active-membership check is not a graph grant or a durable
 authorization lease: every private operation must enforce current membership
 and applicable persisted graph grants together with the data access, so that
 revocation cannot race a previously cached check. Trusted administrator
-provisioning, actual provider callbacks, profile claims, the remaining
-membership transitions, and production key/deployment review are still
-required before issue #9 can be accepted.
+provisioning, actual provider callbacks, profile-claim API integration, the
+remaining membership transitions, and production key/deployment review are
+still required before issue #9 can be accepted.
+
+The local profile-claim persistence slice is implemented without a private
+route. It stores claims in the existing family SQLite database. Proposals require
+active claimant membership and explicit branch/person visibility. Inbox, audit
+reads and decisions require active administrator membership and the reviewer's
+own current branch/person visibility within the same transaction. Approval also
+rechecks the claimant's membership and visibility; an independent reviewer may
+reject a stale claim to release its reservation. Proposal/review/withdrawal events
+are recorded in the existing audit table. The
+`ProfileClaimService` binds the actor through the verified-cookie membership
+bridge; it accepts no principal ID from callers.
+The pending inbox returns at most 100 claims ordered by claim ID with an opaque
+cursor bound to the family and reviewer. Every page rechecks active administrator
+membership and current visibility, including the cursor anchor; a revoked or
+unknown anchor is denied. A full page may lead to an empty final page. Concurrent
+inserts before the cursor require restarting the listing.
+
+This slice remains unaccepted as an integrated feature. It requires the
+`person_visibility` schema/grant contract from #100 to be installed in the same
+database, and authenticated application composition from #107 before any route
+can consume it. No route is enabled here. Future routes must map forbidden and
+unknown claims to the same empty 404 and preserve these transactional checks.
+API integration, full process-level
+authorization tests, deployment/key lifecycle review, and independent security
+review remain outstanding; do not close #9/#90 based on this persistence slice.
 
 ## Membership lifecycle and permitted transitions
 
