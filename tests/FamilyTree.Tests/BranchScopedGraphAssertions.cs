@@ -43,6 +43,24 @@ internal static class BranchScopedGraphAssertions
         Check(BranchScopedTreeQuery.ProjectAsync(viewer,family,branchA,hidden.Id,
             people,relations,new TreeOptions(),grants).GetAwaiter().GetResult() is null,
             "denied and nonexistent centers indistinguishable");
+        var authorization = new BranchScopedAuthorization(viewer, family, branchA, grants);
+        Check(authorization.CanSeePersonAsync(viewer, a.Id).GetAwaiter().GetResult() &&
+            !authorization.CanSeePersonAsync(viewer, Guid.NewGuid()).GetAwaiter().GetResult() &&
+            !authorization.CanSeePersonAsync(Guid.NewGuid(), a.Id).GetAwaiter().GetResult(),
+            "branch grant requires the trusted viewer and an explicitly visible person");
+        Check(!new BranchScopedAuthorization(Guid.Empty, family, branchA, grants)
+                .CanSeePersonAsync(Guid.Empty, a.Id).GetAwaiter().GetResult() &&
+            !new BranchScopedAuthorization(viewer, Guid.Empty, branchA, grants)
+                .CanSeePersonAsync(viewer, a.Id).GetAwaiter().GetResult() &&
+            !new BranchScopedAuthorization(viewer, family, Guid.Empty, grants)
+                .CanSeePersonAsync(viewer, a.Id).GetAwaiter().GetResult(),
+            "empty identity, family and branch identifiers fail closed");
+        Check(!authorization.CanSeeRelationshipAsync(viewer,
+                Relationship.Create(a.Id, hidden.Id, RelationKind.Parent))
+                .GetAwaiter().GetResult() &&
+            !authorization.CanSeeRelationshipAsync(Guid.NewGuid(), first)
+                .GetAwaiter().GetResult(),
+            "relationships require a trusted viewer and visible endpoints");
         Console.WriteLine("PASS per-branch graph isolation and non-enumeration");
     }
     static void Check(bool ok,string message){if(!ok)throw new InvalidOperationException(message);}

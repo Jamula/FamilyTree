@@ -150,7 +150,8 @@ def main():
         if not 0 <= rate <= 100:
             raise ValueError("Branch coverage threshold outside 0..100")
         branch_requirements[component] = rate
-    for component in args.allow_branchless:
+    allowed_branchless = set(args.allow_branchless)
+    for component in allowed_branchless:
         if component not in COMPONENTS:
             raise ValueError("Invalid branchless component justification")
     if args.min_overall_line is not None and not 0 <= args.min_overall_line <= 100:
@@ -166,9 +167,19 @@ def main():
                     for value in branch_counts.get(component, {}).values()]
     overall_line = sum(all_lines) / len(all_lines) if all_lines else None
     overall_branch_total = sum(value[1] for value in all_branches)
+    missing_branch_components = [
+        component for component in COMPONENTS
+        if not branch_counts.get(component) and (
+            not observations.get(component) or component not in allowed_branchless)
+    ]
     overall_branch = (
         sum(value[0] for value in all_branches) / overall_branch_total
-        if overall_branch_total else None)
+        if overall_branch_total and not missing_branch_components else None)
+    if missing_branch_components:
+        print("  FAIL: branch measurements missing for "
+              + ", ".join(f"FamilyTree.{component}" for component in missing_branch_components),
+              file=sys.stderr)
+        failure = True
     if args.min_overall_line is not None and (
             overall_line is None or overall_line * 100 < args.min_overall_line):
         print(f"  FAIL: overall source line coverage below {args.min_overall_line:.1f}%",
@@ -179,11 +190,14 @@ def main():
         print(f"  FAIL: overall source branch coverage below {args.min_overall_branch:.1f}%",
               file=sys.stderr)
         failure = True
-    print(f"  Overall source coverage: lines="
-          f"{overall_line * 100:.1f}% ({len(all_lines)} lines), branches="
-          f"{overall_branch * 100:.1f}% ({overall_branch_total} conditions)"
-          if overall_line is not None and overall_branch is not None
-          else "  Overall source coverage: not measured")
+    overall_line_text = (
+        f"{overall_line * 100:.1f}% ({len(all_lines)} lines)"
+        if overall_line is not None else "NOT MEASURED")
+    overall_branch_text = (
+        f"{overall_branch * 100:.1f}% ({overall_branch_total} conditions)"
+        if overall_branch is not None else "NOT MEASURED")
+    print(f"  Overall source coverage: lines={overall_line_text}, "
+          f"branches={overall_branch_text}")
     for component, rate, count_lines, branch, count_branches in rows:
         line_text = f"{rate*100:.1f}%" if rate is not None else "NOT MEASURED"
         branch_text = f"{branch*100:.1f}%" if branch is not None else "NOT MEASURED"
@@ -197,7 +211,7 @@ def main():
         branch_threshold = branch_requirements.get(component)
         if branch_threshold is not None:
             if branch is None:
-                if rate is None or component not in args.allow_branchless:
+                if rate is None or component not in allowed_branchless:
                     print(f"  FAIL: FamilyTree.{component} has no measured branches; "
                           "component source lines and an explicit branchless justification are required",
                           file=sys.stderr)
@@ -218,7 +232,7 @@ def main():
             for component, rate, count_lines, branch, _ in rows:
                 line_text = f"{rate*100:.1f}%" if rate is not None else "Not measured"
                 branch_text = f"{branch*100:.1f}%" if branch is not None else "Not measured"
-                if (branch is None and rate is not None and component in args.allow_branchless
+                if (branch is None and rate is not None and component in allowed_branchless
                         and component in branch_requirements):
                     branch_text += " (branchless exemption: explicitly allowed)"
                 output.write(f"| FamilyTree.{component} | {count_lines} | {line_text} | {branch_text} |\n")

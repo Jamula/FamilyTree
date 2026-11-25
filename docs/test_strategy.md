@@ -11,8 +11,10 @@ least **95% measured line and 90% measured branch coverage for each** of:
 `FamilyTree.Mcp`, `FamilyTree.ServiceDefaults`, and
 `FamilyTree.SyntheticDemo`. Missing or unmeasured components fail this
 gate rather than counting as covered. A component with no branches requires
-an explicit allowlist justification; it is never counted as 100%. The
-overall M1 target is also 95% lines and 90% branches.
+an explicit allowlist justification and measured source lines; it is never
+counted as 100%. CI enforces branch-measurement completeness with a separate
+0% floor for every component and overall, independently of the staged 90%
+branch target. The overall M1 target is also 95% lines and 90% branches.
 
 The following local measurements use the real .NET 11 test process and the
 same `dotnet-coverage` Cobertura collector used by CI. Counts are covered /
@@ -20,32 +22,36 @@ measured source observations, excluding test and generated files:
 
 | Scope | Baseline lines | Final lines | Baseline branches | Final branches |
 |---|---:|---:|---:|---:|
-| Overall source | 3,055/3,152 | 3,062/3,152 | 2,038/2,494 | 2,205/2,494 |
-| Domain | 1,052/1,092 | 1,059/1,092 | 1,244/1,609 | 1,411/1,609 |
-| Persistence | 973/997 | 973/997 | 258/308 | 258/308 |
+| Overall source | 3,055/3,152 | 3,064/3,152 | 2,038/2,494 | 2,216/2,494 |
+| Domain | 1,052/1,092 | 1,059/1,092 | 1,244/1,609 | 1,419/1,609 |
+| Persistence | 973/997 | 974/997 | 258/308 | 259/308 |
 | Api | 277/286 | 277/286 | 148/158 | 148/158 |
-| Web | 479/495 | 479/495 | 242/273 | 242/273 |
+| Web | 479/495 | 480/495 | 242/273 | 244/273 |
 | Mcp | 86/88 | 86/88 | 58/58 | 58/58 |
 | ServiceDefaults | 116/122 | 116/122 | 68/68 | 68/68 |
 | SyntheticDemo | 72/72 | 72/72 | 20/20 | 20/20 |
 
-The final branch target remains unmet overall (88.4%), and for Domain
-(87.7%), Persistence (83.8%) and Web (88.6%). The collector emits real
+The final branch target remains unmet overall (88.9%), and for Domain
+(88.2%), Persistence (84.1%) and Web (89.4%). The collector emits real
 per-line Cobertura condition counts, including `True`/`False` branch flags.
-The blocking transition gate remains 90% lines while the target steps report
-95% lines and 90% branches without masking their failures. Every new PR and
-`main` push must rerun the coverage check. **These are measured test
-observations, not a claim that all user features work.**
+The blocking transition gate remains 90% lines; independent 0% branch floors
+fail closed on missing measurements, while target steps report 95% lines and
+90% branches without masking below-target results. Every new PR and `main`
+push must rerun the coverage check. **These are measured test observations,
+not a claim that all user features work.**
 
 The compact exception-path matrix should prioritize validation, authentication
 failure, privacy denial, malformed input, corruption, concurrency/rollback,
 cancellation, recovery, telemetry and dependency failures. It must assert
 outcomes, reuse synthetic fixtures, and report scenario count and runtime.
-The original matrix added 7 scenarios; this follow-up adds 195 synthetic
-scenarios and corrects 11 existing preview rejection assertions. The final
-instrumented executable suite took 13.51 seconds locally. Final target
-acceptance requires the staged target steps to pass, followed by making them
-blocking.
+The original matrix added 7 scenarios; the previous follow-up added 195
+synthetic scenarios and corrected 11 existing preview rejection assertions.
+This follow-up adds three focused outcome-asserting test groups for
+branch-scoped authorization, malformed/empty tree centers and missing
+identity-key metadata. The instrumented Release suite took 12.76 seconds
+before and 11.03 seconds after this follow-up on the same local host. Final
+target acceptance requires the staged target steps to pass, followed by
+making them blocking.
 
 ## Existing executable test categories
 

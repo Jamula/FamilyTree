@@ -20,7 +20,27 @@ SAMPLE = """<coverage line-rate="1" branch-rate="1"><packages>
 </classes></package>
 <package name="FamilyTree.Api"><classes>
 <class filename="src/FamilyTree.Api/Program.cs"><lines>
-<line number="1" hits="1"/>
+<line number="1" hits="1" branch="true" condition-coverage="100% (1/1)"/>
+</lines></class></classes></package>
+<package name="FamilyTree.Persistence"><classes>
+<class filename="src/FamilyTree.Persistence/Store.cs"><lines>
+<line number="1" hits="1" branch="true" condition-coverage="100% (1/1)"/>
+</lines></class></classes></package>
+<package name="FamilyTree.Web"><classes>
+<class filename="src/FamilyTree.Web/Page.cs"><lines>
+<line number="1" hits="1" branch="true" condition-coverage="100% (1/1)"/>
+</lines></class></classes></package>
+<package name="FamilyTree.Mcp"><classes>
+<class filename="src/FamilyTree.Mcp/Host.cs"><lines>
+<line number="1" hits="1" branch="true" condition-coverage="100% (1/1)"/>
+</lines></class></classes></package>
+<package name="FamilyTree.ServiceDefaults"><classes>
+<class filename="src/FamilyTree.ServiceDefaults/Defaults.cs"><lines>
+<line number="1" hits="1" branch="true" condition-coverage="100% (1/1)"/>
+</lines></class></classes></package>
+<package name="FamilyTree.SyntheticDemo"><classes>
+<class filename="src/FamilyTree.SyntheticDemo/Catalog.cs"><lines>
+<line number="1" hits="1" branch="true" condition-coverage="100% (1/1)"/>
 </lines></class></classes></package>
 <package name="FamilyTree.Tests"><classes>
 <class filename="tests/FamilyTree.Tests/Example.cs"><lines><line number="1" hits="1"/>
@@ -44,14 +64,14 @@ if __name__ == "__main__":
     output = check(SAMPLE, 0)
     assert "FamilyTree.Domain: lines=50.0% (2 lines)" in output, output
     assert "FamilyTree.Api: lines=100.0% (1 lines)" in output, output
-    assert "FamilyTree.Web: lines=NOT MEASURED" in output, output
+    assert "FamilyTree.Web: lines=100.0% (1 lines)" in output, output
     assert "branches=50.0% (2 conditions)" in output, output
     check(SAMPLE, 0, "--min-component", "Api=90")
     check(SAMPLE, 0, "--min-component-branch", "Domain=50")
     check(SAMPLE, 1, "--min-component-branch", "Domain=90")
     check(SAMPLE, 0, "--min-overall-line", "50")
-    check(SAMPLE, 0, "--min-overall-branch", "40")
-    check(SAMPLE, 1, "--min-overall-branch", "60")
+    check(SAMPLE, 0, "--min-overall-branch", "80")
+    check(SAMPLE, 1, "--min-overall-branch", "90")
     for option in ("--min-overall-line", "--min-overall-branch"):
         for invalid in ("nan", "inf", "-inf", "-1", "101"):
             check(SAMPLE, 2, f"{option}={invalid}")
@@ -61,7 +81,8 @@ if __name__ == "__main__":
     all_covered = '<coverage line-rate="1" branch-rate="1"><packages>' + "".join(
         f'<package name="FamilyTree.{component}"><classes>'
         f'<class filename="src/FamilyTree.{component}/Test.cs"><lines>'
-        '<line number="1" hits="1"/></lines></class></classes></package>'
+        '<line number="1" hits="1" branch="true" '
+        'condition-coverage="100% (1/1)"/></lines></class></classes></package>'
         for component in components
     ) + '</packages></coverage>'
     gates = [item for component in components
@@ -73,7 +94,8 @@ if __name__ == "__main__":
         package = (
             f'<package name="FamilyTree.{missing}"><classes>'
             f'<class filename="src/FamilyTree.{missing}/Test.cs"><lines>'
-            '<line number="1" hits="1"/></lines></class></classes></package>'
+            '<line number="1" hits="1" branch="true" '
+            'condition-coverage="100% (1/1)"/></lines></class></classes></package>'
         )
         incomplete = all_covered.replace(package, "")
         assert incomplete != all_covered, f"fixture missing {missing}"
@@ -81,7 +103,7 @@ if __name__ == "__main__":
         assert f"FamilyTree.{missing}" in output, output
     check(SAMPLE, 1, *gates)
     check(SAMPLE, 1, "--min-component", "Domain=90")
-    check(SAMPLE, 1, "--min-component", "Web=90")
+    check(SAMPLE, 0, "--min-component", "Web=90")
     check(SAMPLE, 2, "--min-component", "Tests=90")
     check(SAMPLE, 2, "--min-component", "Domain=101")
     check(SAMPLE, 2, "--min-component", "Domain=nan")
@@ -96,14 +118,15 @@ if __name__ == "__main__":
     check(SAMPLE.replace('branch="true"', 'branch="TRUE"'), 0)
     check(SAMPLE.replace('branch="true"', 'branch="unknown"'), 2)
     check(SAMPLE.replace('condition-coverage="50% (1/2)"', 'condition-coverage="missing"'), 2)
-    check(SAMPLE, 1, "--min-component-branch", "Web=90")
-    check(SAMPLE, 1, "--min-component-branch", "Api=90")
-    output = check(SAMPLE, 0, "--min-component-branch", "Api=90",
+    check(SAMPLE, 0, "--min-component-branch", "Api=90")
+    branchless_api = SAMPLE.replace(
+        '<line number="1" hits="1" branch="true" condition-coverage="100% (1/1)"/>',
+        '<line number="1" hits="1"/>', 1)
+    check(branchless_api, 1, "--min-component-branch", "Api=90")
+    output = check(branchless_api, 0, "--min-component-branch", "Api=90",
                    "--allow-branchless", "Api")
     assert "branchless exemption (explicitly allowed)" in output, output
     assert "Not measured (branchless exemption: explicitly allowed)" in output, output
-    check(SAMPLE, 1, "--min-component-branch", "Web=90",
-          "--allow-branchless", "Web")
     check(SAMPLE, 1, "--min-component-branch", "Domain=90",
           "--allow-branchless", "Domain")
     check(SAMPLE, 0, "--allow-branchless", "Api")
@@ -113,6 +136,33 @@ if __name__ == "__main__":
           "--allow-branchless", "Domain")
     check(no_branches, 1, "--min-overall-branch", "0",
           "--min-component-branch", "Api=90", "--allow-branchless", "Api")
+    branchless_complete = all_covered.replace(
+        '<line number="1" hits="1" branch="true" '
+        'condition-coverage="100% (1/1)"/></lines></class></classes></package>',
+        '<line number="1" hits="1"/></lines></class></classes></package>', 1)
+    output = check(branchless_complete, 0, "--min-overall-branch", "90",
+                   "--min-component-branch", "Domain=90",
+                   "--min-component-branch", "Persistence=90",
+                   "--min-component-branch", "Api=90",
+                   "--min-component-branch", "Web=90",
+                   "--min-component-branch", "Mcp=90",
+                   "--min-component-branch", "ServiceDefaults=90",
+                   "--min-component-branch", "SyntheticDemo=90",
+                   "--allow-branchless", "Domain")
+    assert "branches=NOT MEASURED (0 conditions)" in output, output
+    missing_component_branch = all_covered.replace(
+        '<line number="1" hits="1" branch="true" '
+        'condition-coverage="100% (1/1)"/>',
+        '<line number="1" hits="1"/>', 1)
+    output = check(missing_component_branch, 1, "--min-overall-branch", "0")
+    assert "FamilyTree.Domain" in output and "branches=NOT MEASURED" in output, output
+    check(branchless_complete, 1, "--min-overall-branch", "90",
+          "--allow-branchless", "Persistence")
+    check(all_covered.replace(
+        '<package name="FamilyTree.Api"><classes><class filename="src/FamilyTree.Api/Test.cs">'
+        '<lines><line number="1" hits="1" branch="true" condition-coverage="100% (1/1)"/>'
+        '</lines></class></classes></package>', ''),
+        1, "--allow-branchless", "Api")
     check(SAMPLE.replace('condition-coverage="50% (1/2)"', 'condition-coverage="missing"'),
           2, "--min-component-branch", "Domain=90", "--allow-branchless", "Domain")
     # Independent C# lambda/classes can share a file and source line while
