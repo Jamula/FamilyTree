@@ -45,3 +45,4 @@ await SqliteRelationshipConcurrencyAssertions.RunAsync();
 await SqliteSchemaMigrationConcurrencyAssertions.RunAsync();
 await SqliteInvitationRaceAssertions.RunAsync();
 await VerifiedFamilyMembershipAssertions.RunAsync();
+await RecoverySuiteAssertions.RunAsync();
