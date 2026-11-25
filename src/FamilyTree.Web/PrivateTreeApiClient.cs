@@ -19,6 +19,14 @@ public enum PrivateTreeApiResultKind
 
 public sealed record PrivateTreeApiResult<T>(PrivateTreeApiResultKind Kind, T? Value);
 
+public enum PrivateTreeMembershipAction
+{
+    Invite,
+    AcceptInvitation,
+    ApproveMember,
+    RevokeMember
+}
+
 public sealed class PrivateTreeApiClient(HttpClient http, PrivateTreeModeOptions options)
 {
     private const string SessionCookieName = "__Host-FamilyTreeSession";
@@ -131,40 +139,20 @@ public sealed class PrivateTreeApiClient(HttpClient http, PrivateTreeModeOptions
         if (!CanConnect(context) || GetSessionCookie(context) is not { } sessionCookie)
             return false;
 
+        var antiforgery = await GetApiAntiforgeryAsync(sessionCookie, cancellationToken);
+        if (antiforgery is null)
+            return false;
+
         try
         {
-            using var csrfRequest = new HttpRequestMessage(HttpMethod.Get,
-                new Uri(_options.ApiBaseUri!, "api/v1/csrf"));
-            csrfRequest.Headers.TryAddWithoutValidation("Cookie", sessionCookie);
-            csrfRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            csrfRequest.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
-            using var csrfResponse = await _http.SendAsync(csrfRequest,
-                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            if (csrfResponse.StatusCode != HttpStatusCode.OK)
-                return false;
-
-            var antiforgeryCookie = ReadResponseCookie(csrfResponse,
-                "__Host-FamilyTreeAntiforgery");
-            using var csrfJson = await ReadJsonAsync<JsonDocument>(
-                csrfResponse, 4096, cancellationToken);
-            if (antiforgeryCookie is null || csrfJson is null ||
-                csrfJson.RootElement.ValueKind != JsonValueKind.Object ||
-                !csrfJson.RootElement.TryGetProperty("requestToken", out var requestToken) ||
-                requestToken.ValueKind != JsonValueKind.String ||
-                string.IsNullOrWhiteSpace(requestToken.GetString()) ||
-                requestToken.GetString()!.Length > 4096 ||
-                requestToken.GetString()!.Any(character =>
-                    !char.IsAscii(character) || char.IsControl(character)))
-                return false;
-
             using var registerRequest = new HttpRequestMessage(HttpMethod.Post,
                 new Uri(_options.ApiBaseUri!, "api/v1/me"));
             registerRequest.Headers.TryAddWithoutValidation("Cookie",
-                sessionCookie + "; " + antiforgeryCookie);
+                sessionCookie + "; " + antiforgery.Value.Cookie);
             registerRequest.Headers.TryAddWithoutValidation("Origin",
                 _options.ApiBaseUri!.GetLeftPart(UriPartial.Authority));
             registerRequest.Headers.TryAddWithoutValidation("X-CSRF-TOKEN",
-                requestToken.GetString());
+                antiforgery.Value.Token);
             registerRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             registerRequest.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
             using var registerResponse = await _http.SendAsync(registerRequest,
@@ -214,6 +202,81 @@ public sealed class PrivateTreeApiClient(HttpClient http, PrivateTreeModeOptions
             : Unavailable<AuthorizedTreeProjection>();
     }
 
+    public async Task<PrivateTreeApiResult<Guid?>> ManageMembershipAsync(
+        HttpContext context, Guid familyId, PrivateTreeMembershipAction action,
+        Guid targetId, CancellationToken cancellationToken)
+    {
+        if (!CanConnect(context) || familyId == Guid.Empty || targetId == Guid.Empty ||
+            !Enum.IsDefined(action) || GetSessionCookie(context) is not { } sessionCookie)
+            return Unavailable<Guid?>();
+
+        var antiforgery = await GetApiAntiforgeryAsync(sessionCookie, cancellationToken);
+        if (antiforgery is null)
+            return Unavailable<Guid?>();
+
+        var (method, path) = action switch
+        {
+            PrivateTreeMembershipAction.Invite =>
+                (HttpMethod.Post, $"api/v1/families/{familyId:D}/invitations"),
+            PrivateTreeMembershipAction.AcceptInvitation =>
+                (HttpMethod.Post, $"api/v1/families/{familyId:D}/invitations/{targetId:D}/accept"),
+            PrivateTreeMembershipAction.ApproveMember =>
+                (HttpMethod.Post, $"api/v1/families/{familyId:D}/members/{targetId:D}/approve"),
+            PrivateTreeMembershipAction.RevokeMember =>
+                (HttpMethod.Delete, $"api/v1/families/{familyId:D}/members/{targetId:D}"),
+            _ => throw new ArgumentOutOfRangeException(nameof(action))
+        };
+
+        try
+        {
+            using var request = new HttpRequestMessage(method,
+                new Uri(_options.ApiBaseUri!, path));
+            request.Headers.TryAddWithoutValidation("Cookie",
+                sessionCookie + "; " + antiforgery.Value.Cookie);
+            request.Headers.TryAddWithoutValidation("Origin",
+                _options.ApiBaseUri!.GetLeftPart(UriPartial.Authority));
+            request.Headers.TryAddWithoutValidation("X-CSRF-TOKEN", antiforgery.Value.Token);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
+            if (action == PrivateTreeMembershipAction.Invite)
+                request.Content = new StringContent(
+                    JsonSerializer.Serialize(new { intendedPrincipalId = targetId }),
+                    System.Text.Encoding.UTF8, "application/json");
+
+            using var response = await _http.SendAsync(request,
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return NotFound<Guid?>();
+            if (action == PrivateTreeMembershipAction.Invite)
+            {
+                if (response.StatusCode != HttpStatusCode.OK)
+                    return Unavailable<Guid?>();
+                using var invitation = await ReadJsonAsync<JsonDocument>(
+                    response, 4096, cancellationToken);
+                return invitation is not null &&
+                    invitation.RootElement.ValueKind == JsonValueKind.Object &&
+                    invitation.RootElement.TryGetProperty("invitationId", out var invitationId) &&
+                    invitationId.ValueKind == JsonValueKind.String &&
+                    Guid.TryParse(invitationId.GetString(), out var parsedId) &&
+                    parsedId != Guid.Empty
+                    ? Success<Guid?>(parsedId)
+                    : Unavailable<Guid?>();
+            }
+
+            return response.StatusCode == HttpStatusCode.NoContent
+                ? Success<Guid?>(null)
+                : Unavailable<Guid?>();
+        }
+        catch (HttpRequestException)
+        {
+            return Unavailable<Guid?>();
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return Unavailable<Guid?>();
+        }
+    }
+
     private async Task<HttpResponseMessage> SendAsync(
         string path, string? sessionCookie, CancellationToken cancellationToken)
     {
@@ -233,6 +296,44 @@ public sealed class PrivateTreeApiClient(HttpClient http, PrivateTreeModeOptions
         try
         {
             return await SendAsync(path, GetSessionCookie(context), cancellationToken);
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    private async Task<(string Cookie, string Token)?> GetApiAntiforgeryAsync(
+        string sessionCookie, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get,
+                new Uri(_options.ApiBaseUri!, "api/v1/csrf"));
+            request.Headers.TryAddWithoutValidation("Cookie", sessionCookie);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
+            using var response = await _http.SendAsync(request,
+                HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (response.StatusCode != HttpStatusCode.OK)
+                return null;
+
+            var cookie = ReadResponseCookie(response, "__Host-FamilyTreeAntiforgery");
+            using var json = await ReadJsonAsync<JsonDocument>(response, 4096, cancellationToken);
+            if (cookie is null || json is null ||
+                json.RootElement.ValueKind != JsonValueKind.Object ||
+                !json.RootElement.TryGetProperty("requestToken", out var requestToken) ||
+                requestToken.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(requestToken.GetString()) ||
+                requestToken.GetString()!.Length > 4096 ||
+                requestToken.GetString()!.Any(character =>
+                    !char.IsAscii(character) || char.IsControl(character)))
+                return null;
+            return (cookie, requestToken.GetString()!);
         }
         catch (HttpRequestException)
         {

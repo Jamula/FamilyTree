@@ -20,9 +20,12 @@ internal static class PrivateTreeModeAssertions
         public List<string?> SessionCookies { get; } = [];
         public List<string?> RequestCookies { get; } = [];
         public List<Uri> RequestUris { get; } = [];
+        public List<string> MembershipCalls { get; } = [];
+        public List<string?> MembershipBodies { get; } = [];
         public string? ExpectedSessionCookie { get; set; }
         public bool Authenticated { get; set; }
         public HttpStatusCode RegistrationStatus { get; set; } = HttpStatusCode.OK;
+        public HttpStatusCode MembershipStatus { get; set; } = HttpStatusCode.OK;
         public HttpStatusCode SearchStatus { get; set; } = HttpStatusCode.OK;
         public HttpStatusCode TreeStatus { get; set; } = HttpStatusCode.OK;
         public bool ThrowOnTree { get; init; }
@@ -32,6 +35,9 @@ internal static class PrivateTreeModeAssertions
         public static Guid CenterId { get; } = Guid.NewGuid();
         public static Guid ParentId { get; } = Guid.NewGuid();
         public static Guid ChildId { get; } = Guid.NewGuid();
+        public static Guid SpouseId { get; } = Guid.NewGuid();
+        public static Guid SiblingId { get; } = Guid.NewGuid();
+        public static Guid SocialId { get; } = Guid.NewGuid();
         public static Guid HiddenId { get; } = Guid.NewGuid();
 
         protected override Task<HttpResponseMessage> SendAsync(
@@ -87,6 +93,32 @@ internal static class PrivateTreeModeAssertions
                     : Json(RegistrationStatus, ""));
             }
 
+            var membershipPrefix = $"/api/v1/families/{FamilyId:D}/";
+            if (uri.AbsolutePath == membershipPrefix + "invitations" ||
+                uri.AbsolutePath.EndsWith("/accept", StringComparison.Ordinal) ||
+                uri.AbsolutePath.EndsWith("/approve", StringComparison.Ordinal) ||
+                uri.AbsolutePath.StartsWith(membershipPrefix + "members/", StringComparison.Ordinal))
+            {
+                if (ExpectedSessionCookie is null ||
+                    requestCookie != ExpectedSessionCookie +
+                        "; __Host-FamilyTreeAntiforgery=synthetic-api-csrf-cookie" ||
+                    !request.Headers.TryGetValues("Origin", out var origins) ||
+                    origins.Single() != "https://localhost:5043" ||
+                    !request.Headers.TryGetValues("X-CSRF-TOKEN", out var tokens) ||
+                    tokens.Single() != "synthetic-api-csrf-token")
+                    throw new InvalidOperationException("Membership request did not use the protected same-origin antiforgery contract.");
+                var body = request.Content?.ReadAsStringAsync(cancellationToken)
+                    .GetAwaiter().GetResult();
+                MembershipCalls.Add(request.Method + " " + uri.AbsolutePath);
+                MembershipBodies.Add(body);
+                if (MembershipStatus != HttpStatusCode.OK)
+                    return Task.FromResult(Json(MembershipStatus, ""));
+                return Task.FromResult(uri.AbsolutePath == membershipPrefix + "invitations"
+                    ? Json(HttpStatusCode.OK,
+                        """{"invitationId":"19a21fa7-2302-40eb-8f5e-7472ef64d0d5"}""")
+                    : new HttpResponseMessage(HttpStatusCode.NoContent));
+            }
+
             var familyPrefix = $"/api/v1/families/{FamilyId:D}/branches/{BranchId:D}/";
             if (uri.AbsolutePath == familyPrefix + "search")
                 return Task.FromResult(SearchStatus == HttpStatusCode.OK
@@ -107,13 +139,18 @@ internal static class PrivateTreeModeAssertions
                         [
                             new AuthorizedTreeNode(CenterId, "Fictional Center", 0),
                             new AuthorizedTreeNode(ParentId, "Fictional Parent", -1),
-                            new AuthorizedTreeNode(ChildId, "Fictional Child", 1)
+                            new AuthorizedTreeNode(ChildId, "Fictional Child", 1),
+                            new AuthorizedTreeNode(SpouseId, "Fictional Spouse", 0),
+                            new AuthorizedTreeNode(SiblingId, "Fictional Sibling", 0),
+                            new AuthorizedTreeNode(SocialId, "Fictional Social Contact", 0)
                         ],
                         [
                             new AuthorizedTreeEdge(Guid.NewGuid(), ParentId, CenterId, RelationKind.Parent),
-                            new AuthorizedTreeEdge(Guid.NewGuid(), CenterId, ChildId, RelationKind.Parent)
+                            new AuthorizedTreeEdge(Guid.NewGuid(), CenterId, ChildId, RelationKind.Parent),
+                            new AuthorizedTreeEdge(Guid.NewGuid(), CenterId, SpouseId, RelationKind.Spouse),
+                            new AuthorizedTreeEdge(Guid.NewGuid(), CenterId, SocialId, RelationKind.Friend)
                         ],
-                        [])))
+                        [new InferredSiblingConnection(CenterId, SiblingId)])))
                     : Json(TreeStatus, ""));
             }
             throw new InvalidOperationException("Unexpected API route.");
@@ -371,6 +408,10 @@ internal static class PrivateTreeModeAssertions
                 var openedHtml = await opened.Content.ReadAsStringAsync();
                 Ensure(opened.StatusCode == HttpStatusCode.OK &&
                     openedHtml.Contains("Search visible people", StringComparison.Ordinal) &&
+                    openedHtml.Contains("Membership controls", StringComparison.Ordinal) &&
+                    openedHtml.Contains("Spouses and partners", StringComparison.Ordinal) &&
+                    openedHtml.Contains("Family and branch identifiers are entered manually; access is determined by the API.",
+                        StringComparison.Ordinal) &&
                     !openedHtml.Contains("Fictional Center", StringComparison.Ordinal),
                     "selected family and branch show controls but do not imply API-granted records");
 
@@ -390,6 +431,18 @@ internal static class PrivateTreeModeAssertions
                     !clientHandler.RequestUris.Skip(readsBeforeUnregisteredSearch)
                         .Any(uri => uri.AbsolutePath.EndsWith("/search", StringComparison.Ordinal)),
                     "unavailable verified-identity registration fails closed before private reads");
+
+                var writesBeforeUnregisteredMembership = clientHandler.MembershipCalls.Count;
+                var unregisteredInvite = MembershipForm(
+                    "invite", Guid.NewGuid());
+                using var unregisteredMembership = await PostAsync(client, unregisteredInvite,
+                    requestToken, antiCookie, verifiedSessionCookie);
+                var unregisteredMembershipHtml =
+                    await unregisteredMembership.Content.ReadAsStringAsync();
+                Ensure(unregisteredMembershipHtml.Contains("Membership request unavailable",
+                        StringComparison.Ordinal) &&
+                    clientHandler.MembershipCalls.Count == writesBeforeUnregisteredMembership,
+                    "membership action stops before writes when verified identity registration fails");
                 clientHandler.RegistrationStatus = HttpStatusCode.OK;
 
                 var search = new Dictionary<string, string>(scope)
@@ -429,18 +482,40 @@ internal static class PrivateTreeModeAssertions
                 var treeHtml = await treeResponse.Content.ReadAsStringAsync();
                 Ensure(treeHtml.Contains("Fictional Center", StringComparison.Ordinal) &&
                     treeHtml.Contains("Fictional Child", StringComparison.Ordinal) &&
+                    treeHtml.Contains("Fictional Spouse", StringComparison.Ordinal) &&
+                    treeHtml.Contains("Fictional Sibling", StringComparison.Ordinal) &&
+                    !treeHtml.Contains("Fictional Social Contact", StringComparison.Ordinal) &&
                     !treeHtml.Contains("Fictional Parent", StringComparison.Ordinal) &&
                     treeHtml.Contains("Generations above", StringComparison.Ordinal) &&
                     treeHtml.Contains("Generations below", StringComparison.Ordinal) &&
                     treeHtml.Contains("Authorized people in the selected generations", StringComparison.Ordinal) &&
                     !treeHtml.Contains(LocalApiHandler.HiddenId.ToString("D"), StringComparison.Ordinal),
                     "tree route renders only authorized nodes within selected depth with keyboard recenter forms");
+
+                var toggledTreePost = new Dictionary<string, string>(treePost)
+                {
+                    ["above"] = "4",
+                    ["spouses"] = "false",
+                    ["siblings"] = "false",
+                    ["social"] = "false"
+                };
+                using var toggledTree = await PostAsync(client, toggledTreePost,
+                    requestToken, antiCookie, verifiedSessionCookie);
+                var toggledTreeHtml = await toggledTree.Content.ReadAsStringAsync();
+                Ensure(toggledTreeHtml.Contains("Fictional Parent", StringComparison.Ordinal) &&
+                    toggledTreeHtml.Contains("Fictional Child", StringComparison.Ordinal) &&
+                    !toggledTreeHtml.Contains("Fictional Spouse", StringComparison.Ordinal) &&
+                    !toggledTreeHtml.Contains("Fictional Sibling", StringComparison.Ordinal) &&
+                    !toggledTreeHtml.Contains("Fictional Social Contact", StringComparison.Ordinal),
+                    "relationship toggles limit rendered nodes and edges to the authorized API projection");
                 Ensure(clientHandler.RequestUris.Any(uri =>
                     uri.AbsolutePath.EndsWith("/tree/" + LocalApiHandler.CenterId.ToString("D"),
                         StringComparison.Ordinal)),
                     "center-tree request uses the API family/branch route contract");
 
                 await VerifyIndistinguishableDenialsAsync(
+                    client, clientHandler, requestToken, antiCookie, verifiedSessionCookie);
+                await VerifyMembershipControlsAsync(
                     client, clientHandler, requestToken, antiCookie, verifiedSessionCookie);
                 await VerifyTreeExceptionIsPrivateAsync(verifiedSessionCookie);
 
@@ -474,6 +549,104 @@ internal static class PrivateTreeModeAssertions
                 await app.DisposeAsync();
             }
         }
+
+        private static async Task VerifyMembershipControlsAsync(
+            HttpClient client,
+            LocalApiHandler handler,
+            string requestToken,
+            string antiCookie,
+            string sessionCookie)
+        {
+            var principalId = Guid.NewGuid();
+            var invitationId = Guid.NewGuid();
+            var memberId = Guid.NewGuid();
+            var operations = new[]
+            {
+                (Action: "invite", Target: principalId,
+                    Request: $"POST /api/v1/families/{LocalApiHandler.FamilyId:D}/invitations"),
+                (Action: "accept", Target: invitationId,
+                    Request: $"POST /api/v1/families/{LocalApiHandler.FamilyId:D}/invitations/{invitationId:D}/accept"),
+                (Action: "approve", Target: memberId,
+                    Request: $"POST /api/v1/families/{LocalApiHandler.FamilyId:D}/members/{memberId:D}/approve"),
+                (Action: "revoke", Target: memberId,
+                    Request: $"DELETE /api/v1/families/{LocalApiHandler.FamilyId:D}/members/{memberId:D}")
+            };
+            var start = handler.MembershipCalls.Count;
+            var missingConfirmation = MembershipForm("revoke", memberId);
+            missingConfirmation.Remove("confirmRevoke");
+            using (var unconfirmedRevoke = await PostAsync(client,
+                missingConfirmation, requestToken, antiCookie, sessionCookie))
+                Ensure(unconfirmedRevoke.StatusCode == HttpStatusCode.BadRequest &&
+                    handler.MembershipCalls.Count == start,
+                    "revocation requires an explicit confirmation before API mutation");
+
+            foreach (var operation in operations)
+            {
+                using var response = await PostAsync(client,
+                    MembershipForm(operation.Action, operation.Target),
+                    requestToken, antiCookie, sessionCookie);
+                var html = await response.Content.ReadAsStringAsync();
+                Ensure(response.StatusCode == HttpStatusCode.OK &&
+                    html.Contains("Membership action accepted.", StringComparison.Ordinal),
+                    "supported membership action reports success only after API confirmation");
+                if (operation.Action == "invite")
+                    Ensure(html.Contains("19a21fa7-2302-40eb-8f5e-7472ef64d0d5",
+                            StringComparison.Ordinal),
+                        "issued invitation identifier is returned only after API authorization");
+            }
+
+            Ensure(handler.MembershipCalls.Skip(start).SequenceEqual(
+                    operations.Select(operation => operation.Request)) &&
+                handler.MembershipBodies.Skip(start).First() is { } inviteBody &&
+                JsonDocument.Parse(inviteBody).RootElement.GetProperty("intendedPrincipalId")
+                    .GetGuid() == principalId &&
+                handler.MembershipBodies.Skip(start).Skip(1).All(body => body is null),
+                "membership calls match the documented invitation, acceptance, approval, and revocation routes");
+
+            handler.MembershipStatus = HttpStatusCode.NotFound;
+            var denied = await MembershipPageAsync(client, "approve", memberId,
+                requestToken, antiCookie, sessionCookie);
+            var unknown = await MembershipPageAsync(client, "approve", Guid.NewGuid(),
+                requestToken, antiCookie, sessionCookie);
+            Ensure(NormalizeToken(denied) == NormalizeToken(unknown) &&
+                denied.Contains("Membership request unavailable.", StringComparison.Ordinal) &&
+                !denied.Contains(memberId.ToString("D"), StringComparison.Ordinal),
+                "forbidden and unknown membership operations have identical non-enumerating responses");
+            handler.MembershipStatus = HttpStatusCode.OK;
+        }
+
+        private static Dictionary<string, string> MembershipForm(string action, Guid targetId)
+        {
+            var form = new Dictionary<string, string>
+            {
+                ["action"] = "membership",
+                ["familyId"] = LocalApiHandler.FamilyId.ToString("D"),
+                ["branchId"] = LocalApiHandler.BranchId.ToString("D"),
+                ["above"] = "4",
+                ["below"] = "4",
+                ["membershipAction"] = action,
+                ["targetId"] = targetId.ToString("D")
+            };
+            if (action == "revoke")
+                form["confirmRevoke"] = "true";
+            return form;
+        }
+
+        private static async Task<string> MembershipPageAsync(
+            HttpClient client,
+            string action,
+            Guid targetId,
+            string requestToken,
+            string antiCookie,
+            string sessionCookie)
+        {
+            using var response = await PostAsync(client, MembershipForm(action, targetId),
+                requestToken, antiCookie, sessionCookie);
+            return await response.Content.ReadAsStringAsync();
+        }
+
+        private static string NormalizeToken(string html) => Regex.Replace(html,
+            "(?<=name='__RequestVerificationToken' value=')[^']+", "TOKEN");
 
         private static async Task VerifyIndistinguishableDenialsAsync(
             HttpClient client,
