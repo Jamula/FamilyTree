@@ -31,15 +31,27 @@ internal static class AiProposalAssertions
         Check(hostileProposal is not null && !hostileProposal.Approved &&
               hostileProposal.SuggestedText == hostileSuggestion,
               "hostile model text remains an unapproved draft");
-        Check(await AiProposalGate.TryStageAsync(
-            safe with { SuggestedText = hostileSuggestion, CitedPersonIds = new[] { secret } },
-            policy, aiEnabled: true) is null,
+        var extraCitation = safe with
+        {
+            SuggestedText = hostileSuggestion,
+            CitedPersonIds = new[] { b, secret }
+        };
+        var policyWithExtraCitation = new FakeAuth(new HashSet<Guid> { a, b, secret },
+            new HashSet<Guid> { friend.Id });
+        var authorizedProposal = await AiProposalGate.TryStageAsync(
+            extraCitation, policyWithExtraCitation, aiEnabled: true);
+        Check(authorizedProposal is not null && !authorizedProposal.Approved &&
+              authorizedProposal.SuggestedText == hostileSuggestion &&
+              authorizedProposal.CitedPersonIds.Contains(b) &&
+              authorizedProposal.CitedPersonIds.Contains(secret),
+              "authorized extra citation yields an unapproved draft");
+        Check(await AiProposalGate.TryStageAsync(extraCitation, policy, aiEnabled: true) is null,
             "hostile text cannot bypass cited-person authorization");
         Check(await AiProposalGate.TryStageAsync(
             safe with { SubjectPersonId = secret }, policy, aiEnabled: true) is null,
             "hidden subject denied");
         Check(await AiProposalGate.TryStageAsync(
-            safe with { CitedPersonIds = new[] { secret } }, policy, aiEnabled: true) is null,
+            safe with { CitedPersonIds = new[] { b, secret } }, policy, aiEnabled: true) is null,
             "hidden cited person denied");
         Check(await AiProposalGate.TryStageAsync(
             safe with { CitedRelationships = new[] { leak } }, policy, aiEnabled: true) is null,
