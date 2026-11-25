@@ -102,7 +102,9 @@ internal static class ApiLoopbackIntegrationAssertions
         var privatePaths = new[]
         {
             "/api/v1/people/hidden-person", "/api/v1/people/unknown-person",
-            "/api/v1/tree/hidden", "/api/v1/families/fake",
+            "/api/v1/tree/hidden", "/api/v1/families",
+            "/api/v1/families/fake", "/api/v1/families/00000000-0000-0000-0000-000000000001/branches",
+            "/api/v1/families/00000000-0000-0000-0000-000000000001/members",
             "/api/v1/memberships/active", "/api/v1/me", "/api/v1/admin",
             "/api/v1/invitations", "/api/v1/profile-claims",
             "/api/v1/search?name=Fictional", "/api/v1/relationships/hidden",

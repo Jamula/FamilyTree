@@ -36,6 +36,8 @@ await AuthorizedTreeExplorerHttpAssertions.RunAsync();
 
 // Keep HTTP integration off module initializers to avoid CLR startup locks.
 await ApiLoopbackIntegrationAssertions.RunAsync();
+PrivateApiLoopbackAssertions.AssertWindowsConfiguration();
+await PrivateApiLoopbackAssertions.RunAsync();
 
 await VerifiedCookieHandlerAssertions.RunAsync();
 

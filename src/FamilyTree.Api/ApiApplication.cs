@@ -1,6 +1,8 @@
 using FamilyTree.Domain;
+using FamilyTree.Persistence;
 using FamilyTree.ServiceDefaults;
 using System.Diagnostics;
+using System.Security.Cryptography.X509Certificates;
 
 namespace FamilyTree.Api;
 
@@ -15,7 +17,17 @@ public static class ApiApplication
         ArgumentNullException.ThrowIfNull(builder);
         builder.Services.AddFamilyTreeObservability(builder.Configuration);
         var identityProviders = InteractiveOidc.Configure(builder);
+        var privateApiEnabled = PrivateApiComposition.Configure(builder, identityProviders);
         var app = builder.Build();
+        if (privateApiEnabled)
+        {
+            // Resolve registered disposable instances so the host owns their
+            // lifetime even when no private request reaches the endpoint layer.
+            _ = app.Services.GetRequiredService<SqliteFamilyStore>();
+            _ = app.Services.GetRequiredService<SqlitePrincipalRegistry>();
+            _ = app.Services.GetRequiredService<SqliteTreeReadSource>();
+            _ = app.Services.GetRequiredService<X509Certificate2>();
+        }
         
         // Local, privacy-filtered diagnostics only. No exporter is configured.
         app.Use(async (context, next) =>
@@ -38,11 +50,12 @@ public static class ApiApplication
         });
         
         
-        // This global route gate must remain active until authenticated server policies are reviewed.
-        app.UsePrivateApiBoundary();
+        // Only explicitly marked routes may pass in opt-in loopback development.
+        app.UsePrivateApiBoundary(privateApiEnabled);
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapInteractiveOidc(identityProviders);
+        app.MapPrivateApiEndpoints(identityProviders);
         
         app.MapGet("/health", () => Results.Ok(new { status = "ok", service = "FamilyTree.Api" }))
            .WithName("Health");
