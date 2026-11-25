@@ -8,7 +8,12 @@ namespace FamilyTree.Web;
 public sealed record PrivateTreeApiStatus(
     bool Available,
     IReadOnlyList<string> SignInProviders,
-    bool Authenticated);
+    bool Authenticated,
+    IReadOnlySet<PrivateTreeMembershipAction>? MembershipActions = null)
+{
+    public bool SupportsMembership(PrivateTreeMembershipAction action) =>
+        MembershipActions?.Contains(action) == true;
+}
 
 public enum PrivateTreeApiResultKind
 {
@@ -35,6 +40,7 @@ public sealed class PrivateTreeApiClient(HttpClient http, PrivateTreeModeOptions
     private const int MaxTreeEdges = 20_000;
     private const int MaxResponseBytes = 4 * 1024 * 1024;
     private const int MaxDisplayNameLength = 1024;
+    private static readonly TimeSpan JsonBodyReadTimeout = TimeSpan.FromSeconds(5);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         MaxDepth = 8
@@ -92,7 +98,10 @@ public sealed class PrivateTreeApiClient(HttpClient http, PrivateTreeModeOptions
                 authenticated.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                 return Unavailable();
             var isAuthenticated = authenticated.GetBoolean();
-            return new(true, providers, isAuthenticated);
+            var membershipActions = isAuthenticated
+                ? await GetMembershipActionsAsync(cancellationToken)
+                : null;
+            return new(true, providers, isAuthenticated, membershipActions);
         }
         catch (HttpRequestException)
         {
@@ -210,6 +219,9 @@ public sealed class PrivateTreeApiClient(HttpClient http, PrivateTreeModeOptions
             !Enum.IsDefined(action) || GetSessionCookie(context) is not { } sessionCookie)
             return Unavailable<Guid?>();
 
+        if (!(await GetMembershipActionsAsync(cancellationToken)).Contains(action))
+            return Unavailable<Guid?>();
+
         var antiforgery = await GetApiAntiforgeryAsync(sessionCookie, cancellationToken);
         if (antiforgery is null)
             return Unavailable<Guid?>();
@@ -274,6 +286,53 @@ public sealed class PrivateTreeApiClient(HttpClient http, PrivateTreeModeOptions
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             return Unavailable<Guid?>();
+        }
+    }
+
+    private async Task<IReadOnlySet<PrivateTreeMembershipAction>> GetMembershipActionsAsync(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await SendAsync(
+                "api/v1/capabilities", null, cancellationToken);
+            if (response.StatusCode != HttpStatusCode.OK)
+                return new HashSet<PrivateTreeMembershipAction>();
+
+            using var capabilities = await ReadJsonAsync<JsonDocument>(
+                response, 4096, cancellationToken);
+            if (capabilities is null ||
+                capabilities.RootElement.ValueKind != JsonValueKind.Object ||
+                !capabilities.RootElement.TryGetProperty(
+                    "membershipActions", out var actions) ||
+                actions.ValueKind != JsonValueKind.Array)
+                return new HashSet<PrivateTreeMembershipAction>();
+
+            var supported = new HashSet<PrivateTreeMembershipAction>();
+            foreach (var action in actions.EnumerateArray())
+            {
+                if (action.ValueKind != JsonValueKind.String)
+                    continue;
+                var parsed = action.GetString() switch
+                {
+                    "invite" => PrivateTreeMembershipAction.Invite,
+                    "accept" => PrivateTreeMembershipAction.AcceptInvitation,
+                    "approve" => PrivateTreeMembershipAction.ApproveMember,
+                    "revoke" => PrivateTreeMembershipAction.RevokeMember,
+                    _ => (PrivateTreeMembershipAction?)null
+                };
+                if (parsed is { } supportedAction)
+                    supported.Add(supportedAction);
+            }
+            return supported;
+        }
+        catch (HttpRequestException)
+        {
+            return new HashSet<PrivateTreeMembershipAction>();
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new HashSet<PrivateTreeMembershipAction>();
         }
     }
 
@@ -353,19 +412,27 @@ public sealed class PrivateTreeApiClient(HttpClient http, PrivateTreeModeOptions
             return default;
         try
         {
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var bodyDeadline = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+            bodyDeadline.CancelAfter(JsonBodyReadTimeout);
+            await using var stream = await response.Content.ReadAsStreamAsync(
+                bodyDeadline.Token);
             using var body = new MemoryStream();
             var buffer = new byte[4096];
             while (true)
             {
-                var count = await stream.ReadAsync(buffer, cancellationToken);
+                var count = await stream.ReadAsync(buffer, bodyDeadline.Token);
                 if (count == 0)
                     break;
                 if (body.Length + count > maxBytes)
                     return default;
-                await body.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+                await body.WriteAsync(buffer.AsMemory(0, count), bodyDeadline.Token);
             }
             return JsonSerializer.Deserialize<T>(body.ToArray(), JsonOptions);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return default;
         }
         catch (JsonException)
         {

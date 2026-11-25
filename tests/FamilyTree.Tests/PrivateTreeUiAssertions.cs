@@ -10,6 +10,7 @@ internal static class PrivateTreeUiAssertions
     public static void Run()
     {
         VerifyDepthAndKeyboardControls();
+        VerifyRelationshipToggles();
         VerifyMembershipControls();
         VerifyUnavailableContentIsGeneric();
     }
@@ -43,9 +44,39 @@ internal static class PrivateTreeUiAssertions
             "depth eight exposes keyboard-operable recenter buttons and labelled depth controls");
     }
 
+    private static void VerifyRelationshipToggles()
+    {
+        var tree = CreateRelationshipToggleTree();
+        var withoutSiblings = Render(tree, 1, 1, spouses: false, siblings: false);
+        Ensure(!withoutSiblings.Contains("Synthetic sibling", StringComparison.Ordinal),
+            "hiding siblings excludes a sibling reachable through their shared parent");
+
+        var withSiblings = Render(tree, 1, 1, spouses: false, siblings: true);
+        Ensure(withSiblings.Contains("Synthetic sibling", StringComparison.Ordinal),
+            "showing siblings includes the authorized shared-parent sibling");
+
+        var withoutSpouses = Render(tree, 1, 1, spouses: false, siblings: true);
+        Ensure(!withoutSpouses.Contains("Synthetic partner", StringComparison.Ordinal),
+            "hiding spouses excludes a partner reachable through their shared child");
+
+        var withSpouses = Render(tree, 1, 1, spouses: true, siblings: false);
+        Ensure(withSpouses.Contains("Synthetic partner", StringComparison.Ordinal),
+            "showing spouses includes the authorized partner without enabling sibling branches");
+    }
+
     private static void VerifyMembershipControls()
     {
-        var html = Render(CreateDeepTree(), 1, 1);
+        var html = PrivateTreeRoutes.RenderWorkspace(
+            new PrivateTreeApiStatus(true, Array.Empty<string>(), true,
+                new HashSet<PrivateTreeMembershipAction>
+                {
+                    PrivateTreeMembershipAction.Invite,
+                    PrivateTreeMembershipAction.AcceptInvitation,
+                    PrivateTreeMembershipAction.ApproveMember,
+                    PrivateTreeMembershipAction.RevokeMember
+                }),
+            "synthetic-csrf-token", FamilyId, BranchId, null, null, 1, 1,
+            tree: CreateDeepTree());
         Ensure(html.Contains("<section aria-labelledby='membership-controls'>",
                 StringComparison.Ordinal) &&
             html.Contains("<label for='membership-invite'>Principal ID</label>",
@@ -59,6 +90,26 @@ internal static class PrivateTreeUiAssertions
             html.Contains("name='confirmRevoke' type='checkbox' value='true' required",
                 StringComparison.Ordinal),
             "membership forms are labelled, keyboard-submittable, and require explicit revoke confirmation");
+
+        var unsupported = PrivateTreeRoutes.RenderWorkspace(
+            new PrivateTreeApiStatus(true, Array.Empty<string>(), true),
+            "synthetic-csrf-token", FamilyId, BranchId, null, null, 1, 1,
+            tree: CreateDeepTree());
+        Ensure(!unsupported.Contains("Membership controls", StringComparison.Ordinal),
+            "membership forms are absent without API-advertised capabilities");
+
+        var inviteOnly = PrivateTreeRoutes.RenderWorkspace(
+            new PrivateTreeApiStatus(true, Array.Empty<string>(), true,
+                new HashSet<PrivateTreeMembershipAction>
+                {
+                    PrivateTreeMembershipAction.Invite
+                }),
+            "synthetic-csrf-token", FamilyId, BranchId, null, null, 1, 1);
+        Ensure(inviteOnly.Contains("Principal ID", StringComparison.Ordinal) &&
+            !inviteOnly.Contains("Invitation ID", StringComparison.Ordinal) &&
+            !inviteOnly.Contains("Approve member", StringComparison.Ordinal) &&
+            !inviteOnly.Contains("Revoke member", StringComparison.Ordinal),
+            "only operations explicitly listed by the API receive controls");
     }
 
     private static void VerifyUnavailableContentIsGeneric()
@@ -76,11 +127,37 @@ internal static class PrivateTreeUiAssertions
             "unavailable UI does not render private search terms or person identifiers");
     }
 
-    private static string Render(AuthorizedTreeProjection tree, int above, int below) =>
+    private static string Render(AuthorizedTreeProjection tree, int above, int below,
+        bool spouses = true, bool siblings = true) =>
         PrivateTreeRoutes.RenderWorkspace(
             new PrivateTreeApiStatus(true, Array.Empty<string>(), true),
             "synthetic-csrf-token", FamilyId, BranchId, null, null, above, below,
-            tree: tree);
+            tree: tree, spouses: spouses, siblings: siblings);
+
+    private static AuthorizedTreeProjection CreateRelationshipToggleTree()
+    {
+        var center = Guid.Parse("00000000-0000-0000-0000-000000000101");
+        var parent = Guid.Parse("00000000-0000-0000-0000-000000000102");
+        var sibling = Guid.Parse("00000000-0000-0000-0000-000000000103");
+        var child = Guid.Parse("00000000-0000-0000-0000-000000000104");
+        var partner = Guid.Parse("00000000-0000-0000-0000-000000000105");
+        return new AuthorizedTreeProjection(center,
+            [
+                new(center, "Synthetic center", 0),
+                new(parent, "Synthetic parent", -1),
+                new(sibling, "Synthetic sibling", 0),
+                new(child, "Synthetic child", 1),
+                new(partner, "Synthetic partner", 0)
+            ],
+            [
+                new(Guid.NewGuid(), parent, center, RelationKind.Parent),
+                new(Guid.NewGuid(), parent, sibling, RelationKind.Parent),
+                new(Guid.NewGuid(), center, child, RelationKind.Parent),
+                new(Guid.NewGuid(), partner, child, RelationKind.Parent),
+                new(Guid.NewGuid(), center, partner, RelationKind.Spouse)
+            ],
+            []);
+    }
 
     private static AuthorizedTreeProjection CreateDeepTree()
     {

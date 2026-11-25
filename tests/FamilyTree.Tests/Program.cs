@@ -39,6 +39,7 @@ await ApiLoopbackIntegrationAssertions.RunAsync();
 
 var verifiedSessionCookie = await VerifiedCookieHandlerAssertions.RunAsync();
 await PrivateTreeModeAssertions.RunAsync(verifiedSessionCookie);
+await PrivateTreeApiClientAssertions.RunAsync();
 
 await SqliteRelationshipConcurrencyAssertions.RunAsync();
 await SqliteSchemaMigrationConcurrencyAssertions.RunAsync();

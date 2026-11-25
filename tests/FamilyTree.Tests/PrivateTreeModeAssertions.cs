@@ -28,6 +28,8 @@ internal static class PrivateTreeModeAssertions
         public HttpStatusCode MembershipStatus { get; set; } = HttpStatusCode.OK;
         public HttpStatusCode SearchStatus { get; set; } = HttpStatusCode.OK;
         public HttpStatusCode TreeStatus { get; set; } = HttpStatusCode.OK;
+        public string CapabilitiesResponse { get; set; } =
+            """{"membershipActions":["invite","accept","approve","revoke"]}""";
         public bool ThrowOnTree { get; init; }
 
         public static Guid FamilyId { get; } = Guid.NewGuid();
@@ -65,6 +67,8 @@ internal static class PrivateTreeModeAssertions
                         """{"authenticated":true,"familyAccess":false}""")
                     : Json(HttpStatusCode.Unauthorized, ""));
             }
+            if (uri.AbsolutePath == "/api/v1/capabilities")
+                return Task.FromResult(Json(HttpStatusCode.OK, CapabilitiesResponse));
             if (uri.AbsolutePath == "/api/v1/csrf")
             {
                 if (requestCookie != ExpectedSessionCookie)
@@ -617,6 +621,33 @@ internal static class PrivateTreeModeAssertions
                 !denied.Contains(memberId.ToString("D"), StringComparison.Ordinal),
                 "forbidden and unknown membership operations have identical non-enumerating responses");
             handler.MembershipStatus = HttpStatusCode.OK;
+
+            handler.CapabilitiesResponse =
+                """{"authorization":"not yet configured","publicFamilyRecords":false}""";
+            var open = new Dictionary<string, string>
+            {
+                ["action"] = "open",
+                ["familyId"] = LocalApiHandler.FamilyId.ToString("D"),
+                ["branchId"] = LocalApiHandler.BranchId.ToString("D"),
+                ["above"] = "4",
+                ["below"] = "4"
+            };
+            using (var noCapabilities = await PostAsync(client, open,
+                       requestToken, antiCookie, sessionCookie))
+            {
+                var html = await noCapabilities.Content.ReadAsStringAsync();
+                Ensure(!html.Contains("Membership controls", StringComparison.Ordinal),
+                    "membership UI is hidden when the trusted API advertises no supported actions");
+            }
+            var callsBeforeUnsupportedAction = handler.MembershipCalls.Count;
+            var unsupported = await MembershipPageAsync(client, "approve", memberId,
+                requestToken, antiCookie, sessionCookie);
+            Ensure(unsupported.Contains("Membership request unavailable.",
+                    StringComparison.Ordinal) &&
+                handler.MembershipCalls.Count == callsBeforeUnsupportedAction,
+                "unsupported membership POSTs fail closed before contacting mutation routes");
+            handler.CapabilitiesResponse =
+                """{"membershipActions":["invite","accept","approve","revoke"]}""";
         }
 
         private static Dictionary<string, string> MembershipForm(string action, Guid targetId)

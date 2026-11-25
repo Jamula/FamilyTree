@@ -168,6 +168,12 @@ public static class PrivateTreeRoutes
                     membershipAction != PrivateTreeMembershipAction.RevokeMember &&
                     form.ContainsKey("confirmRevoke"))
                     return Results.BadRequest();
+                if (!status.SupportsMembership(membershipAction))
+                    return Results.Content(RenderWorkspace(status, antiforgeryToken,
+                        familyId, branchId, null, null, above.Value, below.Value,
+                        membershipMessage: "Membership request unavailable.",
+                        spouses: spouses.Value, siblings: siblings.Value,
+                        social: social.Value), "text/html; charset=utf-8");
                 var membership = await api.EnsureRegisteredAsync(context, context.RequestAborted)
                     ? await api.ManageMembershipAsync(context, familyId,
                         membershipAction, targetId, context.RequestAborted)
@@ -310,7 +316,7 @@ public static class PrivateTreeRoutes
                 spouses, siblings, social);
 
         AppendMembershipControls(html, token, familyId, branchId, above, below,
-            spouses, siblings, social);
+            spouses, siblings, social, status.MembershipActions);
         html.Append("<p><a href='/'>Return to FamilyTree</a></p>");
         return EndPage(html);
     }
@@ -363,41 +369,107 @@ public static class PrivateTreeRoutes
         var depthNodes = tree.Nodes.Where(node =>
             node.Generation >= -above && node.Generation <= below).ToArray();
         var depthVisible = depthNodes.Select(node => node.PersonId).ToHashSet();
-        var edges = tree.Edges.Where(edge =>
+        var parentEdges = tree.Edges.Where(edge =>
+            edge.Kind == RelationKind.Parent &&
             depthVisible.Contains(edge.FromPersonId) &&
-            depthVisible.Contains(edge.ToPersonId) &&
+            depthVisible.Contains(edge.ToPersonId)).ToArray();
+        var parentsOf = new Dictionary<Guid, List<Guid>>();
+        var childrenOf = new Dictionary<Guid, List<Guid>>();
+        static void AddNeighbor(Dictionary<Guid, List<Guid>> adjacency,
+            Guid from, Guid to)
+        {
+            if (!adjacency.TryGetValue(from, out var neighbors))
+                adjacency[from] = neighbors = [];
+            neighbors.Add(to);
+        }
+        foreach (var edge in parentEdges)
+        {
+            AddNeighbor(parentsOf, edge.ToPersonId, edge.FromPersonId);
+            AddNeighbor(childrenOf, edge.FromPersonId, edge.ToPersonId);
+        }
+
+        var included = new Dictionary<Guid, int> { [tree.CenterPersonId] = 0 };
+        void Traverse(Dictionary<Guid, List<Guid>> adjacency, int limit, bool aboveCenter)
+        {
+            var frontier = new HashSet<Guid> { tree.CenterPersonId };
+            var visited = new HashSet<Guid> { tree.CenterPersonId };
+            for (var generation = 1; generation <= limit && frontier.Count > 0; generation++)
+            {
+                var next = new HashSet<Guid>();
+                foreach (var personId in frontier)
+                {
+                    if (!adjacency.TryGetValue(personId, out var relatives))
+                        continue;
+                    foreach (var relative in relatives.Where(visited.Add))
+                    {
+                        included.TryAdd(relative, aboveCenter ? -generation : generation);
+                        next.Add(relative);
+                    }
+                }
+                frontier = next;
+            }
+        }
+        Traverse(parentsOf, above, aboveCenter: true);
+        Traverse(childrenOf, below, aboveCenter: false);
+
+        if (siblings)
+        {
+            var explicitSiblingEdges = tree.Edges.Where(edge =>
+                edge.Kind == RelationKind.Sibling &&
+                depthVisible.Contains(edge.FromPersonId) &&
+                depthVisible.Contains(edge.ToPersonId)).ToArray();
+            var siblingAdjacency = new Dictionary<Guid, List<Guid>>();
+            foreach (var edge in explicitSiblingEdges)
+            {
+                AddNeighbor(siblingAdjacency, edge.FromPersonId, edge.ToPersonId);
+                AddNeighbor(siblingAdjacency, edge.ToPersonId, edge.FromPersonId);
+            }
+            foreach (var connection in tree.SiblingConnections.Where(connection =>
+                         depthVisible.Contains(connection.FirstPersonId) &&
+                         depthVisible.Contains(connection.SecondPersonId)))
+            {
+                AddNeighbor(siblingAdjacency, connection.FirstPersonId,
+                    connection.SecondPersonId);
+                AddNeighbor(siblingAdjacency, connection.SecondPersonId,
+                    connection.FirstPersonId);
+            }
+            foreach (var personId in included.Keys.ToArray())
+            {
+                if (siblingAdjacency.TryGetValue(personId, out var siblingsOfPerson))
+                    foreach (var sibling in siblingsOfPerson)
+                        included.TryAdd(sibling, included[personId]);
+
+                if (!parentsOf.TryGetValue(personId, out var parents))
+                    continue;
+                foreach (var parentId in parents)
+                    if (childrenOf.TryGetValue(parentId, out var children))
+                        foreach (var sibling in children.Where(id => id != personId))
+                            included.TryAdd(sibling, included[personId]);
+            }
+        }
+
+        if (spouses)
+            AddOptionalRelatives(tree.Edges, included, depthVisible,
+                edge => edge.Kind is RelationKind.Spouse or RelationKind.Partner);
+        if (social)
+            AddOptionalRelatives(tree.Edges, included, depthVisible,
+                edge => edge.Kind is RelationKind.Friend or RelationKind.Neighbor or
+                    RelationKind.Mentor or RelationKind.Other);
+
+        var visible = included.Keys.ToHashSet();
+        var edges = tree.Edges.Where(edge =>
+            visible.Contains(edge.FromPersonId) &&
+            visible.Contains(edge.ToPersonId) &&
             IsDisplayed(edge.Kind, spouses, siblings, social)).ToArray();
         var siblingConnections = siblings
             ? tree.SiblingConnections.Where(connection =>
-                depthVisible.Contains(connection.FirstPersonId) &&
-                depthVisible.Contains(connection.SecondPersonId)).ToArray()
+                visible.Contains(connection.FirstPersonId) &&
+                visible.Contains(connection.SecondPersonId)).ToArray()
             : [];
-        var adjacency = new Dictionary<Guid, List<Guid>>();
-        void Connect(Guid first, Guid second)
-        {
-            if (!adjacency.TryGetValue(first, out var firstNeighbors))
-                adjacency[first] = firstNeighbors = [];
-            if (!adjacency.TryGetValue(second, out var secondNeighbors))
-                adjacency[second] = secondNeighbors = [];
-            firstNeighbors.Add(second);
-            secondNeighbors.Add(first);
-        }
-        foreach (var edge in edges)
-            Connect(edge.FromPersonId, edge.ToPersonId);
-        foreach (var connection in siblingConnections)
-            Connect(connection.FirstPersonId, connection.SecondPersonId);
-        var included = new HashSet<Guid> { tree.CenterPersonId };
-        var pending = new Queue<Guid>();
-        pending.Enqueue(tree.CenterPersonId);
-        while (pending.TryDequeue(out var current))
-            if (adjacency.TryGetValue(current, out var neighbors))
-                foreach (var neighbor in neighbors.Where(included.Add))
-                    pending.Enqueue(neighbor);
-        var nodes = depthNodes.Where(node => included.Contains(node.PersonId)).ToArray();
-        var visible = nodes.Select(node => node.PersonId).ToHashSet();
+        var nodes = depthNodes.Where(node => visible.Contains(node.PersonId)).ToArray();
         var graph = new PersonTreeProjection(tree.CenterPersonId,
             nodes.Select(node => new PersonTreeNode(
-                new Person(node.PersonId, node.DisplayName), node.Generation)).ToArray(),
+                new Person(node.PersonId, node.DisplayName), included[node.PersonId])).ToArray(),
             edges.Where(edge => visible.Contains(edge.FromPersonId) &&
                 visible.Contains(edge.ToPersonId))
                 .Select(edge => new Relationship(edge.RelationshipId, edge.FromPersonId,
@@ -528,19 +600,50 @@ public static class PrivateTreeRoutes
         int below,
         bool spouses,
         bool siblings,
-        bool social)
+        bool social,
+        IReadOnlySet<PrivateTreeMembershipAction>? supportedActions)
     {
+        if (supportedActions is null || supportedActions.Count == 0)
+            return;
         html.Append("<section aria-labelledby='membership-controls'><h2 id='membership-controls'>Membership controls</h2>")
-            .Append("<p>These actions are checked by the API. No member list is available here; enter an identifier from an authorized workflow.</p>");
-        AppendMembershipForm(html, token, "invite", "Invite principal",
-            "Principal ID", familyId, branchId, above, below, spouses, siblings, social);
-        AppendMembershipForm(html, token, "accept", "Accept invitation",
-            "Invitation ID", familyId, branchId, above, below, spouses, siblings, social);
-        AppendMembershipForm(html, token, "approve", "Approve member",
-            "Member ID", familyId, branchId, above, below, spouses, siblings, social);
-        AppendMembershipForm(html, token, "revoke", "Revoke member",
-            "Member ID", familyId, branchId, above, below, spouses, siblings, social);
+            .Append("<p>These API-advertised actions are still authorized by the API. No member list is available here; enter an identifier from an authorized workflow.</p>");
+        if (supportedActions.Contains(PrivateTreeMembershipAction.Invite))
+            AppendMembershipForm(html, token, "invite", "Invite principal",
+                "Principal ID", familyId, branchId, above, below, spouses, siblings, social);
+        if (supportedActions.Contains(PrivateTreeMembershipAction.AcceptInvitation))
+            AppendMembershipForm(html, token, "accept", "Accept invitation",
+                "Invitation ID", familyId, branchId, above, below, spouses, siblings, social);
+        if (supportedActions.Contains(PrivateTreeMembershipAction.ApproveMember))
+            AppendMembershipForm(html, token, "approve", "Approve member",
+                "Member ID", familyId, branchId, above, below, spouses, siblings, social);
+        if (supportedActions.Contains(PrivateTreeMembershipAction.RevokeMember))
+            AppendMembershipForm(html, token, "revoke", "Revoke member",
+                "Member ID", familyId, branchId, above, below, spouses, siblings, social);
         html.Append("</section>");
+    }
+
+    private static void AddOptionalRelatives(
+        IReadOnlyList<AuthorizedTreeEdge> relationships,
+        IDictionary<Guid, int> included,
+        IReadOnlySet<Guid> depthVisible,
+        Func<AuthorizedTreeEdge, bool> matches)
+    {
+        var alreadyIncluded = included.Keys.ToHashSet();
+        foreach (var edge in relationships.Where(edge =>
+                     matches(edge) && depthVisible.Contains(edge.FromPersonId) &&
+                     depthVisible.Contains(edge.ToPersonId)))
+        {
+            if (alreadyIncluded.Contains(edge.FromPersonId))
+            {
+                var fromGeneration = included[edge.FromPersonId];
+                included.TryAdd(edge.ToPersonId, fromGeneration);
+            }
+            if (alreadyIncluded.Contains(edge.ToPersonId))
+            {
+                var toGeneration = included[edge.ToPersonId];
+                included.TryAdd(edge.FromPersonId, toGeneration);
+            }
+        }
     }
 
     private static void AppendMembershipForm(
