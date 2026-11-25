@@ -190,6 +190,7 @@ public sealed partial class SqliteFamilyStore
         }
         catch (Exception ex) when (ex is FormatException or InvalidDataException)
         {
+            throw new UnauthorizedAccessException("Access denied.");
         }
         throw new UnauthorizedAccessException("Access denied.");
     }

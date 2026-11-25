@@ -451,6 +451,10 @@ internal static class ProfileClaimPersistenceAssertions
                 .Select(c => c.Id).SequenceEqual(first.Claims.Select(c => c.Id)),
                 "repeated pagination has stable ordering");
             var invalid = await Denied(() => service.ListPendingAsync(context(reviewerCookie), family, "invalid"));
+            Check(invalid == (typeof(UnauthorizedAccessException), "Access denied.") &&
+                  await Denied(() => service.ListPendingAsync(context(reviewerCookie), family,
+                      new string('!', 88))) == invalid,
+                "malformed base64 and invalid length have the same generic denial");
             var tampered = cursor[..10] + (cursor[10] == 'A' ? "B" : "A") + cursor[11..];
             Check(await Denied(() => service.ListPendingAsync(context(reviewerCookie), family, tampered)) == invalid,
                 "tampered cursor has the same denial as an unknown cursor");
