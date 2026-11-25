@@ -37,11 +37,11 @@ public sealed class ProfileClaimService(
         return _families.WithdrawProfileClaim(familyId, principal, claimId);
     }
 
-    public async Task<IReadOnlyList<SqliteFamilyStore.StoredProfileClaim>> ListPendingAsync(
-        HttpContext context, Guid familyId)
+    public async Task<SqliteFamilyStore.PendingProfileClaimPage> ListPendingAsync(
+        HttpContext context, Guid familyId, string? cursor = null)
     {
         var administrator = await RequirePrincipalAsync(context);
-        return _families.ListPendingProfileClaims(familyId, administrator);
+        return _families.ListPendingProfileClaims(familyId, administrator, cursor);
     }
 
     public async Task<IReadOnlyList<SqliteFamilyStore.ProfileClaimAuditEntry>> ReadAuditAsync(

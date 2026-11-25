@@ -1,5 +1,6 @@
 using FamilyTree.Domain;
 using Microsoft.Data.Sqlite;
+using System.Text;
 
 namespace FamilyTree.Persistence;
 
@@ -11,6 +12,9 @@ public sealed partial class SqliteFamilyStore
 
     public sealed record ProfileClaimAuditEntry(
         long Sequence, Guid ClaimId, Guid ActorId, string Action);
+
+    public sealed record PendingProfileClaimPage(
+        IReadOnlyList<StoredProfileClaim> Claims, string? NextCursor);
 
     public StoredProfileClaim ProposeProfileClaim(
         Guid familyId, Guid principalId, Guid branchId, Guid personId)
@@ -126,23 +130,31 @@ public sealed partial class SqliteFamilyStore
         return claim with { State = withdrawn.State };
     }
 
-    public IReadOnlyList<StoredProfileClaim> ListPendingProfileClaims(
-        Guid familyId, Guid administratorId)
+    public PendingProfileClaimPage ListPendingProfileClaims(
+        Guid familyId, Guid administratorId, string? cursor = null)
     {
         RequireIds(familyId, administratorId);
         using var con = Open();
         using var tx = con.BeginTransaction();
         EnsureProfileClaimSchema(con, tx);
         RequireMember(con, tx, familyId, administratorId, administrator: true);
+        Guid? after = null;
+        if (cursor is not null)
+        {
+            after = DecodeProfileClaimCursor(familyId, administratorId, cursor);
+            RequireVisibleProfileClaim(con, tx, familyId, administratorId, after.Value);
+        }
         var claims = new List<StoredProfileClaim>();
         using (var query = Cmd(con, tx, """
             SELECT c.id,c.person_id,c.principal_id,c.branch_id,c.reviewed_by,c.identity_envelope
             FROM profile_claims c WHERE c.family_id=$f AND c.state='Pending'
+              AND ($after IS NULL OR c.id > $after)
               AND EXISTS (SELECT 1 FROM person_visibility v
                   WHERE v.family_id=c.family_id AND v.branch_id=c.branch_id
                     AND v.person_id=c.person_id AND v.principal_id=$admin)
             ORDER BY c.id LIMIT 100;
-            """, ("$f", familyId.ToString("D")), ("$admin", administratorId.ToString("D"))))
+            """, ("$f", familyId.ToString("D")), ("$admin", administratorId.ToString("D")),
+            ("$after", (object?)after?.ToString("D") ?? DBNull.Value)))
         using (var reader = query.ExecuteReader())
             while (reader.Read())
             {
@@ -158,7 +170,28 @@ public sealed partial class SqliteFamilyStore
                     reader.IsDBNull(4) ? null : Guid.Parse(reader.GetString(4))));
             }
         tx.Commit();
-        return claims;
+        var next = claims.Count == 100
+            ? Convert.ToBase64String(Encrypt(familyId, administratorId, claims[^1].Id.ToString("D"),
+                Encoding.UTF8.GetBytes("profile-claim-cursor.v1")))
+            : null;
+        return new PendingProfileClaimPage(claims, next);
+    }
+
+    private Guid DecodeProfileClaimCursor(Guid familyId, Guid administratorId, string cursor)
+    {
+        try
+        {
+            if (cursor.Length != 88)
+                throw new FormatException();
+            var value = Decrypt(familyId, administratorId, Convert.FromBase64String(cursor),
+                Encoding.UTF8.GetBytes("profile-claim-cursor.v1"));
+            if (Guid.TryParseExact(value, "D", out var id) && id != Guid.Empty)
+                return id;
+        }
+        catch (Exception ex) when (ex is FormatException or InvalidDataException)
+        {
+        }
+        throw new UnauthorizedAccessException("Access denied.");
     }
 
     public IReadOnlyList<ProfileClaimAuditEntry> ReadProfileClaimAudit(

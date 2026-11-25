@@ -27,6 +27,11 @@ reject a stale claim to release its reservation. Proposal/review/withdrawal even
 are recorded in the existing audit table. The
 `ProfileClaimService` binds the actor through the verified-cookie membership
 bridge; it accepts no principal ID from callers.
+The pending inbox returns at most 100 claims ordered by claim ID with an opaque
+cursor bound to the family and reviewer. Every page rechecks active administrator
+membership and current visibility, including the cursor anchor; a revoked or
+unknown anchor is denied. A full page may lead to an empty final page. Concurrent
+inserts before the cursor require restarting the listing.
 
 This slice remains unaccepted as an integrated feature. It requires the
 `person_visibility` schema/grant contract from #100 to be installed in the same
