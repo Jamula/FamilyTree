@@ -267,6 +267,35 @@ internal static class PrivateApiLoopbackAssertions
                     "concurrent owner bootstrap reuses one family without duplicate audit entries");
             }
 
+            using (var currentSession = await GetWithCookieAsync(client,
+                       "/api/v1/me", adminCookie))
+            {
+                var session = await currentSession.Content.ReadFromJsonAsync<JsonElement>();
+                Check(currentSession.StatusCode == HttpStatusCode.OK &&
+                    session.GetProperty("principalId").GetGuid() == adminId &&
+                    currentSession.Headers.CacheControl?.NoStore == true,
+                    "verified registered cookie resolves to its opaque principal");
+            }
+            using (var forgedSession = await GetWithCookieAsync(client,
+                       "/api/v1/me", "__Host-FamilyTreeSession=forged"))
+                Check(forgedSession.StatusCode == HttpStatusCode.NotFound &&
+                    forgedSession.Content.Headers.ContentLength == 0,
+                    "forged session cookies cannot retrieve a private principal");
+            using (var sessionFamilies = await GetWithCookieAsync(client,
+                       "/api/v1/families", adminCookie))
+            {
+                var families = await sessionFamilies.Content.ReadFromJsonAsync<Guid[]>();
+                Check(sessionFamilies.StatusCode == HttpStatusCode.OK &&
+                    families is { Length: 1 } && families[0] == familyId,
+                    "family listing includes only current active memberships");
+            }
+            using (var unregisteredSession = await GetWithCookieAsync(client,
+                       "/api/v1/me", await CreateCookieAsync(app, provider,
+                           "synthetic-unregistered-session")))
+                Check(unregisteredSession.StatusCode == HttpStatusCode.NotFound &&
+                    unregisteredSession.Content.Headers.ContentLength == 0,
+                    "valid but unregistered sessions do not expose private session state");
+
             using (var missingCsrf = new HttpRequestMessage(HttpMethod.Post, "/api/v1/me"))
             {
                 missingCsrf.Headers.TryAddWithoutValidation("Cookie", adminCookie);
@@ -328,13 +357,63 @@ internal static class PrivateApiLoopbackAssertions
             Check(app.Services.GetRequiredService<SqliteFamilyStore>()
                 .IsActiveMember(familyId, memberId), "approval activates membership");
 
+            using (var memberFamilies = await GetWithCookieAsync(client,
+                       "/api/v1/families", memberCookie))
+            {
+                var families = await memberFamilies.Content.ReadFromJsonAsync<Guid[]>();
+                Check(memberFamilies.StatusCode == HttpStatusCode.OK &&
+                    families is { Length: 1 } && families[0] == familyId,
+                    "approved member sees only the family with active membership");
+            }
+
             var store = app.Services.GetRequiredService<SqliteFamilyStore>();
+            var inaccessibleFamilyId = Guid.NewGuid();
+            store.CreateFictionalFamily(inaccessibleFamilyId, Guid.NewGuid());
             var person = new Person(Guid.NewGuid(), "Synthetic HTTP Read Person");
             var proposalId = store.ProposePerson(familyId, memberId, person);
             store.ReviewPerson(familyId, adminId, proposalId, approve: true);
             var grants = new SqliteGraphGrantStore(databasePath);
             grants.GrantPerson(familyId, branchId, adminId, memberId, person.Id);
             grants.GrantDisplayName(familyId, branchId, adminId, memberId, person.Id);
+            var hiddenBranchId = Guid.NewGuid();
+            grants.GrantPerson(familyId, hiddenBranchId, adminId, memberId, person.Id);
+            using (var memberBranches = await GetWithCookieAsync(client,
+                       $"/api/v1/families/{familyId:D}/branches", memberCookie))
+            {
+                var branches = await memberBranches.Content.ReadFromJsonAsync<Guid[]>();
+                Check(memberBranches.StatusCode == HttpStatusCode.OK &&
+                    branches is { Length: 1 } && branches[0] == branchId,
+                    "branch listing requires a visible person and explicit display-name grant");
+            }
+            using (var nonAdminMembers = await GetWithCookieAsync(client,
+                       $"/api/v1/families/{familyId:D}/members", memberCookie))
+                Check(nonAdminMembers.StatusCode == HttpStatusCode.NotFound &&
+                    nonAdminMembers.Content.Headers.ContentLength == 0,
+                    "member listing is unavailable to non-administrator members");
+            using (var administratorMembers = await GetWithCookieAsync(client,
+                       $"/api/v1/families/{familyId:D}/members", adminCookie))
+            {
+                var members = await administratorMembers.Content
+                    .ReadFromJsonAsync<JsonElement>();
+                Check(administratorMembers.StatusCode == HttpStatusCode.OK &&
+                    members.GetArrayLength() == 2 &&
+                    members.EnumerateArray().Any(item =>
+                        item.GetProperty("principalId").GetGuid() == memberId &&
+                        item.GetProperty("state").GetString() == "Active") &&
+                    members.EnumerateArray().Any(item =>
+                        item.GetProperty("principalId").GetGuid() == adminId &&
+                        item.GetProperty("administrator").GetBoolean()),
+                    "active administrator can list bounded opaque family membership state");
+            }
+            using (var forbiddenBranches = await GetWithCookieAsync(client,
+                       $"/api/v1/families/{inaccessibleFamilyId:D}/branches", memberCookie))
+            using (var unknownBranches = await GetWithCookieAsync(client,
+                       $"/api/v1/families/{Guid.NewGuid():D}/branches", memberCookie))
+                Check(forbiddenBranches.StatusCode == HttpStatusCode.NotFound &&
+                    unknownBranches.StatusCode == forbiddenBranches.StatusCode &&
+                    await unknownBranches.Content.ReadAsStringAsync() ==
+                    await forbiddenBranches.Content.ReadAsStringAsync(),
+                    "forbidden and unknown family listings have identical empty denials");
             var personPath = $"/api/v1/families/{familyId:D}/branches/{branchId:D}/people/{person.Id:D}";
             using (var personResponse = await GetWithCookieAsync(client, personPath, memberCookie))
             {
@@ -406,6 +485,14 @@ internal static class PrivateApiLoopbackAssertions
                 Check(revokedRead.StatusCode == HttpStatusCode.NotFound &&
                     revokedRead.Content.Headers.ContentLength == 0,
                     "revoked member loses HTTP read access immediately");
+            using (var revokedFamilies = await GetWithCookieAsync(client,
+                       "/api/v1/families", memberCookie))
+            {
+                var families = await revokedFamilies.Content.ReadFromJsonAsync<Guid[]>();
+                Check(revokedFamilies.StatusCode == HttpStatusCode.OK &&
+                    families is { Length: 0 },
+                    "revoked member is removed from family listings immediately");
+            }
 
             grants.GrantPerson(familyId, branchId, adminId, adminId, person.Id);
             grants.GrantDisplayName(familyId, branchId, adminId, adminId, person.Id);
@@ -450,9 +537,11 @@ internal static class PrivateApiLoopbackAssertions
             }
 
             using (var stillClosed = await client.GetAsync("/api/v1/people"))
+            {
                 Check(stillClosed.StatusCode == HttpStatusCode.NotImplemented &&
                     stillClosed.Headers.CacheControl?.NoStore == true,
                     "private reads remain closed until the reviewed grant contract is integrated");
+            }
             var unavailableRelationshipRoutes = new[]
             {
                 $"/api/v1/families/{familyId:D}/relationships/proposals",

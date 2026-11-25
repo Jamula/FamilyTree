@@ -407,6 +407,44 @@ internal static class PrivateApiEndpoints
             return Results.Ok(new { requestToken = tokens.RequestToken });
         }).WithMetadata(PrivateApiBoundary.EnabledPrivateEndpoint.Instance);
 
+        app.MapGet("/api/v1/me", async (HttpContext context,
+            VerifiedFamilyMembership membership) =>
+        {
+            var principalId = await GetRegisteredViewerAsync(context, providers, membership);
+            return principalId is { } id
+                ? Results.Ok(new { principalId = id })
+                : Results.StatusCode(StatusCodes.Status404NotFound);
+        }).WithMetadata(PrivateApiBoundary.EnabledPrivateEndpoint.Instance);
+
+        app.MapGet("/api/v1/families", async (HttpContext context,
+            VerifiedFamilyMembership membership, SqliteFamilyStore families) =>
+        {
+            var principalId = await GetRegisteredViewerAsync(context, providers, membership);
+            return principalId is { } id
+                ? Results.Ok(families.ListActiveFamilyIds(id))
+                : Results.StatusCode(StatusCodes.Status404NotFound);
+        }).WithMetadata(PrivateApiBoundary.EnabledPrivateEndpoint.Instance);
+
+        app.MapGet("/api/v1/families/{familyId:guid}/branches",
+            async (Guid familyId, HttpContext context,
+                VerifiedFamilyMembership membership, SqliteFamilyStore families) =>
+            {
+                var principalId = await GetRegisteredViewerAsync(context, providers, membership);
+                return principalId is { } id
+                    ? Results.Ok(families.ListGrantedBranchIds(familyId, id))
+                    : Results.StatusCode(StatusCodes.Status404NotFound);
+            }).WithMetadata(PrivateApiBoundary.EnabledPrivateEndpoint.Instance);
+
+        app.MapGet("/api/v1/families/{familyId:guid}/members",
+            async (Guid familyId, HttpContext context,
+                VerifiedFamilyMembership membership, SqliteFamilyStore families) =>
+            {
+                var principalId = await GetRegisteredViewerAsync(context, providers, membership);
+                return principalId is { } id
+                    ? Results.Ok(families.ListMembersForAdministrator(familyId, id))
+                    : Results.StatusCode(StatusCodes.Status404NotFound);
+            }).WithMetadata(PrivateApiBoundary.EnabledPrivateEndpoint.Instance);
+
         app.MapGet($"{FamilyBranchPath}/people/{{personId:guid}}",
             async (Guid familyId, Guid branchId, Guid personId, HttpContext context,
                 VerifiedFamilyMembership membership, SqlitePersonReadService people) =>

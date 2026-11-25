@@ -129,12 +129,21 @@ account cannot bootstrap, and repeating bootstrap for the configured owner
 returns the same family. Cookie-authenticated writes require a same-origin
 request and antiforgery token from `GET /api/v1/csrf`.
 
+`GET /api/v1/me` returns the registered caller's stable opaque principal ID;
+`POST /api/v1/me` registers only a verified OIDC identity after same-origin and
+antiforgery validation. `GET /api/v1/families` lists only families with current
+active membership. Branch listing returns only branches with at least one
+currently granted person and display-name field. The
+`GET /api/v1/families/{familyId}/members` endpoint is restricted to active
+family administrators and returns opaque principal IDs and membership state,
+not identity-provider profile data. Lists are bounded to 100 entries.
+
 Granted person lookup, bounded display-name search, and center-scoped tree
 reads use #100's persisted membership/branch/person/field checks inside the
 read transaction. Tree results contain only explicitly granted people;
-relationship edges remain absent.
-`POST /api/v1/me` returns only the caller's stable opaque principal ID so an
-inviter can address that registered identity.
+relationship edges remain absent. Membership and visibility are rechecked
+from SQLite for each listing request; a verified session alone grants no
+family or branch access.
 
 ## Deliberately unavailable
 
@@ -152,3 +161,7 @@ contract (#117), profile-claim integration (#112), and private web integration
 (#108) remain separate dependencies. This is not a private-family deployment
 and must not be used with real family records. The default configuration and
 all unsupported private paths continue to return an empty, `no-store` `501`.
+The HTTP assertions use signed test cookies through ASP.NET Core's cookie
+handler; they do not verify a live external OIDC provider login. The current CI
+runner is Linux-only, so Windows ACL runtime and enabled-private-mode Aspire
+acceptance remain unverified.
