@@ -308,23 +308,20 @@ public sealed class PrivateTreeApiClient(HttpClient http, PrivateTreeModeOptions
                 actions.ValueKind != JsonValueKind.Array)
                 return new HashSet<PrivateTreeMembershipAction>();
 
-            var supported = new HashSet<PrivateTreeMembershipAction>();
-            foreach (var action in actions.EnumerateArray())
-            {
-                if (action.ValueKind != JsonValueKind.String)
-                    continue;
-                var parsed = action.GetString() switch
+            return actions.EnumerateArray()
+                .Where(action => action.ValueKind == JsonValueKind.String)
+                .Select(action => action.GetString())
+                .Select(action => action switch
                 {
                     "invite" => PrivateTreeMembershipAction.Invite,
                     "accept" => PrivateTreeMembershipAction.AcceptInvitation,
                     "approve" => PrivateTreeMembershipAction.ApproveMember,
                     "revoke" => PrivateTreeMembershipAction.RevokeMember,
                     _ => (PrivateTreeMembershipAction?)null
-                };
-                if (parsed is { } supportedAction)
-                    supported.Add(supportedAction);
-            }
-            return supported;
+                })
+                .Where(action => action.HasValue)
+                .Select(action => action!.Value)
+                .ToHashSet();
         }
         catch (HttpRequestException)
         {

@@ -396,11 +396,9 @@ public static class PrivateTreeRoutes
             for (var generation = 1; generation <= limit && frontier.Count > 0; generation++)
             {
                 var next = new HashSet<Guid>();
-                foreach (var personId in frontier)
+                foreach (var personId in frontier.Where(adjacency.ContainsKey))
                 {
-                    if (!adjacency.TryGetValue(personId, out var relatives))
-                        continue;
-                    foreach (var relative in relatives.Where(visited.Add))
+                    foreach (var relative in adjacency[personId].Where(visited.Add))
                     {
                         included.TryAdd(relative, aboveCenter ? -generation : generation);
                         next.Add(relative);
@@ -433,19 +431,19 @@ public static class PrivateTreeRoutes
                 AddNeighbor(siblingAdjacency, connection.SecondPersonId,
                     connection.FirstPersonId);
             }
-            foreach (var personId in included.Keys.ToArray())
+            foreach (var personId in included.Keys.ToArray()
+                         .Where(siblingAdjacency.ContainsKey))
             {
-                if (siblingAdjacency.TryGetValue(personId, out var siblingsOfPerson))
-                    foreach (var sibling in siblingsOfPerson)
-                        included.TryAdd(sibling, included[personId]);
-
-                if (!parentsOf.TryGetValue(personId, out var parents))
-                    continue;
-                foreach (var parentId in parents)
-                    if (childrenOf.TryGetValue(parentId, out var children))
-                        foreach (var sibling in children.Where(id => id != personId))
-                            included.TryAdd(sibling, included[personId]);
+                foreach (var sibling in siblingAdjacency[personId])
+                    included.TryAdd(sibling, included[personId]);
             }
+            foreach (var personId in included.Keys.ToArray()
+                         .Where(parentsOf.ContainsKey))
+                foreach (var parentId in parentsOf[personId]
+                             .Where(childrenOf.ContainsKey))
+                    foreach (var sibling in childrenOf[parentId]
+                                 .Where(id => id != personId))
+                        included.TryAdd(sibling, included[personId]);
         }
 
         if (spouses)

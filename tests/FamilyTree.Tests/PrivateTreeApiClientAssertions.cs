@@ -10,10 +10,13 @@ internal static class PrivateTreeApiClientAssertions
     {
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            Task.FromResult(CreateStallingResponse());
+
+        private static HttpResponseMessage CreateStallingResponse() =>
+            new(HttpStatusCode.OK)
             {
                 Content = new StallingContent()
-            });
+            };
     }
 
     private sealed class StallingContent : HttpContent
