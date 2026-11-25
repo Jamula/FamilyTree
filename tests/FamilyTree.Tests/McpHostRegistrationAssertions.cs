@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 
 internal static class McpHostRegistrationAssertions
 {
@@ -43,6 +44,30 @@ internal static class McpHostRegistrationAssertions
                 item.ServiceType.FullName ==
                     "Microsoft.AspNetCore.Hosting.Server.IServer"),
             "HTTP web-host and Kestrel listeners must not be registered");
+        var toolMethods = typeof(FamilyDemoTools).GetMethods(
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Static |
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.DeclaredOnly)
+            .Where(method => Attribute.IsDefined(method, typeof(McpServerToolAttribute)))
+            .Select(method => method.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        Check(toolMethods.SetEquals(new[]
+            {
+                nameof(FamilyDemoTools.FamilyOverview),
+                nameof(FamilyDemoTools.ListDemoPeople),
+                nameof(FamilyDemoTools.SearchDemoPeople),
+                nameof(FamilyDemoTools.InspectDemoPerson),
+                nameof(FamilyDemoTools.ListDemoRelationships),
+                nameof(FamilyDemoTools.ProposeDemoPerson),
+                nameof(FamilyDemoTools.ProposeDemoRelationship),
+                nameof(FamilyDemoTools.ListDemoDrafts)
+            }) &&
+              !toolMethods.Any(name => name.Contains("Review", StringComparison.OrdinalIgnoreCase) ||
+                                       name.Contains("Approve", StringComparison.OrdinalIgnoreCase) ||
+                                       name.Contains("Publish", StringComparison.OrdinalIgnoreCase)),
+            "MCP exposes only the reviewed synthetic tools, never proposal-review or publication tools");
 
         // Constructing a host (without starting it) must not open a port,
         // consume stdin, launch a remote provider or persist any records.

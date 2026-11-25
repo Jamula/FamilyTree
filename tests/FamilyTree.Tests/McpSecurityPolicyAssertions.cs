@@ -15,10 +15,27 @@ internal static class McpSecurityPolicyAssertions
             "only explicitly requested and consented local capabilities negotiate");
         Check(!McpCapabilityPolicy.Allows(negotiated, McpCapability.ReadPrivateFamily) &&
               !McpCapabilityPolicy.Allows(negotiated, McpCapability.ProposePrivateChange) &&
+              !McpCapabilityPolicy.Allows(negotiated, McpCapability.ReviewLocalDraft) &&
+              !McpCapabilityPolicy.Allows(negotiated, McpCapability.ApproveLocalDraft) &&
               !McpCapabilityPolicy.Allows(negotiated, McpCapability.PublishChanges) &&
               !McpCapabilityPolicy.AllowsPrivateAccess(negotiated) &&
               !McpCapabilityPolicy.AllowsPrivateAccess(null),
-            "private reads, writes and publication stay denied");
+            "private reads, proposals, review, approval and publication stay denied");
+        var forgedCapabilities = new McpNegotiatedCapabilities("untrusted-agent",
+            allCapabilities);
+        Check(!McpCapabilityPolicy.Allows(forgedCapabilities,
+                  McpCapability.ReadPrivateFamily) &&
+              !McpCapabilityPolicy.Allows(forgedCapabilities,
+                  McpCapability.ProposePrivateChange) &&
+              !McpCapabilityPolicy.Allows(forgedCapabilities,
+                  McpCapability.ReviewLocalDraft) &&
+              !McpCapabilityPolicy.Allows(forgedCapabilities,
+                  McpCapability.ApproveLocalDraft) &&
+              !McpCapabilityPolicy.Allows(forgedCapabilities,
+                  McpCapability.PublishChanges) &&
+              !McpCapabilityPolicy.Allows(forgedCapabilities,
+                  (McpCapability)int.MaxValue),
+            "forged or unknown capability grants cannot elevate private/review authority");
 
         var partialConsent = McpCapabilityPolicy.Negotiate(new McpCapabilityOffer(
             "synthetic-agent",
@@ -32,6 +49,10 @@ internal static class McpSecurityPolicyAssertions
               !McpCapabilityPolicy.Allows(partialConsent, McpCapability.CreateLocalDraft),
             "a capability without user consent is not granted");
         Check(McpCapabilityPolicy.Negotiate(null).Granted.Count == 0 &&
+              McpCapabilityPolicy.Negotiate(new McpCapabilityOffer("agent", null!,
+                  allCapabilities)).Granted.Count == 0 &&
+              McpCapabilityPolicy.Negotiate(new McpCapabilityOffer("agent",
+                  allCapabilities, null!)).Granted.Count == 0 &&
               McpCapabilityPolicy.Negotiate(new McpCapabilityOffer("", allCapabilities,
                   allCapabilities)).Granted.Count == 0 &&
               McpCapabilityPolicy.Negotiate(new McpCapabilityOffer(
@@ -64,6 +85,24 @@ internal static class McpSecurityPolicyAssertions
         Check(proposal.Summary == injection && proposal.Status == "pending" &&
               !proposal.Approved && !proposal.Persisted,
             "prompt-injection text remains inert, pending synthetic draft content");
+        var forgedReviewOffer = McpCapabilityPolicy.Negotiate(new McpCapabilityOffer(
+            "synthetic-agent",
+            new HashSet<McpCapability>
+            {
+                McpCapability.ReviewLocalDraft,
+                McpCapability.ApproveLocalDraft,
+                McpCapability.PublishChanges
+            },
+            new HashSet<McpCapability>
+            {
+                McpCapability.ReviewLocalDraft,
+                McpCapability.ApproveLocalDraft,
+                McpCapability.PublishChanges
+            }));
+        Check(forgedReviewOffer.Granted.Count == 0 &&
+              drafts.All(firstScope).Single() == proposal &&
+              proposal.Status == "pending" && !proposal.Approved && !proposal.Persisted,
+            "consented review/approval requests cannot move a draft beyond pending");
         Check(drafts.All(secondScope).Count == 0 &&
               drafts.All(Guid.NewGuid()).Count == 0 &&
               drafts.All(firstScope).Single().Id == proposal.Id,

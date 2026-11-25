@@ -10,6 +10,8 @@ public enum McpCapability
     ReadLocalDrafts,
     ReadPrivateFamily,
     ProposePrivateChange,
+    ReviewLocalDraft,
+    ApproveLocalDraft,
     PublishChanges
 }
 
