@@ -6,7 +6,7 @@ ServiceDefaults uses stable OpenTelemetry 1.21.0. Native `FamilyTelemetry` instr
 When the Aspire AppHost is available (#23), it orchestrates both applications and sets `FAMILYTREE_OTLP_ENABLED=true` and its **localhost** OTLP endpoint for local development. The OTel exporter supports both gRPC and HTTP/protobuf, chosen by `OTEL_EXPORTER_OTLP_PROTOCOL`. Dashboard uses synthetic requests only.
 
 ## Without Aspire
-Run the API without any OTLP configuration and no exporter is created. To opt in, configure a collector listening on the local machine:
+Run the API or Web without any OTLP configuration and no exporter is created. To opt in, configure a collector listening on the local machine:
 ```bash
 FAMILYTREE_OTLP_ENABLED=true \
 OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317 \
