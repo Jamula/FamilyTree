@@ -23,11 +23,8 @@ internal static class SqliteRelationshipVisibilityAssertions
             using var store = new SqliteFamilyStore(path, key);
             store.CreateFictionalFamily(family, admin);
             foreach (var member in new[] { author, reviewer, viewer }) Join(store, family, admin, member);
-            foreach (var person in new[] { first, second })
-            {
-                var p = store.ProposePerson(family, author, person);
+            foreach (var p in new[] { first, second }.Select(person => store.ProposePerson(family, author, person)))
                 store.ReviewPerson(family, admin, p, true);
-            }
             var visibility = new SqliteGraphGrantStore(path);
             foreach (var person in new[] { first, second })
                 foreach (var member in new[] { admin, author, reviewer, viewer })

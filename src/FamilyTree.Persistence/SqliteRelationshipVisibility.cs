@@ -67,7 +67,10 @@ public sealed partial class SqliteFamilyStore
                 publication.Link.FromPersonId, publication.Link.ToPersonId);
         }
         catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or
-            FormatException or InvalidCastException or OverflowException or ArgumentException) { }
+            FormatException or InvalidCastException or OverflowException or ArgumentException)
+        {
+            recipientCanSee = false;
+        }
         if (!recipientCanSee)
             throw new UnauthorizedAccessException("Access denied.");
         var envelope = Encrypt(family, relationship, "relationship-visibility-v1",

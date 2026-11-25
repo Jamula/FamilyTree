@@ -251,6 +251,7 @@ public sealed partial class SqliteFamilyStore
                 }
                 catch (Exception error) when (error is InvalidDataException or UnauthorizedAccessException or InvalidCastException or FormatException or OverflowException)
                 {
+                    continue;
                 }
             }
         }

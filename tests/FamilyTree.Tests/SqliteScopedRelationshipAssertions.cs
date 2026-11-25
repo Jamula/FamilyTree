@@ -286,12 +286,16 @@ internal static class SqliteScopedRelationshipAssertions
 
             var concurrent = Propose();
             var successes = 0;
+            var unavailable = 0;
             Parallel.For(0, 2, _ =>
             {
                 try { store.ReviewScopedRelationship(family, branch, reviewer, concurrent, true); Interlocked.Increment(ref successes); }
-                catch (InvalidOperationException) { }
+                catch (InvalidOperationException ex) when (ex.Message == "Proposal unavailable.")
+                {
+                    Interlocked.Increment(ref unavailable);
+                }
             });
-            Check(successes == 1 && Publications(path) == 1, "one concurrent approval");
+            Check(successes == 1 && unavailable == 1 && Publications(path) == 1, "one concurrent approval");
             store.UndoScopedRelationship(family, branch, reviewer, concurrent);
             var one = Propose();
             var two = Propose();

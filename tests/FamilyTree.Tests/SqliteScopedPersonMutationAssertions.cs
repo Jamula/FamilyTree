@@ -201,8 +201,20 @@ internal static class SqliteScopedPersonMutationAssertions
 
             var corrupt = store.ProposeScopedPerson(family, branch, author, "Synthetic Corrupt");
             var readable = store.ProposeScopedPerson(family, branch, author, "Synthetic Readable");
+            var corruptPerson = store.ListScopedPendingPeople(family, branch, reviewer)
+                .Single(x => x.ProposalId == corrupt).Person.Id;
+            byte[] corruptPayload, corruptPendingSeal;
             using (var db = Connect(path))
             {
+                using (var query = db.CreateCommand())
+                {
+                    query.CommandText = "SELECT payload,state_envelope FROM scoped_person_proposals WHERE id=$id;";
+                    query.Parameters.AddWithValue("$id", corrupt.ToString("D"));
+                    using var reader = query.ExecuteReader();
+                    Check(reader.Read(), "corrupt proposal exists");
+                    corruptPayload = reader.GetFieldValue<byte[]>(0);
+                    corruptPendingSeal = reader.GetFieldValue<byte[]>(1);
+                }
                 Execute(db, "UPDATE scoped_person_proposals SET payload=X'01' WHERE id=$id;", ("$id", corrupt.ToString("D")));
                 using var cmd = db.CreateCommand();
                 cmd.CommandText = """
@@ -227,6 +239,7 @@ internal static class SqliteScopedPersonMutationAssertions
                 Check(continued.Entries.Single().ProposalId == readable && continued.QuarantineIds.SequenceEqual([corrupt]),
                     "continuation reaches readable and authenticated corrupt proposals");
                 Expect<UnauthorizedAccessException>(() => reopened.QuarantineScopedPerson(family, branch, author, corrupt));
+                Expect<InvalidDataException>(() => reopened.QuarantineScopedPerson(family, otherBranch, reviewer, corrupt));
                 Expect<InvalidDataException>(() => reopened.QuarantineScopedPerson(family, branch, reviewer, readable));
                 reopened.QuarantineScopedPerson(family, branch, reviewer, corrupt);
                 Check(reopened.ListScopedPendingPeoplePage(family, branch, reviewer, empty.NextCursor)
@@ -234,6 +247,29 @@ internal static class SqliteScopedPersonMutationAssertions
                 Expect<InvalidOperationException>(() => reopened.ReviewScopedPerson(family, branch, reviewer, corrupt, true));
                 reopened.ReviewScopedPerson(family, branch, reviewer, readable, false);
             }
+            using (var db = Connect(path))
+                Execute(db, """
+                    UPDATE scoped_person_proposals SET payload=$payload,state='Pending',reviewer=NULL,state_envelope=$seal
+                    WHERE id=$id;
+                    """, ("$payload", corruptPayload), ("$seal", corruptPendingSeal), ("$id", corrupt.ToString("D")));
+            using (var reopened = new SqliteFamilyStore(path, key))
+                Expect<InvalidDataException>(() => reopened.ReviewScopedPerson(family, branch, reviewer, corrupt, true));
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = """
+                    SELECT (SELECT COUNT(*) FROM people WHERE id=$person),
+                           (SELECT COUNT(*) FROM audit WHERE subject_id=$id AND action='scoped-person-quarantined'),
+                           (SELECT COUNT(*) FROM audit WHERE subject_id=$id AND action='scoped-person-approved');
+                    """;
+                cmd.Parameters.AddWithValue("$person", corruptPerson.ToString("D"));
+                cmd.Parameters.AddWithValue("$id", corrupt.ToString("D"));
+                using var reader = cmd.ExecuteReader();
+                Check(reader.Read() && reader.GetInt64(0) == 0 && reader.GetInt64(1) == 1 && reader.GetInt64(2) == 0,
+                    "quarantine replay does not publish or add an approval audit");
+            }
+            using (var db = Connect(path))
+                Execute(db, "UPDATE scoped_person_proposals SET state='Rejected' WHERE id=$id;", ("$id", corrupt.ToString("D")));
             using (var db = Connect(path))
             using (var cmd = db.CreateCommand())
             {

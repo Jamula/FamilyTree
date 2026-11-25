@@ -55,12 +55,13 @@ internal static class SqliteScopedPersonRaceAssertions
             cmd.Parameters.AddWithValue("$p", person.Id.ToString("D"));
             if (((long)cmd.ExecuteScalar()! == 1) != review.Result)
                 throw new Exception("race result disagrees with durable publication");
+            var denied = false;
             try
             {
                 first.ProposeScopedPerson(family, branch, author, "Synthetic Denied");
-                throw new Exception("revoked author retained grant");
             }
-            catch (UnauthorizedAccessException) { }
+            catch (UnauthorizedAccessException) { denied = true; }
+            if (!denied) throw new Exception("revoked author retained grant");
             Console.WriteLine("PASS SQLite scoped review versus revocation race");
         }
         finally
