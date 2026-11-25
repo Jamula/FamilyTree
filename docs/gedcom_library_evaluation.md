@@ -1,4 +1,4 @@
-# M1 GEDCOM library selection and preview boundary
+# M02 GEDCOM library selection and preview boundary
 
 ## Candidate library review (November 2026)
 

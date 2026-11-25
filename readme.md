@@ -8,7 +8,7 @@ FamilyTree is an open-source, standards-oriented family heritage project, indepe
 
 ![Grayscale UI wireframes for FamilyTree: a person-centered family tree and a separate proposal review queue, populated with invented example people. Concept artwork, not a screenshot of a completed feature.](docs/assets/familytree-ui-wireframes.svg)
 
-*Design wireframe, not a screenshot or production feature promise.* The tree navigator and fictional editing workbench already exist locally in simpler forms. The integrated private tree, real users, persistent review queue and full genealogy editing remain M1 work.
+*Design wireframe, not a screenshot or production feature promise.* The tree navigator and fictional editing workbench already exist locally in simpler forms. The integrated private tree, real users, persistent review queue and full genealogy editing remain M02 work.
 
 ### Main interaction flows
 
@@ -44,6 +44,7 @@ Open **http://127.0.0.1:5182/demo** for the 32-person fictional explorer, or **h
 ## Architecture and delivery
 
 - [Architecture and trust boundaries](docs/architecture.md), including a Mermaid diagram.
+- [Roadmap and canonical milestone numbering](docs/roadmap.md), including provisional dates and issue groupings.
 - [Local development](docs/development.md), [test strategy](docs/test_strategy.md), and [release readiness](docs/release_readiness.md).
 - [Cost policy](docs/cost_policy.md) and [security boundary](docs/private_api_security_boundary.md).
 - [GitHub issues](https://github.com/Jamula/FamilyTree/issues) and [pull requests](https://github.com/Jamula/FamilyTree/pulls) are the live source of work status.

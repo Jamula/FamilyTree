@@ -52,7 +52,7 @@
   <rect x="711" y="411" width="177" height="58" rx="10" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
   <text x="744" y="444" fill="#1e293b" font-family="Arial,Helvetica,sans-serif" font-size="20" font-weight="700">Kian Vale</text>
   <text x="310" y="535" fill="#64748b" font-family="Arial,Helvetica,sans-serif" font-size="15">Recenter by selecting any authorized person · Keyboard accessible alternative</text>
-  <text x="310" y="571" fill="#94a3b8" font-family="Arial,Helvetica,sans-serif" font-size="13">Tree layout illustrated. Actual M1 private tree still needs authentication and persistence.</text>
+  <text x="310" y="571" fill="#94a3b8" font-family="Arial,Helvetica,sans-serif" font-size="13">Tree layout illustrated. Actual M02 private tree still needs authentication and persistence.</text>
 
   <!-- detail -->
   <path d="M1005 169 V624" stroke="#cbd5e1" stroke-width="2"/>

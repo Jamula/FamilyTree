@@ -9,10 +9,10 @@ production connector. Never expose it as an unauthenticated HTTP service.
 | Attack | Required behavior | Verification |
 |---|---|---|
 | Malicious text/prompt-injection in a proposal | Treat as untrusted text; never execute, promote or publish | Bounds and explicit draft state only; full prompt-injection review pending |
-| Cross-family ID enumeration | No existence hint, edges, media or count disclosures | M1 #9/#10 API authorization tests pending |
-| Forged moderator identity | Review identity server-bound; no self approval | M1 #12 draft state machine tests |
-| Lost member access | Invalidate effective grants on pause/leave | M1 #9 lifecycle tests pending |
-| Sensitive field or image | Deny by default, consent + field permission | M1 #10 and M2 #14 gates |
+| Cross-family ID enumeration | No existence hint, edges, media or count disclosures | M02 #9/#10 API authorization tests pending |
+| Forged moderator identity | Review identity server-bound; no self approval | M02 #12 draft state machine tests |
+| Lost member access | Invalidate effective grants on pause/leave | M02 #9 lifecycle tests pending |
+| Sensitive field or image | Deny by default, consent + field permission | M02 #10 and M03 #14 gates |
 | Rogue remote MCP client | Exact HTTPS origin/host allowlist, auth, scope, rate limits, per-agent capability | **Not implemented; prohibited remotely** |
 | Draft overflow / control chars | Bounded queue and summaries, no content logging | MCP negative tests |
 

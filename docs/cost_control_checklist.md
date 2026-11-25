@@ -31,4 +31,4 @@ Confirm $0 incremental cost and a hard stop on overages. If not enforceably $0, 
 
 ## Release gate
 
-A foundation-only GitHub release **does not** create a hosted deployment. No production family data is allowed before M1 authentication, server-side authorization, security and consent controls. Publishing `v0.1.0` requires a separate explicit release decision.
+A foundation-only GitHub release **does not** create a hosted deployment. No production family data is allowed before M02 authentication, server-side authorization, security and consent controls. Publishing `v0.1.0` requires a separate explicit release decision.

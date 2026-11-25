@@ -49,5 +49,5 @@ HTTP smoke and unit tests cover these actions, invalid POSTs and undo.
   relatives' names, photos, dates, imported GEDCOM or user-supplied fields.
 - The product's real-family `/api/v1` endpoints remain fail-closed at 501.
   Do not use the workbench to manage actual genealogy.
-- Full M1 acceptance requires a durable, authorization-backed store, genuine
+- Full M02 acceptance requires a durable, authorization-backed store, genuine
   moderator review, restored data and private authenticated tree UI.
