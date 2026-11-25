@@ -6,6 +6,9 @@ const text = value => typeof value === 'string' && value.length > 0;
 const integer = value => Number.isSafeInteger(value) && value > 0;
 const unique = values => new Set(values).size === values.length;
 const sha = value => typeof value === 'string' && /^[0-9a-f]{40}$/.test(value);
+const identity = value => value.toLowerCase();
+const pathValid = path => text(path) && !path.startsWith('/') &&
+  !path.includes('\\') && !path.split('/').some(part => part === '..' || part === '.');
 
 export function validPolicy(p) {
   if (!exact(p, ['version', 'repository', 'defaultBranch', 'mergeMethod', 'mode',
@@ -18,11 +21,11 @@ export function validPolicy(p) {
     p.checks.every(c => exact(c, ['name', 'appId']) && text(c.name) && integer(c.appId)) &&
     unique(p.checks.map(c => c.name)) &&
     Array.isArray(p.reviewers) && p.reviewers.length > 0 &&
-    p.reviewers.every(text) && unique(p.reviewers) &&
+    p.reviewers.every(text) && unique(p.reviewers.map(identity)) &&
     exact(p.coverage, ['line', 'branch']) &&
     [p.coverage.line, p.coverage.branch].every(n => Number.isFinite(n) && n >= 0 && n <= 100) &&
     Array.isArray(p.owners) && p.owners.length > 0 &&
-    p.owners.every(o => exact(o, ['prefix', 'owner']) && text(o.prefix) && text(o.owner)) &&
+    p.owners.every(o => exact(o, ['prefix', 'owner']) && pathValid(o.prefix) && text(o.owner)) &&
     unique(p.owners.map(o => o.prefix)) && integer(p.maxActive) &&
     Number.isFinite(p.creditLimit) && p.creditLimit > 0 &&
     Array.isArray(p.riskClasses) && p.riskClasses.length > 0 &&
@@ -49,9 +52,9 @@ export function evaluate(policy, s) {
   if (s.providerReady !== true) return result('blocked', 'PROVIDER_UNKNOWN');
   if (!policy.riskClasses.includes(s.risk) || !Number.isSafeInteger(s.priority))
     return result('blocked', 'RISK_OR_PRIORITY_UNKNOWN');
-  if (!Array.isArray(s.paths) || !s.paths.length || !s.paths.every(path =>
-    text(path) && !path.startsWith('/') && !path.split('/').some(part => part === '..' || part === '.')) ||
-      s.paths.some(path => !policy.owners.some(owner => path.startsWith(owner.prefix))))
+  if (!Array.isArray(s.paths) || !s.paths.length || !s.paths.every(pathValid) ||
+      s.paths.some(path => !policy.owners.some(owner => path === owner.prefix ||
+        path.startsWith(owner.prefix.endsWith('/') ? owner.prefix : `${owner.prefix}/`))))
     return result('blocked', 'PATH_OWNERSHIP_UNKNOWN');
   if (!Array.isArray(s.dependencies) || s.dependencies.some(d =>
     !exact(d, ['issue', 'accepted']) || !integer(d.issue) || d.issue === s.issue ||
@@ -77,11 +80,12 @@ export function evaluate(policy, s) {
   if (!Array.isArray(s.reviews) || !text(s.author) || !text(s.agent))
     return result('blocked', 'REVIEW_MISSING');
   // The caller must supply the latest review per reviewer, including dismissals.
-  if (s.reviews.some(r => !exact(r, ['reviewer', 'head', 'state']) || !text(r.reviewer)) ||
-      !unique(s.reviews.map(r => r.reviewer)) ||
+  if (s.reviews.some(r => !exact(r, ['reviewer', 'head', 'state']) || !text(r.reviewer) ||
+        !sha(r.head) || !['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED', 'DISMISSED'].includes(r.state)) ||
+      !unique(s.reviews.map(r => identity(r.reviewer))) ||
       s.reviews.some(r => r.state === 'CHANGES_REQUESTED') ||
-      !s.reviews.some(r => policy.reviewers.includes(r.reviewer) &&
-        r.reviewer !== s.author && r.reviewer !== s.agent &&
+      !s.reviews.some(r => policy.reviewers.map(identity).includes(identity(r.reviewer)) &&
+        identity(r.reviewer) !== identity(s.author) && identity(r.reviewer) !== identity(s.agent) &&
         r.head === s.head && r.state === 'APPROVED'))
     return result('blocked', 'REVIEW_MISSING');
   return result('eligible', 'SHADOW_ELIGIBLE');

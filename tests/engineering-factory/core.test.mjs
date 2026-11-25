@@ -51,7 +51,14 @@ for (const [name, change, reason] of [
   ['outstanding changes requested', { reviews: [...snapshot.reviews,
     { reviewer: 'another-reviewer', head, state: 'CHANGES_REQUESTED' }] }, 'REVIEW_MISSING'],
   ['self review', { author: 'synthetic-reviewer' }, 'REVIEW_MISSING'],
+  ['case-insensitive self review', { agent: 'Synthetic-Reviewer' }, 'REVIEW_MISSING'],
+  ['unknown review state', { reviews: [...snapshot.reviews,
+    { reviewer: 'another-reviewer', head: null, state: null }] }, 'REVIEW_MISSING'],
+  ['duplicate reviewer casing', { reviews: [...snapshot.reviews,
+    { reviewer: 'Synthetic-Reviewer', head, state: 'APPROVED' }] }, 'REVIEW_MISSING'],
   ['path traversal', { paths: ['src/../other'] }, 'PATH_OWNERSHIP_UNKNOWN'],
+  ['different path prefix', { paths: ['src-other/demo.cs'] }, 'PATH_OWNERSHIP_UNKNOWN'],
+  ['backslash path', { paths: ['src/..\\other'] }, 'PATH_OWNERSHIP_UNKNOWN'],
 ]) {
   test(name, () => assert.equal(evaluate(policy, { ...snapshot, ...change }).reason, reason));
 }
