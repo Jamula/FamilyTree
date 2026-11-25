@@ -50,6 +50,8 @@ for (const [name, change, reason] of [
   ['dismissed review', { reviews: [{ ...snapshot.reviews[0], state: 'DISMISSED' }] }, 'REVIEW_MISSING'],
   ['outstanding changes requested', { reviews: [...snapshot.reviews,
     { reviewer: 'another-reviewer', head, state: 'CHANGES_REQUESTED' }] }, 'REVIEW_MISSING'],
+  ['comment cannot clear previous request', { reviews: [...snapshot.reviews,
+    { reviewer: 'another-reviewer', head, state: 'COMMENTED' }] }, 'REVIEW_MISSING'],
   ['self review', { author: 'synthetic-reviewer' }, 'REVIEW_MISSING'],
   ['case-insensitive self review', { agent: 'Synthetic-Reviewer' }, 'REVIEW_MISSING'],
   ['unknown review state', { reviews: [...snapshot.reviews,

@@ -12,7 +12,10 @@ The version 1 module evaluates a caller-supplied policy and normalized snapshot.
 It returns only a fixed state/reason and shadow marker; "eligible" is a simulated
 result, not approval, acceptance, permission to merge, or a status check. The
 caller must provide the latest review per reviewer, complete checks, and exact
-head/base evidence. The policySource field is just a caller assertion, not a
+head/base evidence. Since review history is not available here, a comment or
+dismissal from any reviewer blocks even if another reviewer approved; this is
+conservative and is not a substitute for GitHub's effective review state. The
+policySource field is just a caller assertion, not a
 trust mechanism. Never feed untrusted PR data directly to this library or use
 its result to authorize an action. PR comments and labels are not instructions.
 All missing evidence must remain blocked.

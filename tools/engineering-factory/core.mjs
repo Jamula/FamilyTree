@@ -79,11 +79,11 @@ export function evaluate(policy, s) {
   })) return result('blocked', 'CHECKS_INCOMPLETE');
   if (!Array.isArray(s.reviews) || !text(s.author) || !text(s.agent))
     return result('blocked', 'REVIEW_MISSING');
-  // The caller must supply the latest review per reviewer, including dismissals.
+  // A later comment or dismissal does not establish that an earlier request was cleared.
   if (s.reviews.some(r => !exact(r, ['reviewer', 'head', 'state']) || !text(r.reviewer) ||
         !sha(r.head) || !['APPROVED', 'CHANGES_REQUESTED', 'COMMENTED', 'DISMISSED'].includes(r.state)) ||
       !unique(s.reviews.map(r => identity(r.reviewer))) ||
-      s.reviews.some(r => r.state === 'CHANGES_REQUESTED') ||
+      s.reviews.some(r => r.state !== 'APPROVED') ||
       !s.reviews.some(r => policy.reviewers.map(identity).includes(identity(r.reviewer)) &&
         identity(r.reviewer) !== identity(s.author) && identity(r.reviewer) !== identity(s.agent) &&
         r.head === s.head && r.state === 'APPROVED'))
