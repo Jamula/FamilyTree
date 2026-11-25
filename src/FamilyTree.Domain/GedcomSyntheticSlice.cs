@@ -242,7 +242,7 @@ public static partial class GedcomSyntheticSlice
             Require(c is not null && SafeText(c.Id) && SafeName(c.Name) &&
                 (c.BirthDate is null || SafeText(c.BirthDate)) && candidateIds.Add(c.Id));
         }
-        static string Key(string name) => string.Join(' ', name.Replace("/", "", StringComparison.Ordinal)
+        static string Key(string name) => string.Join(' ', name.Replace("/", " ", StringComparison.Ordinal)
             .Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
         static string? Birth(SyntheticGedcomPerson p) => p.Events.FirstOrDefault(e => e.Kind == "BIRT")?.Date;
         static string Kind(string? a, string? b) => a is not null && b is not null &&

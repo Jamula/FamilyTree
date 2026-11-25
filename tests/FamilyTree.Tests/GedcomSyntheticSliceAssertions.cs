@@ -51,6 +51,20 @@ internal static class GedcomSyntheticSliceAssertions
         var duplicateMatches = Parse(duplicate).Proposal!.Matches;
         Check(duplicateMatches.Single() == new SyntheticGedcomMatch("@I1@", "@I2@", "incoming", "possible-duplicate"),
             "incoming duplicate report");
+        var unspaced = Fixture.Replace("Avery /Fiction/", "Avery/Fiction/", StringComparison.Ordinal)
+            .Replace("Blair /Fiction/", "Avery Fiction", StringComparison.Ordinal);
+        var unspacedMatches = Parse(unspaced, [new("candidate", "Avery Fiction", "ABT 1900")]).Proposal!.Matches;
+        Check(unspacedMatches.Count == 3 &&
+            unspacedMatches.Contains(new SyntheticGedcomMatch("@I1@", "@I2@", "incoming", "possible-duplicate")) &&
+            unspacedMatches.Contains(new SyntheticGedcomMatch("@I1@", "candidate", "candidate", "possible-duplicate")),
+            "unspaced surname delimiters preserve incoming and candidate name boundaries");
+        Check(Parse(Fixture.Replace("Avery /Fiction/", "Avery Fiction", StringComparison.Ordinal),
+            [new("candidate", "Avery/Fiction/", "ABT 1900")]).Proposal!.Matches.Count == 1,
+            "candidate surname delimiters preserve name boundaries");
+        var distinct = Fixture.Replace("Avery /Fiction/", "Ann/Abel/", StringComparison.Ordinal)
+            .Replace("Blair /Fiction/", "Annabel", StringComparison.Ordinal);
+        Check(Parse(distinct, [new("candidate", "Annabel", "1901")]).Proposal!.Matches
+            .All(m => m.IncomingId != "@I1@"), "surname components do not merge into false matches");
 
         var exported = GedcomSyntheticSlice.Export(new(proposal.Graph));
         Check(exported.Text.Contains("1 WIFE @I1@\n", StringComparison.Ordinal) &&

@@ -190,9 +190,9 @@ internal static class GedcomAuthorizedPersonSliceAssertions
                 store.ListPendingPeople(family, admin).SequenceEqual(pendingPeople) &&
                 store.ListPendingRelationships(family, admin).SequenceEqual(pendingRelationships),
                 "valid, invalid and cancelled previews do not change graph, review inboxes or audit");
-            foreach (var name in new[] { "Fictional @Name@", "Fictional\tName" })
+            foreach (var invalid in new[] { "Fictional @Name@", "Fictional\tName" }
+                .Select(name => new Person(Guid.NewGuid(), name)))
             {
-                var invalid = new Person(Guid.NewGuid(), name);
                 store.ReviewPerson(family, admin, store.ProposePerson(family, member, invalid), true);
                 grants.GrantPerson(family, branch, admin, member, invalid.Id);
                 grants.GrantDisplayName(family, branch, admin, member, invalid.Id);
@@ -251,14 +251,13 @@ internal static class GedcomAuthorizedPersonSliceAssertions
         Check(noEdge.Nodes.Count == 1 && noEdge.Edges.Count == 0,
             "visible endpoints alone cannot authorize an edge");
         var localEndpoints = grant with { VisibleRelationships = new HashSet<Guid>() };
-        foreach (var foreignEdgeGrant in new[] {
+        foreach (var crossScope in new[] {
             grant with { PrincipalId = Guid.NewGuid() },
             grant with { BranchId = Guid.NewGuid() }
-        })
+        }.Select(foreignEdgeGrant => FieldRedactedTreeQuery.ProjectAsync(viewer, family, branch, parent.Id,
+            people, [edge], new TreeOptions(), [localEndpoints, foreignEdgeGrant], fields)
+            .GetAwaiter().GetResult()))
         {
-            var crossScope = FieldRedactedTreeQuery.ProjectAsync(viewer, family, branch, parent.Id,
-                people, [edge], new TreeOptions(), [localEndpoints, foreignEdgeGrant], fields)
-                .GetAwaiter().GetResult();
             Check(crossScope is not null && crossScope.Nodes.Count == 1 &&
                 crossScope.Nodes[0].PersonId == parent.Id && crossScope.Edges.Count == 0,
                 "foreign principal or branch edge grant cannot combine with local endpoints");
