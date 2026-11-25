@@ -95,6 +95,7 @@ public sealed partial class SqliteFamilyStore : IDisposable
             """;
         command.ExecuteNonQuery();
         EnsureAuditTimestampColumn(connection, transaction);
+        EnsureScopedRelationshipSchema(connection, transaction);
         VerifyDatabaseKey(connection, transaction);
         transaction.Commit();
     }

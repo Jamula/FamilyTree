@@ -70,10 +70,10 @@ internal static class SqliteScopedPersonMutationAssertions
 
             Expect<SqliteException>(() => store.UndoScopedPerson(family, branch, reviewer, proposal));
             visibility.RevokePerson(family, branch, admin, author, person.Id);
-            var link = store.ProposeRelationship(family, author,
-                Relationship.Create(person.Id, seed.Id, RelationKind.Friend));
-            Expect<InvalidOperationException>(() => store.UndoScopedPerson(family, branch, reviewer, proposal));
-            store.ReviewRelationship(family, admin, link, false);
+            Expect<InvalidOperationException>(() => store.ProposeRelationship(family, author,
+                Relationship.Create(person.Id, seed.Id, RelationKind.Friend)));
+            Expect<InvalidOperationException>(() => store.ProposeRelationship(family, author,
+                Relationship.Create(Guid.NewGuid(), seed.Id, RelationKind.Friend)));
             store.UndoScopedPerson(family, branch, reviewer, proposal);
             Check(!store.ReadPeople(family, admin).Any(x => x.Id == person.Id), "undo removed person");
             Expect<InvalidOperationException>(() => store.UndoScopedPerson(family, branch, reviewer, proposal));

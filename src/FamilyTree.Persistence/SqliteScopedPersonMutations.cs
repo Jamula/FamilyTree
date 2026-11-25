@@ -280,6 +280,12 @@ public sealed partial class SqliteFamilyStore
             """, ("$f", familyId.ToString("D")),
             ("$p", proposal.Person.Id.ToString("D"))) != 0)
             throw new InvalidOperationException("Person has pending relationships.");
+        if (Scalar<long>(con, tx, """
+            SELECT COUNT(*) FROM scoped_relationship_proposals
+            WHERE family_id=$f AND state IN ('Pending','Approved') AND (from_id=$p OR to_id=$p);
+            """, ("$f", familyId.ToString("D")),
+            ("$p", proposal.Person.Id.ToString("D"))) != 0)
+            throw new InvalidOperationException("Person has scoped relationships.");
         // Foreign keys prevent deleting a person with existing graph dependencies.
         Exec(con, tx, "DELETE FROM people WHERE family_id=$f AND id=$p;",
             ("$f", familyId.ToString("D")), ("$p", proposal.Person.Id.ToString("D")));
