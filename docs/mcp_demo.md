@@ -40,6 +40,8 @@ Try: **"Using familytree-fictional tools, describe the fictional five-generation
 - `scripts/smoke-mcp.py` exercises MCP initialization, discovery and a read tool over stdio on the standard public GitHub Actions runner.
 - `SyntheticDemoAssertions` validates stable fictional IDs, relationship endpoints, no self-links, a disconnected person, step relationships and the five-generation chain.
 - Proposals are explicitly **pending**, unapproved and ephemeral. No tool can approve, persist, delete or export actual genealogy data.
+- MCP startup fails closed unless the reviewed synthetic tool class and exact method set are the only registered MCP tools. Local capability negotiation grants only requested, explicitly consented synthetic capabilities; private data and publication remain denied.
+- `ScopedDemoDraftStore` is bounded and process-local, with explicit scope deletion. Its scope handles are not authenticated identity, and the store is not yet integrated with the public tool session or encrypted storage.
 - Stdio does not make this localhost service accessible from the ChatGPT website or a remote agent automatically. ChatGPT's supported connected app/remote MCP workflow would require a separate, authenticated connector, hosting/privacy review and cost approval. Never expose the stdio app as a public anonymous endpoint.
 - MCP tooling is not an identity/authorization solution. Integrate with scoped membership and approvals in #9, #10, #12 and #46 before attempting to use actual family records.
 - Product version remains **0.1.0 until the MVP is approved**. Hosting stays at $0 incremental; GitHub engineering spend is accounted for across projects.
