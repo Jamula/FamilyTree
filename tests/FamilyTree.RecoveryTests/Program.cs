@@ -192,6 +192,13 @@ static void RunRecoveryAssertions()
         }
         TestRestoreDestinationRace(backupPath, backupKey, restoreDirectory, sidecar: false);
         TestRestoreDestinationRace(backupPath, backupKey, restoreDirectory, sidecar: true);
+        Expect<IOException>(() => SqliteRecovery.CreateBackup(databasePath, keyPath, backupKey),
+            "backup never overwrites an existing key or other file");
+        Check(File.ReadAllBytes(keyPath).SequenceEqual(backupKey),
+            "existing backup key remains unchanged");
+        TestMalformedSchemas(databasePath, directory, restoreDirectory, backupKey);
+        TestLegacySchema(databasePath, directory, restoreDirectory, backupKey, familyKey,
+            familyId, memberId, person.Id);
         Expect<ArgumentException>(() => SqliteRecovery.CreateBackup(databasePath, backupPath, new byte[8]),
             "backup requires a 256-bit external key");
         Expect<ArgumentException>(() => SqliteRecovery.Restore(backupPath, restoredPath, new byte[8]),
@@ -210,6 +217,14 @@ static void RunRecoveryAssertions()
         Expect<InvalidDataException>(() => SqliteRecovery.Restore(tamperedPath, tamperedTarget, backupKey),
             "tampered ciphertext fails authentication");
         Check(!File.Exists(tamperedTarget), "tampered backup never creates a restore destination");
+
+        var oversizedPath = Path.Combine(directory, "oversized.backup");
+        using (var oversized = new FileStream(oversizedPath, FileMode.CreateNew, FileAccess.Write))
+            oversized.SetLength(1024L * 1024 * 1024 + 37);
+        var oversizedTarget = Path.Combine(restoreDirectory, "oversized.sqlite");
+        Expect<InvalidDataException>(() => SqliteRecovery.Restore(oversizedPath, oversizedTarget, backupKey),
+            "oversized encrypted input is rejected before allocation");
+        Check(!File.Exists(oversizedTarget), "oversized input is never published");
 
         var partialPath = Path.Combine(directory, "partial.backup");
         File.WriteAllBytes(partialPath, snapshot[..Math.Min(snapshot.Length, 24)]);
@@ -257,6 +272,123 @@ static void RunRecoveryAssertions()
         CryptographicOperations.ZeroMemory(wrongKey);
         Directory.Delete(directory, recursive: true);
     }
+}
+
+static void TestMalformedSchemas(string source, string directory, string restoreDirectory, byte[] key)
+{
+    var cases = new[]
+    {
+        (Table: "key_verifier", Old: "envelope BLOB NOT NULL", New: "placeholder BLOB NOT NULL"),
+        (Table: "memberships", Old: "CHECK (administrator IN (0,1))", New: ""),
+        (Table: "people", Old: "encrypted_name BLOB", New: "encrypted_name\u00a0BLOB"),
+        (Table: "person_visibility", Old: "REFERENCES memberships(family_id,principal_id)",
+            New: "REFERENCES families(id)")
+    };
+    for (var index = 0; index < cases.Length; index++)
+    {
+        var (table, oldText, newText) = cases[index];
+        var malformed = Path.Combine(directory, $"malformed-{index}.sqlite");
+        File.Copy(source, malformed);
+        using (var connection = new SqliteConnection($"Data Source={malformed};Pooling=False"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                PRAGMA writable_schema=ON;
+                UPDATE sqlite_master SET sql=replace(sql,$old,$new)
+                WHERE type='table' AND name=$table AND instr(sql,$old)>0;
+                """;
+            command.Parameters.AddWithValue("$old", oldText);
+            command.Parameters.AddWithValue("$new", newText);
+            command.Parameters.AddWithValue("$table", table);
+            Check(command.ExecuteNonQuery() == 1, "synthetic schema mutation was applied");
+        }
+        var output = Path.Combine(directory, $"malformed-{index}.backup");
+        Expect<InvalidDataException>(() => SqliteRecovery.CreateBackup(malformed, output, key),
+            "backup rejects missing columns and constraints");
+        Check(!File.Exists(output), "malformed schema is not backed up");
+        File.WriteAllBytes(output, EncryptTestSnapshot(File.ReadAllBytes(malformed), key));
+        var target = Path.Combine(restoreDirectory, $"malformed-{index}.sqlite");
+        Expect<InvalidDataException>(() => SqliteRecovery.Restore(output, target, key),
+            "restore rejects authenticated malformed schemas");
+        Check(!File.Exists(target), "malformed schema is not published");
+    }
+
+    var placeholders = Path.Combine(directory, "placeholder.sqlite");
+    using (var connection = new SqliteConnection($"Data Source={placeholders};Pooling=False"))
+    {
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = string.Join("; ", new[]
+        {
+            "families", "memberships", "invitations", "people", "person_proposals", "audit", "key_verifier"
+        }.Select(name => $"CREATE TABLE {name} (placeholder TEXT)"));
+        command.ExecuteNonQuery();
+    }
+    Expect<InvalidDataException>(() => SqliteRecovery.CreateBackup(
+        placeholders, Path.Combine(directory, "placeholder.backup"), key),
+        "table names alone do not constitute a valid schema");
+
+    var triggerDatabase = Path.Combine(directory, "trigger.sqlite");
+    File.Copy(source, triggerDatabase);
+    using (var connection = new SqliteConnection($"Data Source={triggerDatabase};Pooling=False"))
+    {
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "CREATE TRIGGER unexpected AFTER INSERT ON families BEGIN DELETE FROM memberships; END;";
+        command.ExecuteNonQuery();
+    }
+    var triggerBackup = Path.Combine(directory, "trigger.backup");
+    Expect<InvalidDataException>(() => SqliteRecovery.CreateBackup(triggerDatabase, triggerBackup, key),
+        "backup rejects unexpected triggers");
+    File.WriteAllBytes(triggerBackup, EncryptTestSnapshot(File.ReadAllBytes(triggerDatabase), key));
+    var triggerTarget = Path.Combine(restoreDirectory, "trigger.sqlite");
+    Expect<InvalidDataException>(() => SqliteRecovery.Restore(triggerBackup, triggerTarget, key),
+        "restore rejects authenticated unexpected triggers");
+    Check(!File.Exists(triggerTarget), "trigger database is not published");
+
+    var indexDatabase = Path.Combine(directory, "index.sqlite");
+    File.Copy(source, indexDatabase);
+    using (var connection = new SqliteConnection($"Data Source={indexDatabase};Pooling=False"))
+    {
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "CREATE UNIQUE INDEX unexpected ON families(id, id);";
+        command.ExecuteNonQuery();
+    }
+    var indexBackup = Path.Combine(directory, "index.backup");
+    Expect<InvalidDataException>(() => SqliteRecovery.CreateBackup(indexDatabase, indexBackup, key),
+        "backup rejects unexpected indexes");
+    File.WriteAllBytes(indexBackup, EncryptTestSnapshot(File.ReadAllBytes(indexDatabase), key));
+    var indexTarget = Path.Combine(restoreDirectory, "index.sqlite");
+    Expect<InvalidDataException>(() => SqliteRecovery.Restore(indexBackup, indexTarget, key),
+        "restore rejects authenticated unexpected indexes");
+    Check(!File.Exists(indexTarget), "indexed database is not published");
+}
+
+static void TestLegacySchema(string source, string directory, string restoreDirectory,
+    byte[] backupKey, byte[] familyKey, Guid familyId, Guid memberId, Guid personId)
+{
+    var legacy = Path.Combine(directory, "legacy.sqlite");
+    File.Copy(source, legacy);
+    using (var connection = new SqliteConnection($"Data Source={legacy};Pooling=False"))
+    {
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            DROP TABLE relationship_proposals;
+            DROP TABLE relationships;
+            ALTER TABLE audit DROP COLUMN created_utc;
+            """;
+        command.ExecuteNonQuery();
+    }
+    var backup = Path.Combine(directory, "legacy.backup");
+    var restored = Path.Combine(restoreDirectory, "legacy.sqlite");
+    SqliteRecovery.CreateBackup(legacy, backup, backupKey);
+    SqliteRecovery.Restore(backup, restored, backupKey);
+    using var store = new SqliteFamilyStore(restored, familyKey);
+    Check(store.ReadPeople(familyId, memberId).Any(person => person.Id == personId),
+        "supported legacy snapshot restores and migrates without losing people");
 }
 
 static void AssertRecoveryValidationBranches()
@@ -313,11 +445,6 @@ static void AssertRecoveryValidationBranches()
     SqliteRecovery.EnsureForeignKeyCheckClean(false);
     Expect<InvalidDataException>(() => SqliteRecovery.EnsureForeignKeyCheckClean(true),
         "foreign-key enforcement rejects reported violations");
-    Check(SqliteRecovery.HasRequiredSchema(7) && !SqliteRecovery.HasRequiredSchema(6),
-        "schema validation requires every recovery table");
-    SqliteRecovery.EnsureRequiredSchema(7);
-    Expect<InvalidDataException>(() => SqliteRecovery.EnsureRequiredSchema(6),
-        "schema enforcement rejects incomplete databases");
     Check(SqliteRecovery.JoinChildPath(Path.GetTempPath(), "safe-child") ==
           Path.Join(Path.GetTempPath(), "safe-child"),
         "recovery path composition accepts a single safe child");
@@ -344,34 +471,11 @@ static void TestRestoreDestinationRace(
         sidecar ? "raced-sidecar.sqlite" : "raced-destination.sqlite");
     var sentinel = Encoding.UTF8.GetBytes("destination race sentinel");
     var racedPath = sidecar ? destination + "-wal" : destination;
-    var restore = Task.Run(() =>
-    {
-        try
-        {
-            SqliteRecovery.Restore(backupPath, destination, backupKey);
-            return (Exception?)null;
-        }
-        catch (Exception exception)
-        {
-            return exception;
-        }
-    });
-
-    var deadline = DateTime.UtcNow.AddSeconds(10);
-    while (!restore.IsCompleted && DateTime.UtcNow < deadline)
-    {
-        if (Directory.EnumerateFiles(restoreDirectory, ".ft-recovery-*").Any())
-        {
-            File.WriteAllBytes(racedPath, sentinel);
-            break;
-        }
-        Thread.Sleep(1);
-    }
-
-    if (!File.Exists(racedPath))
-        throw new InvalidOperationException("Restore staging window was not observed.");
-    var failure = restore.GetAwaiter().GetResult();
-    Check(failure is IOException && File.ReadAllBytes(racedPath).SequenceEqual(sentinel),
+    Expect<IOException>(() => SqliteRecovery.Restore(backupPath, destination, backupKey,
+        () => File.WriteAllBytes(racedPath, sentinel)),
+        "restore rejects a destination collision before publication");
+    Check(File.ReadAllBytes(racedPath).SequenceEqual(sentinel) &&
+          (sidecar ? !File.Exists(destination) : true),
         sidecar
             ? "restore refuses a sidecar created while staging"
             : "restore refuses a destination created while staging");

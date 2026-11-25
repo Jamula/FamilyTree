@@ -27,7 +27,7 @@ internal static class RecoverySuiteAssertions
         start.ArgumentList.Add("--no-build");
         start.ArgumentList.Add("--no-restore");
         start.ArgumentList.Add("--configuration");
-        start.ArgumentList.Add("Release");
+        start.ArgumentList.Add(new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name);
 
         using var process = Process.Start(start) ??
             throw new InvalidOperationException("Recovery test process could not start.");

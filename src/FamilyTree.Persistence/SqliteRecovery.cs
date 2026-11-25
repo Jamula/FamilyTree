@@ -24,31 +24,44 @@ public static class SqliteRecovery
         RequireExistingDirectory(Path.GetDirectoryName(targetPath)!);
         RejectDirectory(targetPath);
 
-        using var source = Open(sourcePath, SqliteOpenMode.ReadOnly);
-        using var snapshot = OpenMemory();
-        source.BackupDatabase(snapshot);
-        ValidateDatabase(snapshot);
-
-        var database = Serialize(snapshot);
         try
         {
-            var encrypted = Encrypt(database, backupKey);
+            using var source = Open(sourcePath, SqliteOpenMode.ReadOnly);
+            EnsureDatabaseSizeValid(source);
+            using var snapshot = OpenMemory();
+            source.BackupDatabase(snapshot);
+            EnsureDatabaseSizeValid(snapshot);
+            ValidateDatabase(snapshot);
+
+            var database = Serialize(snapshot);
             try
             {
-                WriteAtomically(targetPath, encrypted);
+                var encrypted = Encrypt(database, backupKey);
+                try
+                {
+                    WriteAtomically(targetPath, encrypted);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(encrypted);
+                }
             }
             finally
             {
-                CryptographicOperations.ZeroMemory(encrypted);
+                CryptographicOperations.ZeroMemory(database);
             }
         }
-        finally
+        catch (SqliteException)
         {
-            CryptographicOperations.ZeroMemory(database);
+            throw new InvalidDataException("SQLite snapshot could not be validated.");
         }
     }
 
     public static void Restore(string backupPath, string databasePath, byte[] backupKey)
+        => Restore(backupPath, databasePath, backupKey, null);
+
+    internal static void Restore(string backupPath, string databasePath, byte[] backupKey,
+        Action? beforePublish)
     {
         ValidateKey(backupKey);
         var sourcePath = ResolvePath(backupPath, nameof(backupPath));
@@ -60,12 +73,42 @@ public static class SqliteRecovery
         if (File.Exists(targetPath) || HasSidecar(targetPath))
             throw new IOException("Restore destination must be new and isolated.");
 
-        var encrypted = File.ReadAllBytes(sourcePath);
-        var database = Decrypt(encrypted, backupKey);
-        CryptographicOperations.ZeroMemory(encrypted);
+        byte[] encrypted;
+        using (var stream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            var length = stream.Length;
+            if (length <= HeaderLength || length > (long)HeaderLength + MaximumSnapshotLength)
+                throw new InvalidDataException("Encrypted backup format is invalid.");
+            encrypted = new byte[checked((int)length)];
+            try
+            {
+                stream.ReadExactly(encrypted);
+                if (stream.ReadByte() != -1)
+                    throw new InvalidDataException("Encrypted backup format is invalid.");
+            }
+            catch (EndOfStreamException)
+            {
+                CryptographicOperations.ZeroMemory(encrypted);
+                throw new InvalidDataException("Encrypted backup format is invalid.");
+            }
+            catch
+            {
+                CryptographicOperations.ZeroMemory(encrypted);
+                throw;
+            }
+        }
+        byte[] database;
         try
         {
-            RestoreDatabase(database, targetPath);
+            database = Decrypt(encrypted, backupKey);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(encrypted);
+        }
+        try
+        {
+            RestoreDatabase(database, targetPath, beforePublish);
         }
         finally
         {
@@ -73,7 +116,7 @@ public static class SqliteRecovery
         }
     }
 
-    private static void RestoreDatabase(byte[] database, string targetPath)
+    private static void RestoreDatabase(byte[] database, string targetPath, Action? beforePublish)
     {
         var stagedPath = JoinChildPath(Path.GetDirectoryName(targetPath)!,
             ".ft-recovery-" + Guid.NewGuid().ToString("N") + ".tmp");
@@ -97,6 +140,7 @@ public static class SqliteRecovery
                 throw new InvalidDataException("SQLite snapshot could not be validated.");
             }
             FlushFile(stagedPath);
+            beforePublish?.Invoke();
             if (File.Exists(targetPath) || HasSidecar(targetPath))
                 throw new IOException("Restore destination must be new and isolated.");
             File.Move(stagedPath, targetPath);
@@ -137,10 +181,20 @@ public static class SqliteRecovery
             Marshal.Copy(pointer, result, 0, result.Length);
             return result;
         }
+
         finally
         {
             SQLitePCL.raw.sqlite3_free(pointer);
         }
+    }
+
+    private static void EnsureDatabaseSizeValid(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size();";
+        var length = Convert.ToInt64(command.ExecuteScalar());
+        if (length <= 0 || length > MaximumSnapshotLength)
+            throw new InvalidDataException("SQLite snapshot size is invalid.");
     }
 
     internal static bool IsSerializedBufferValid(IntPtr pointer, long length) =>
@@ -221,16 +275,7 @@ public static class SqliteRecovery
             EnsureForeignKeyCheckClean(reader.Read());
         }
 
-        using (var check = connection.CreateCommand())
-        {
-            check.CommandText = """
-                SELECT COUNT(*) FROM sqlite_master
-                WHERE type='table' AND name IN
-                    ('families','memberships','invitations','people',
-                     'person_proposals','audit','key_verifier');
-                """;
-            EnsureRequiredSchema(Convert.ToInt32(check.ExecuteScalar()));
-        }
+        ValidateSchema(connection);
     }
 
     internal static bool IsIntegrityCheckValid(
@@ -240,8 +285,6 @@ public static class SqliteRecovery
         !hasAdditionalRows;
 
     internal static bool IsForeignKeyCheckClean(bool hasViolations) => !hasViolations;
-
-    internal static bool HasRequiredSchema(int tableCount) => tableCount == 7;
 
     internal static void EnsureIntegrityCheckValid(Func<bool> read, Func<string> readResult)
     {
@@ -258,11 +301,161 @@ public static class SqliteRecovery
             throw new InvalidDataException("SQLite snapshot relationship check failed.");
     }
 
-    internal static void EnsureRequiredSchema(int tableCount)
+    private static void ValidateSchema(SqliteConnection connection)
     {
-        if (!HasRequiredSchema(tableCount))
+        using (var objects = connection.CreateCommand())
+        {
+            objects.CommandText = """
+                SELECT COUNT(*) FROM sqlite_master
+                WHERE type IN ('trigger','view') OR (type='index' AND sql IS NOT NULL);
+                """;
+            if (Convert.ToInt64(objects.ExecuteScalar()) != 0)
+                throw new InvalidDataException("SQLite snapshot schema is unsupported.");
+        }
+        var present = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (name, required, definition) in SchemaDefinitions)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name=$name;";
+            command.Parameters.AddWithValue("$name", name);
+            var actual = command.ExecuteScalar() as string;
+            if (actual is null ? required :
+                NormalizeSchema(actual) != NormalizeSchema(definition) &&
+                !(name == "audit" && NormalizeSchema(actual) == NormalizeSchema(LegacyAuditDefinition)))
+                throw new InvalidDataException("SQLite snapshot schema is unsupported.");
+            if (actual is not null)
+                present.Add(name);
+        }
+        if (present.Contains("external_principals") != present.Contains("identity_key_verifier") ||
+            present.Contains("person_visibility") != present.Contains("person_display_name_visibility") ||
+            present.Contains("relationships") != present.Contains("relationship_proposals"))
             throw new InvalidDataException("SQLite snapshot schema is incomplete.");
     }
+
+    private static string NormalizeSchema(string sql)
+    {
+        var result = new StringBuilder(sql.Length);
+        var inString = false;
+        var whitespace = false;
+        foreach (var character in sql)
+        {
+            if (!inString && (character == ' ' || character is >= '\t' and <= '\r'))
+            {
+                whitespace = true;
+                continue;
+            }
+            if (whitespace && result.Length > 0 &&
+                (char.IsLetterOrDigit(result[^1]) || result[^1] == '_') &&
+                (char.IsLetterOrDigit(character) || character == '_'))
+                result.Append(' ');
+            whitespace = false;
+            if (character == '\'')
+                inString = !inString;
+            result.Append(character);
+        }
+        return result.ToString();
+    }
+
+    // Definitions are deliberately strict: an unknown schema needs an explicit
+    // recovery compatibility decision before it can be accepted.
+    private const string LegacyAuditDefinition = """
+        CREATE TABLE audit (
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            family_id TEXT NOT NULL, subject_id TEXT NOT NULL,
+            reviewer TEXT NOT NULL, action TEXT NOT NULL)
+        """;
+    private static readonly (string Name, bool Required, string Definition)[] SchemaDefinitions =
+    [
+        ("families", true, "CREATE TABLE families (id TEXT PRIMARY KEY NOT NULL)"),
+        ("memberships", true, """
+            CREATE TABLE memberships (
+                family_id TEXT NOT NULL, principal_id TEXT NOT NULL,
+                state TEXT NOT NULL CHECK (state IN ('Pending', 'Active', 'Left')),
+                administrator INTEGER NOT NULL CHECK (administrator IN (0,1)),
+                PRIMARY KEY(family_id, principal_id),
+                FOREIGN KEY(family_id) REFERENCES families(id))
+            """),
+        ("invitations", true, """
+            CREATE TABLE invitations (
+                id TEXT PRIMARY KEY, family_id TEXT NOT NULL, issuer TEXT NOT NULL,
+                intended TEXT NOT NULL, expires_unix INTEGER NOT NULL,
+                state TEXT NOT NULL CHECK (state IN ('Offered','Accepted','Revoked')),
+                FOREIGN KEY(family_id) REFERENCES families(id))
+            """),
+        ("people", true, """
+            CREATE TABLE people (
+                family_id TEXT NOT NULL, id TEXT NOT NULL,
+                encrypted_name BLOB NOT NULL, living INTEGER NOT NULL,
+                PRIMARY KEY(family_id, id), FOREIGN KEY(family_id) REFERENCES families(id))
+            """),
+        ("person_proposals", true, """
+            CREATE TABLE person_proposals (
+                id TEXT PRIMARY KEY, family_id TEXT NOT NULL, person_id TEXT NOT NULL,
+                submitter TEXT NOT NULL, encrypted_name BLOB NOT NULL,
+                living INTEGER NOT NULL, state TEXT NOT NULL
+                    CHECK(state IN ('Pending','Approved','Rejected')),
+                reviewer TEXT NULL, FOREIGN KEY(family_id) REFERENCES families(id))
+            """),
+        ("audit", true, """
+            CREATE TABLE audit (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                family_id TEXT NOT NULL, subject_id TEXT NOT NULL,
+                reviewer TEXT NOT NULL, action TEXT NOT NULL,
+                created_utc TEXT)
+            """),
+        ("key_verifier", true, """
+            CREATE TABLE key_verifier (
+                id INTEGER PRIMARY KEY CHECK(id=1), envelope BLOB NOT NULL)
+            """),
+        ("relationships", false, """
+            CREATE TABLE relationships (
+                family_id TEXT NOT NULL, id TEXT NOT NULL,
+                from_id TEXT NOT NULL, to_id TEXT NOT NULL,
+                kind TEXT NOT NULL, encrypted_label BLOB NOT NULL,
+                proposal_id TEXT NOT NULL, submitter TEXT NOT NULL,
+                PRIMARY KEY(family_id, id),
+                FOREIGN KEY(family_id) REFERENCES families(id),
+                FOREIGN KEY(family_id,from_id) REFERENCES people(family_id,id),
+                FOREIGN KEY(family_id,to_id) REFERENCES people(family_id,id))
+            """),
+        ("relationship_proposals", false, """
+            CREATE TABLE relationship_proposals (
+                id TEXT PRIMARY KEY, family_id TEXT NOT NULL,
+                relation_id TEXT NOT NULL, from_id TEXT NOT NULL,
+                to_id TEXT NOT NULL, kind TEXT NOT NULL,
+                encrypted_label BLOB NOT NULL, submitter TEXT NOT NULL,
+                identity_envelope BLOB NOT NULL,
+                state TEXT NOT NULL CHECK(state IN
+                    ('Pending','Approved','Rejected','Undone')),
+                reviewer TEXT NULL, FOREIGN KEY(family_id) REFERENCES families(id))
+            """),
+        ("external_principals", false, """
+            CREATE TABLE external_principals (
+                subject_digest TEXT NOT NULL PRIMARY KEY, principal_id TEXT NOT NULL UNIQUE)
+            """),
+        ("identity_key_verifier", false, """
+            CREATE TABLE identity_key_verifier (
+                id INTEGER NOT NULL PRIMARY KEY CHECK(id=1), digest TEXT NOT NULL)
+            """),
+        ("person_visibility", false, """
+            CREATE TABLE person_visibility (
+                family_id TEXT NOT NULL, branch_id TEXT NOT NULL,
+                principal_id TEXT NOT NULL, person_id TEXT NOT NULL,
+                PRIMARY KEY (family_id,branch_id,principal_id,person_id),
+                FOREIGN KEY (family_id,principal_id)
+                    REFERENCES memberships(family_id,principal_id),
+                FOREIGN KEY (family_id,person_id) REFERENCES people(family_id,id))
+            """),
+        ("person_display_name_visibility", false, """
+            CREATE TABLE person_display_name_visibility (
+                family_id TEXT NOT NULL, branch_id TEXT NOT NULL,
+                principal_id TEXT NOT NULL, person_id TEXT NOT NULL,
+                PRIMARY KEY (family_id,branch_id,principal_id,person_id),
+                FOREIGN KEY (family_id,branch_id,principal_id,person_id)
+                    REFERENCES person_visibility(family_id,branch_id,principal_id,person_id)
+                    ON DELETE CASCADE)
+            """)
+    ];
 
     private static SqliteConnection OpenMemory()
     {
@@ -303,7 +496,7 @@ public static class SqliteRecovery
                 stream.Write(content);
                 stream.Flush(flushToDisk: true);
             }
-            File.Move(temporaryPath, targetPath, overwrite: true);
+            File.Move(temporaryPath, targetPath);
         }
         finally
         {
