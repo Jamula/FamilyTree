@@ -3,6 +3,9 @@ on:
   pull_request:
   push:
     branches: [main]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
@@ -63,7 +66,7 @@ jobs:
       - name: Restore local tools
         run: dotnet tool restore
       - name: Domain assertions and local coverage
-        run: dotnet dotnet-coverage collect "dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj --no-restore --configuration Release" --output coverage.cobertura.xml --output-format cobertura
+        run: dotnet dotnet-coverage collect "dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj --no-build --no-restore --configuration Release" --output coverage.cobertura.xml --output-format cobertura
       - name: Check coverage was generated
         run: test -s coverage.cobertura.xml
       - name: Coverage reporter parser regression tests
@@ -76,18 +79,45 @@ jobs:
         run: bash scripts/smoke-aspire.sh
       - name: Local fictional MCP protocol handshake
         run: python3 scripts/smoke-mcp.py
-      - name: Measure and enforce M1 line coverage floor
+      - name: Enforce existing M1 90% line coverage floor
         run: python3 scripts/report-coverage.py coverage.cobertura.xml --min-overall 90 --min-domain 90
-      - name: Enforce 90% line coverage per measured architectural component
+      - name: Enforce line floor and complete branch measurements
         if: always() && hashFiles('coverage.cobertura.xml') != ''
         run: >-
           python3 scripts/report-component-coverage.py coverage.cobertura.xml
+          --min-overall-branch 0
           --min-component Domain=90
+          --min-component-branch Domain=0
           --min-component Persistence=90
+          --min-component-branch Persistence=0
           --min-component Api=90
+          --min-component-branch Api=0
           --min-component Web=90
+          --min-component-branch Web=0
           --min-component Mcp=90
+          --min-component-branch Mcp=0
           --min-component ServiceDefaults=90
+          --min-component-branch ServiceDefaults=0
           --min-component SyntheticDemo=90
+          --min-component-branch SyntheticDemo=0
+      - name: Report staged M1 95% line and 90% branch targets
+        if: always() && hashFiles('coverage.cobertura.xml') != ''
+        continue-on-error: true
+        run: >-
+          python3 scripts/report-coverage.py coverage.cobertura.xml
+          --min-overall 95 --min-overall-branch 90 --min-domain 90
+      - name: Report staged 95% line and 90% branch targets per component
+        if: always() && hashFiles('coverage.cobertura.xml') != ''
+        continue-on-error: true
+        run: >-
+          python3 scripts/report-component-coverage.py coverage.cobertura.xml
+          --min-overall-line 95 --min-overall-branch 90
+          --min-component Domain=95 --min-component-branch Domain=90
+          --min-component Persistence=95 --min-component-branch Persistence=90
+          --min-component Api=95 --min-component-branch Api=90
+          --min-component Web=95 --min-component-branch Web=90
+          --min-component Mcp=95 --min-component-branch Mcp=90
+          --min-component ServiceDefaults=95 --min-component-branch ServiceDefaults=90
+          --min-component SyntheticDemo=95 --min-component-branch SyntheticDemo=90
 # No paid Code Quality upload or persisted artifacts: $0 cost guardrail.
 # Keep any future action SHA-pinned, approved, and behind explicit spending approval.

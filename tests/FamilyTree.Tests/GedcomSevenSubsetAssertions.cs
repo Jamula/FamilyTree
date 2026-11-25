@@ -16,6 +16,14 @@ internal static class GedcomSevenSubsetAssertions
             "both family parent records retained");
         Check(parsed.People.Any(x=>x.DisplayName=="Alex Example"),
             "name slash syntax normalized");
+        var dates = fixture.Replace("1 NAME Alex /Example/",
+            "1 NAME Alex /Example/\n1 BIRT\n2 DATE 1 JAN 1900\n1 DEAT\n2 DATE 1 JAN 1980\n1 OCCU\n2 DATE 1 JAN 1950",
+            StringComparison.Ordinal);
+        var dated = GedcomSevenSubset.Preview(dates);
+        var alex = dated.People.Single(x => x.DisplayName == "Alex Example");
+        Check(dated.Valid && alex.BirthDateText == "1 JAN 1900" && alex.DeathDateText == "1 JAN 1980" &&
+              dated.Warnings.Contains("Unsupported individual structures require review"),
+            "birth and death dates retained and unrelated date requires review");
         Check(!GedcomSevenSubset.Preview(null).Valid &&
               !GedcomSevenSubset.Preview("0 TRLR").Valid,
               "malformed data rejected without crashing");

@@ -57,8 +57,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("path", type=Path)
     parser.add_argument("--min-overall", type=float, default=0)
+    parser.add_argument("--min-overall-branch", type=float, default=0)
     parser.add_argument("--min-domain", type=float, default=0)
     args = parser.parse_args()
+    for threshold in (args.min_overall, args.min_overall_branch, args.min_domain):
+        if not 0 <= threshold <= 100:
+            raise ValueError("Coverage threshold outside 0..100")
     if not args.path.is_file():
         raise ValueError("Missing coverage report")
     overall, branches, domain, domain_branches, count = summarize(args.path)
@@ -79,9 +83,12 @@ def main():
             for title, value in rows:
                 value_text = f"{value * 100:.1f}%" if value is not None else "Not measured"
                 stream.write(f"| {title} | {value_text} |\n")
-            stream.write("\n90% line coverage floor is enabled on CI; branch coverage remains a separate target.\n")
+            stream.write("\nCI requires 95% overall lines and 90% overall branches for M1.\n")
     if overall * 100 < args.min_overall:
         print(f"ERROR: overall line coverage below {args.min_overall:.1f}% floor", file=sys.stderr)
+        return 1
+    if branches * 100 < args.min_overall_branch:
+        print(f"ERROR: overall branch coverage below {args.min_overall_branch:.1f}% floor", file=sys.stderr)
         return 1
     if args.min_domain > 0 and (domain is None or domain * 100 < args.min_domain):
         print(f"ERROR: Domain line coverage missing or below {args.min_domain:.1f}% floor", file=sys.stderr)

@@ -19,6 +19,16 @@ For the development API, use `dotnet run --project src/FamilyTree.Api/FamilyTree
 
 **Important:** The web page is only a landing page, not an authenticated genealogy app. The API deliberately returns 501 for people/tree endpoints until access control is implemented. Do not run the prototype with private family data.
 
+To reproduce the CI coverage measurement locally:
+```bash
+dotnet tool restore
+dotnet dotnet-coverage collect "dotnet run --project tests/FamilyTree.Tests/FamilyTree.Tests.csproj --no-restore --configuration Release" --output coverage.cobertura.xml --output-format cobertura
+python3 scripts/report-coverage.py coverage.cobertura.xml
+python3 scripts/report-component-coverage.py coverage.cobertura.xml
+```
+The reports use only measured source observations; missing or malformed
+Cobertura data fails closed.
+
 ## CI and cost
 PR checks use GitHub's standard hosted runners for this public repository; GitHub documents those runners as free for public repositories. The workflow generates coverage without uploading artifact storage or enabling usage-billed AI Code Quality. Do not enable paid services or deployments without explicit owner approval. See [cost_policy.md](cost_policy.md).
 

@@ -9,14 +9,29 @@ internal static class GedcomPreviewAssertions
         var preview = GedcomStructurePreview.Preview(safe);
         Check(preview.Valid && preview.Individuals == 2 && preview.Families == 1,
             "synthetic preview recognized");
-        Check(!GedcomStructurePreview.Preview(safe.Replace("@I2@ INDI", "@I1@ INDI"))
-                .Valid, "duplicate pointer rejected");
-        Check(!GedcomStructurePreview.Preview(safe.Replace("WIFE @I2@", "WIFE @OTHER@"))
-                .Valid, "unresolved pointer rejected");
-        Check(!GedcomStructurePreview.Preview("0 HEAD\n0 TRLR")
-                .Valid, "missing version rejected");
-        Check(!GedcomStructurePreview.Preview(new string('X', 300000)).Valid,
-            "oversize input rejected");
+        var rejectedInputs = new (string? Input, string Scenario, string Error)[]
+        {
+            (safe.Replace("0 @I2@ INDI", "0 @I1@ INDI\n0 @I2@ INDI"),
+                "duplicate pointer", "Duplicate record pointer"),
+            (safe.Replace("WIFE @I2@", "WIFE @OTHER@"),
+                "unresolved pointer", "Unresolved reference pointer"),
+            (safe.Replace("2 VERS 7.0", "2 VERS 5.5"),
+                "missing version", "Not marked GEDCOM 7"),
+            (new string('X', 300000), "oversize input", "File absent or too large"),
+            (null, "null input", "File absent or too large"),
+            ("0 HEAD\n0 TRLR", "short input", "Invalid line count"),
+            (safe.Replace("1 NAME", "1\tNAME"), "tabbed line", "Malformed or oversized line"),
+            (safe.Replace("1 NAME", "1 name"), "malformed line", "Malformed GEDCOM line"),
+            (safe.Replace("1 NAME", "4 NAME"), "invalid nesting", "Invalid nesting depth"),
+            (safe.Replace("0 HEAD", "0 NOTE"), "missing head", "Missing HEAD"),
+            (safe.Replace("0 TRLR", "0 NOTE"), "missing trailer", "Missing TRLR"),
+        };
+        foreach (var (input, scenario, expectedError) in rejectedInputs)
+        {
+            var result = GedcomStructurePreview.Preview(input);
+            Check(!result.Valid && result.Errors.SequenceEqual(new[] { expectedError }),
+                $"{scenario}: expected only '{expectedError}', got [{string.Join(", ", result.Errors)}]");
+        }
         var error = GedcomStructurePreview.Preview(safe + "secret-data").Errors;
         Check(!error.Any(x => x.Contains("secret-data", StringComparison.Ordinal)),
             "errors cannot echo GEDCOM contents");

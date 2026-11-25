@@ -267,6 +267,29 @@ internal static class GedcomLegacyCompatibilityAssertions
             Check(!GedcomLegacyCompatibility.Preview(eventAssociation.Replace(
                 "1 BIRT\n2 ASSO", "1 NOTE text\n2 ASSO", StringComparison.Ordinal)).Valid,
                 "event association cannot be hidden beneath a note");
+            foreach (var eventTag in new[] {
+                "ANUL", "CENS", "DIV", "DIVF", "ENGA", "MARB", "MARC", "MARL",
+                "MARR", "MARS", "EVEN", "NCHI", "RESI", "FACT", "CAST", "DSCR",
+                "EDUC", "IDNO", "NATI", "NMR", "OCCU", "PROP", "RELI", "SSN",
+                "TITL", "ADOP", "BAPM", "BARM", "BASM", "BIRT", "BLES", "BURI",
+                "CHR", "CHRA", "CONF", "CREM", "DEAT", "EMIG", "FCOM", "GRAD",
+                "IMMI", "NATU", "ORDN", "PROB", "RETI", "WILL" })
+            {
+                var associated = source.Replace("1 NAME Alex /Example/",
+                    $"1 NAME Alex /Example/\n1 {eventTag}\n2 ASSO @I2@\n3 ROLE WITN",
+                    StringComparison.Ordinal);
+                var associationReport = GedcomLegacyCompatibility.Preview(associated);
+                Check(associationReport.Valid &&
+                    associationReport.People.SequenceEqual(original.People) &&
+                    associationReport.Families.Single().ParentPointers.SequenceEqual(
+                        original.Families.Single().ParentPointers) &&
+                    associationReport.Families.Single().ChildPointers.SequenceEqual(
+                        original.Families.Single().ChildPointers),
+                    $"association under {eventTag} preserves the fictional graph");
+                Check(!GedcomLegacyCompatibility.Preview(associated.Replace(
+                    "2 ASSO @I2@", "2 ASSO @MISSING@", StringComparison.Ordinal)).Valid,
+                    $"association under {eventTag} must resolve to an individual");
+            }
             var inline = source.Replace(
                 "1 NAME Alex /Example/", "1 NAME Alex /Example/\n1 NOTE ordinary text\n1 SOUR inline text\n1 OBJE\n2 FILE example.jpg",
                 StringComparison.Ordinal);

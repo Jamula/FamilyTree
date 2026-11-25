@@ -20,6 +20,15 @@ SOURCE = re.compile(r"(?:^|/)src/FamilyTree\.([A-Za-z]+)/")
 CONDITION = re.compile(r"\((\d+)/(\d+)\)")
 
 
+def is_true(value):
+    normalized = value.strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    raise ValueError("Invalid branch flag")
+
+
 def component_of(filename, package):
     clean = filename.replace("\\", "/")
     if "/obj/" in clean or "/bin/" in clean or "/tests/" in clean:
@@ -63,27 +72,26 @@ def count(source):
                 branch_key = (cls.get("name", ""), *key)
                 observations[component][key] = (
                     observations[component].get(key, False) or hits > 0)
-                if line.get("branch", "false") == "true":
+                if is_true(line.get("branch", "false")):
                     match = CONDITION.search(line.get("condition-coverage", ""))
-                    if match:
-                        covered, total = map(int, match.groups())
-                        if total < 1 or covered < 0 or covered > total:
-                            raise ValueError("Invalid branch condition observation")
-                        previous = branch_counts[component].get(branch_key)
-                        if previous is None:
-                            branch_counts[component][branch_key] = (covered, total)
-                        elif previous[1] != total:
-                            raise ValueError("Conflicting branch totals on source line")
-                        else:
-                            branch_counts[component][branch_key] = (max(covered, previous[0]), total)
-                    else:
+                    if not match:
                         missing_branch_counts[component] += 1
+                        continue
+                    covered, total = map(int, match.groups())
+                    if total < 1 or covered < 0 or covered > total:
+                        raise ValueError("Invalid branch condition observation")
+                    previous = branch_counts[component].get(branch_key)
+                    if previous is None:
+                        branch_counts[component][branch_key] = (covered, total)
+                    elif previous[1] != total:
+                        raise ValueError("Conflicting branch totals on source line")
+                    else:
+                        branch_counts[component][branch_key] = (max(covered, previous[0]), total)
     # Some Cobertura producers supply only a global branch-rate, not per-line
     # condition counts. Mark an entire component NOT MEASURED in that case,
     # but never publish an inflated partial rate from a damaged mixed report.
-    for component, missing in missing_branch_counts.items():
-        if missing and branch_counts.get(component):
-            raise ValueError("Incomplete branch conditions for component")
+    if missing_branch_counts:
+        raise ValueError("Incomplete branch conditions for component")
     return observations, branch_counts
 
 
@@ -105,6 +113,14 @@ def main():
     parser.add_argument("path", type=Path)
     parser.add_argument("--min-component", action="append", default=[],
                         metavar="NAME=RATE", help="Require NAME and its measured line rate >= RATE percent")
+    parser.add_argument("--min-component-branch", action="append", default=[],
+                        metavar="NAME=RATE", help="Require NAME and its measured branch rate >= RATE percent")
+    parser.add_argument("--min-overall-line", type=float, default=None,
+                        help="Require measured source line coverage across all components")
+    parser.add_argument("--min-overall-branch", type=float, default=None,
+                        help="Require measured source branch coverage across all components")
+    parser.add_argument("--allow-branchless", action="append", default=[],
+                        metavar="NAME", help="Explicitly allow a measured component with no branches")
     args = parser.parse_args()
     if not args.path.is_file():
         raise ValueError("Coverage XML file missing")
@@ -122,9 +138,66 @@ def main():
         if not 0 <= rate <= 100:
             raise ValueError("Coverage threshold outside 0..100")
         requirements[component] = rate
+    branch_requirements = {}
+    for rule in args.min_component_branch:
+        component, sep, rate_text = rule.partition("=")
+        if not sep or component not in COMPONENTS or component in branch_requirements:
+            raise ValueError("Invalid or duplicate component branch coverage gate")
+        try:
+            rate = float(rate_text)
+        except ValueError as exc:
+            raise ValueError("Invalid branch coverage threshold") from exc
+        if not 0 <= rate <= 100:
+            raise ValueError("Branch coverage threshold outside 0..100")
+        branch_requirements[component] = rate
+    allowed_branchless = set(args.allow_branchless)
+    for component in allowed_branchless:
+        if component not in COMPONENTS:
+            raise ValueError("Invalid branchless component justification")
+    if args.min_overall_line is not None and not 0 <= args.min_overall_line <= 100:
+        raise ValueError("Overall line coverage threshold outside 0..100")
+    if args.min_overall_branch is not None and not 0 <= args.min_overall_branch <= 100:
+        raise ValueError("Overall branch coverage threshold outside 0..100")
 
     print("Source-component coverage (distinct observed source lines):")
     failure = False
+    all_lines = [value for component in COMPONENTS
+                 for value in observations.get(component, {}).values()]
+    all_branches = [value for component in COMPONENTS
+                    for value in branch_counts.get(component, {}).values()]
+    overall_line = sum(all_lines) / len(all_lines) if all_lines else None
+    overall_branch_total = sum(value[1] for value in all_branches)
+    missing_branch_components = [
+        component for component in COMPONENTS
+        if not branch_counts.get(component) and (
+            not observations.get(component) or component not in allowed_branchless)
+    ]
+    overall_branch = (
+        sum(value[0] for value in all_branches) / overall_branch_total
+        if overall_branch_total and not missing_branch_components else None)
+    if missing_branch_components:
+        print("  FAIL: branch measurements missing for "
+              + ", ".join(f"FamilyTree.{component}" for component in missing_branch_components),
+              file=sys.stderr)
+        failure = True
+    if args.min_overall_line is not None and (
+            overall_line is None or overall_line * 100 < args.min_overall_line):
+        print(f"  FAIL: overall source line coverage below {args.min_overall_line:.1f}%",
+              file=sys.stderr)
+        failure = True
+    if args.min_overall_branch is not None and (
+            overall_branch is None or overall_branch * 100 < args.min_overall_branch):
+        print(f"  FAIL: overall source branch coverage below {args.min_overall_branch:.1f}%",
+              file=sys.stderr)
+        failure = True
+    overall_line_text = (
+        f"{overall_line * 100:.1f}% ({len(all_lines)} lines)"
+        if overall_line is not None else "NOT MEASURED")
+    overall_branch_text = (
+        f"{overall_branch * 100:.1f}% ({overall_branch_total} conditions)"
+        if overall_branch is not None else "NOT MEASURED")
+    print(f"  Overall source coverage: lines={overall_line_text}, "
+          f"branches={overall_branch_text}")
     for component, rate, count_lines, branch, count_branches in rows:
         line_text = f"{rate*100:.1f}%" if rate is not None else "NOT MEASURED"
         branch_text = f"{branch*100:.1f}%" if branch is not None else "NOT MEASURED"
@@ -135,6 +208,20 @@ def main():
             print(f"  FAIL: FamilyTree.{component} lacks measured {threshold:.1f}% line coverage",
                   file=sys.stderr)
             failure = True
+        branch_threshold = branch_requirements.get(component)
+        if branch_threshold is not None:
+            if branch is None:
+                if rate is None or component not in allowed_branchless:
+                    print(f"  FAIL: FamilyTree.{component} has no measured branches; "
+                          "component source lines and an explicit branchless justification are required",
+                          file=sys.stderr)
+                    failure = True
+                else:
+                    print(f"  FamilyTree.{component}: branchless exemption (explicitly allowed)")
+            elif branch * 100 < branch_threshold:
+                print(f"  FAIL: FamilyTree.{component} lacks measured "
+                      f"{branch_threshold:.1f}% branch coverage", file=sys.stderr)
+                failure = True
 
     summary = os.getenv("GITHUB_STEP_SUMMARY")
     if summary:
@@ -145,8 +232,11 @@ def main():
             for component, rate, count_lines, branch, _ in rows:
                 line_text = f"{rate*100:.1f}%" if rate is not None else "Not measured"
                 branch_text = f"{branch*100:.1f}%" if branch is not None else "Not measured"
+                if (branch is None and rate is not None and component in allowed_branchless
+                        and component in branch_requirements):
+                    branch_text += " (branchless exemption: explicitly allowed)"
                 output.write(f"| FamilyTree.{component} | {count_lines} | {line_text} | {branch_text} |\n")
-            output.write("\nUnmeasured means no instrumented source lines, not 100%. "
+            output.write("\nUnmeasured means no instrumented source lines or branches, not 100%. "
                          "Smoke-test coverage is not included in these percentages.\n")
     return 1 if failure else 0
 

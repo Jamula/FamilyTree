@@ -73,6 +73,11 @@ internal static class AuthorizedTreeExplorerHttpAssertions
             await app.StartAsync();
             using var client = app.GetTestClient();
             var baseUrl = "/test-tree?center=" + center.Id;
+            using var malformedCenter = await client.GetAsync("/test-tree?center=not-a-guid");
+            using var emptyCenter = await client.GetAsync("/test-tree?center=" + Guid.Empty);
+            Check(malformedCenter.StatusCode == HttpStatusCode.NotFound &&
+                emptyCenter.StatusCode == malformedCenter.StatusCode,
+                "malformed and empty center identifiers are rejected uniformly");
             using var initial = await client.GetAsync(baseUrl);
             var body = await initial.Content.ReadAsStringAsync();
             Check(initial.StatusCode == HttpStatusCode.OK &&

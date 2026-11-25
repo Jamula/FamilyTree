@@ -21,6 +21,7 @@ internal static class MemberLifecycleAssertions
         Deny(() => MemberEnrollment.Request(accepted,admin), "invitation identity mismatch");
         var pending = MemberEnrollment.Request(accepted,invited);
         Check(pending.State == MembershipState.PendingApproval, "join requires approval");
+        Deny(() => pending.Leave(Guid.Empty,family,false), "empty leave actor");
         Deny(() => pending.Approve(invited,family,true), "self approval");
         Deny(() => pending.Approve(admin,Guid.NewGuid(),true), "cross-family review");
         Deny(() => pending.Approve(admin,family,false), "unprivileged review");

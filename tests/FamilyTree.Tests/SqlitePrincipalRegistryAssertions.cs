@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using FamilyTree.Persistence;
+using Microsoft.Data.Sqlite;
 
 internal static class SqlitePrincipalRegistryAssertions
 {
@@ -76,6 +77,30 @@ internal static class SqlitePrincipalRegistryAssertions
                 Check(!Encoding.UTF8.GetString(File.ReadAllBytes(dbPath)).Contains(
                     subject, StringComparison.Ordinal),
                     "identity subject must never appear in SQLite plaintext");
+            }
+            string keyDigest;
+            using (var raw = new SqliteConnection(new SqliteConnectionStringBuilder
+                   { DataSource = dbPath, Pooling = false }.ToString()))
+            {
+                raw.Open();
+                using var read = raw.CreateCommand();
+                read.CommandText = "SELECT digest FROM identity_key_verifier WHERE id=1;";
+                keyDigest = (string)read.ExecuteScalar()!;
+                using var delete = raw.CreateCommand();
+                delete.CommandText = "DELETE FROM identity_key_verifier WHERE id=1;";
+                Check(delete.ExecuteNonQuery() == 1, "remove synthetic key verifier");
+            }
+            Expect<InvalidDataException>(() =>
+                new SqlitePrincipalRegistry(dbPath, key),
+                "existing identity data without key metadata fails closed");
+            using (var raw = new SqliteConnection(new SqliteConnectionStringBuilder
+                   { DataSource = dbPath, Pooling = false }.ToString()))
+            {
+                raw.Open();
+                using var restore = raw.CreateCommand();
+                restore.CommandText = "INSERT INTO identity_key_verifier(id,digest) VALUES(1,$digest);";
+                restore.Parameters.AddWithValue("$digest", keyDigest);
+                Check(restore.ExecuteNonQuery() == 1, "restore synthetic key verifier");
             }
             using (var reopened = new SqlitePrincipalRegistry(dbPath, key))
             {
