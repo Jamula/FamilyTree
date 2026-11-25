@@ -39,6 +39,14 @@ internal static class MemberContributionAssertions
         var approvedPhoto = photo.Review(moderator, family, true, true);
         Check(approvedPhoto.CanPublishMedia(true, true, true, false, false),
             "approved photo requires valid consent and viewer permission");
+        Check(!approvedPhoto.CanPublishMedia(subjectConsentVerified: false,
+                mediaOwnerConsentVerified: true, viewerHasFieldPermission: true,
+                subjectIsMinor: true, guardianConsentVerified: true),
+            "photo requires subject consent");
+        Check(!approvedPhoto.CanPublishMedia(subjectConsentVerified: true,
+                mediaOwnerConsentVerified: false, viewerHasFieldPermission: true,
+                subjectIsMinor: true, guardianConsentVerified: true),
+            "photo requires media owner consent");
         Check(!approvedPhoto.CanPublishMedia(true, true, false, false, false),
             "photo requires viewer field permission");
         Check(!approvedPhoto.CanPublishMedia(true, true, true, true, false),
