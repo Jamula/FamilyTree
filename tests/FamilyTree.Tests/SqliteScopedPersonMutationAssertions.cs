@@ -40,6 +40,14 @@ internal static class SqliteScopedPersonMutationAssertions
             store.GrantScopedPersonPermission(family, branch, admin, reviewer, Permission.UndoPerson);
             Expect<UnauthorizedAccessException>(() => store.ProposeScopedPerson(family, otherBranch, author, name));
             var proposal = store.ProposeScopedPerson(family, branch, author, name, false);
+            byte[] pendingSeal;
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = "SELECT state_envelope FROM scoped_person_proposals WHERE id=$id;";
+                cmd.Parameters.AddWithValue("$id", proposal.ToString("D"));
+                pendingSeal = (byte[])cmd.ExecuteScalar()!;
+            }
             var person = store.ListScopedPendingPeople(family, branch, reviewer).Single().Person;
             Check(person.Id != Guid.Empty && person.DisplayName == name && !person.IsLiving,
                 "server generated identity and exact payload");
@@ -77,6 +85,19 @@ internal static class SqliteScopedPersonMutationAssertions
             store.UndoScopedPerson(family, branch, reviewer, proposal);
             Check(!store.ReadPeople(family, admin).Any(x => x.Id == person.Id), "undo removed person");
             Expect<InvalidOperationException>(() => store.UndoScopedPerson(family, branch, reviewer, proposal));
+            using (var db = Connect(path))
+                Execute(db, "UPDATE scoped_person_proposals SET state='Pending',reviewer=NULL,state_envelope=$seal WHERE id=$id;",
+                    ("$seal", pendingSeal), ("$id", proposal.ToString("D")));
+            using (var reopened = new SqliteFamilyStore(path, key))
+                Expect<InvalidDataException>(() => reopened.ReviewScopedPerson(family, branch, reviewer, proposal, true));
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM people WHERE id=$id;";
+                cmd.Parameters.AddWithValue("$id", person.Id.ToString("D"));
+                Check((long)cmd.ExecuteScalar()! == 0, "undo replay publishes nothing");
+                Execute(db, "UPDATE scoped_person_proposals SET state='Undone' WHERE id=$id;", ("$id", proposal.ToString("D")));
+            }
 
             var replacedProposal = store.ProposeScopedPerson(family, branch, author, "Synthetic Replacement");
             var replaced = store.ListScopedPendingPeople(family, branch, reviewer).Single().Person;
@@ -98,6 +119,14 @@ internal static class SqliteScopedPersonMutationAssertions
             }
 
             var tampered = store.ProposeScopedPerson(family, branch, author, "Synthetic Tamper");
+            byte[] rejectedPendingSeal;
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = "SELECT state_envelope FROM scoped_person_proposals WHERE id=$id;";
+                cmd.Parameters.AddWithValue("$id", tampered.ToString("D"));
+                rejectedPendingSeal = (byte[])cmd.ExecuteScalar()!;
+            }
             using (var db = Connect(path))
             {
                 Execute(db, "UPDATE scoped_person_proposals SET submitter=$p WHERE id=$id;",
@@ -154,6 +183,86 @@ internal static class SqliteScopedPersonMutationAssertions
             }
             store.ReviewScopedPerson(family, branch, reviewer, tampered, false);
             Check(!store.ReadPeople(family, admin).Any(x => x.DisplayName == "Synthetic Tamper"), "rejection publishes nothing");
+            using (var db = Connect(path))
+                Execute(db, "UPDATE scoped_person_proposals SET state='Pending',reviewer=NULL,state_envelope=$seal WHERE id=$id;",
+                    ("$seal", rejectedPendingSeal), ("$id", tampered.ToString("D")));
+            using (var reopened = new SqliteFamilyStore(path, key))
+                Expect<InvalidDataException>(() => reopened.ReviewScopedPerson(family, branch, reviewer, tampered, true));
+            using (var db = Connect(path))
+                Execute(db, """
+                    DELETE FROM scoped_person_events WHERE proposal_id=$id AND seq>
+                    (SELECT MIN(seq) FROM scoped_person_events WHERE proposal_id=$id);
+                    """, ("$id", tampered.ToString("D")));
+            Expect<InvalidDataException>(() => store.ReviewScopedPerson(family, branch, reviewer, tampered, true));
+            using (var db = Connect(path))
+                Execute(db, "UPDATE scoped_person_proposals SET state='Rejected' WHERE id=$id;", ("$id", tampered.ToString("D")));
+            Check(!store.ReadPeople(family, admin).Any(x => x.DisplayName == "Synthetic Tamper"),
+                "rejection replay publishes nothing");
+
+            var corrupt = store.ProposeScopedPerson(family, branch, author, "Synthetic Corrupt");
+            var readable = store.ProposeScopedPerson(family, branch, author, "Synthetic Readable");
+            using (var db = Connect(path))
+            {
+                Execute(db, "UPDATE scoped_person_proposals SET payload=X'01' WHERE id=$id;", ("$id", corrupt.ToString("D")));
+                using var cmd = db.CreateCommand();
+                cmd.CommandText = """
+                    WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<100)
+                    INSERT INTO scoped_person_proposals
+                      (id,family_id,branch_id,person_id,submitter,living,payload,state,state_envelope)
+                    SELECT printf('00000000-0000-0000-0000-%012x',n.i),family_id,branch_id,
+                      printf('!forged-%03d',n.i),submitter,living,payload,state,state_envelope
+                    FROM scoped_person_proposals,n WHERE id=$id;
+                    """;
+                cmd.Parameters.AddWithValue("$id", corrupt.ToString("D"));
+                Check(cmd.ExecuteNonQuery() == 100, "insert unauthenticated synthetic rows");
+            }
+            using (var reopened = new SqliteFamilyStore(path, key))
+            {
+                var empty = reopened.ListScopedPendingPeoplePage(family, branch, reviewer);
+                Check(empty.Entries.Count == 0 && empty.QuarantineIds.Count == 0 && empty.NextCursor is not null,
+                    "empty corrupt page has continuation");
+                Check(reopened.ListScopedPendingPeople(family, branch, reviewer).Single().ProposalId == readable,
+                    "legacy inbox reaches readable proposals past an empty page");
+                var continued = reopened.ListScopedPendingPeoplePage(family, branch, reviewer, empty.NextCursor);
+                Check(continued.Entries.Single().ProposalId == readable && continued.QuarantineIds.SequenceEqual([corrupt]),
+                    "continuation reaches readable and authenticated corrupt proposals");
+                Expect<UnauthorizedAccessException>(() => reopened.QuarantineScopedPerson(family, branch, author, corrupt));
+                Expect<InvalidDataException>(() => reopened.QuarantineScopedPerson(family, branch, reviewer, readable));
+                reopened.QuarantineScopedPerson(family, branch, reviewer, corrupt);
+                Check(reopened.ListScopedPendingPeoplePage(family, branch, reviewer, empty.NextCursor)
+                    .Entries.Single().ProposalId == readable, "quarantine preserves readable proposals");
+                Expect<InvalidOperationException>(() => reopened.ReviewScopedPerson(family, branch, reviewer, corrupt, true));
+                reopened.ReviewScopedPerson(family, branch, reviewer, readable, false);
+            }
+            using (var db = Connect(path))
+            using (var cmd = db.CreateCommand())
+            {
+                cmd.CommandText = "DELETE FROM scoped_person_proposals WHERE person_id GLOB '!forged-*';";
+                Check(cmd.ExecuteNonQuery() == 100, "remove unauthenticated synthetic rows");
+            }
+
+            var corruptSeal = store.ProposeScopedPerson(family, branch, author, "Synthetic Corrupt Seal");
+            var noHistory = store.ProposeScopedPerson(family, branch, author, "Synthetic Old Proposal");
+            using (var db = Connect(path))
+            {
+                Execute(db, "UPDATE scoped_person_proposals SET state_envelope=X'01' WHERE id=$id;",
+                    ("$id", corruptSeal.ToString("D")));
+                Execute(db, "DELETE FROM scoped_person_events WHERE proposal_id=$id;", ("$id", noHistory.ToString("D")));
+            }
+            var corruptPage = store.ListScopedPendingPeoplePage(family, branch, reviewer);
+            Check(corruptPage.QuarantineIds.SequenceEqual([corruptSeal]) &&
+                corruptPage.Entries.All(x => x.ProposalId != noHistory), "unauthenticated legacy history fails closed");
+            Expect<InvalidDataException>(() => store.ReviewScopedPerson(family, branch, reviewer, noHistory, true));
+            Expect<InvalidDataException>(() => store.QuarantineScopedPerson(family, branch, reviewer, noHistory));
+            store.QuarantineScopedPerson(family, branch, reviewer, corruptSeal);
+            using (var db = Connect(path))
+            {
+                Execute(db, "UPDATE scoped_person_proposals SET state='Rejected' WHERE id=$id;", ("$id", noHistory.ToString("D")));
+                using var cmd = db.CreateCommand();
+                cmd.CommandText = "SELECT COUNT(*) FROM audit WHERE subject_id=$id AND action='scoped-person-quarantined';";
+                cmd.Parameters.AddWithValue("$id", corruptSeal.ToString("D"));
+                Check((long)cmd.ExecuteScalar()! == 1, "quarantine is audited");
+            }
 
             var stale = store.ProposeScopedPerson(family, branch, author, "Synthetic Stale");
             store.RevokeMember(family, admin, author);
