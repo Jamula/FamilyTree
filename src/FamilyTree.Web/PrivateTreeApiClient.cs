@@ -449,19 +449,19 @@ public sealed class PrivateTreeApiClient(HttpClient http, PrivateTreeModeOptions
     {
         if (!response.Headers.TryGetValues("Set-Cookie", out var cookies))
             return null;
-        string? found = null;
-        foreach (var header in cookies)
-        {
-            var pair = header.Split(';', 2)[0].Trim();
-            var separator = pair.IndexOf('=');
-            if (separator <= 0 ||
-                !string.Equals(pair[..separator].Trim(), name, StringComparison.Ordinal))
-                continue;
-            if (found is not null || pair.Length > 4096)
-                return null;
-            found = pair;
-        }
-        return found;
+        var matches = cookies
+            .Select(header => header.Split(';', 2)[0].Trim())
+            .Where(pair =>
+            {
+                var separator = pair.IndexOf('=');
+                return separator > 0 &&
+                    string.Equals(pair[..separator].Trim(), name, StringComparison.Ordinal);
+            })
+            .Take(2)
+            .ToArray();
+        return matches.Length == 1 && matches[0].Length <= 4096
+            ? matches[0]
+            : null;
     }
 
     private static bool IsLoopback(IPAddress? address) =>

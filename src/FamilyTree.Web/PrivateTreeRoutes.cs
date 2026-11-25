@@ -88,7 +88,7 @@ public static class PrivateTreeRoutes
 
         var antiforgeryToken = antiforgery.GetAndStoreTokens(context).RequestToken;
         var status = await api.GetStatusAsync(context, context.RequestAborted);
-        if (!options.Enabled || !status.Available || !status.Authenticated)
+        if (!status.Available || !status.Authenticated)
             return Results.Content(Render(options, status, antiforgeryToken),
                 "text/html; charset=utf-8");
 
@@ -228,7 +228,7 @@ public static class PrivateTreeRoutes
         return EndPage(html);
     }
 
-    private static string RenderWorkspace(
+    internal static string RenderWorkspace(
         PrivateTreeApiStatus status,
         string? token,
         Guid familyId,
@@ -269,7 +269,7 @@ public static class PrivateTreeRoutes
         AppendToggleValues(html, spouses, siblings, social);
         html.Append("<label for='visible-search'>Search visible people</label>")
             .Append("<input id='visible-search' name='query' type='search' minlength='2' maxlength='80' required value='")
-            .Append(WebUtility.HtmlEncode(query ?? "")).Append("'>")
+            .Append(WebUtility.HtmlEncode(unavailable ? "" : query ?? "")).Append("'>")
             .Append("<button type='submit'>Search</button></form>");
 
         if (unavailable)
@@ -391,9 +391,8 @@ public static class PrivateTreeRoutes
         pending.Enqueue(tree.CenterPersonId);
         while (pending.TryDequeue(out var current))
             if (adjacency.TryGetValue(current, out var neighbors))
-                foreach (var neighbor in neighbors)
-                    if (included.Add(neighbor))
-                        pending.Enqueue(neighbor);
+                foreach (var neighbor in neighbors.Where(included.Add))
+                    pending.Enqueue(neighbor);
         var nodes = depthNodes.Where(node => included.Contains(node.PersonId)).ToArray();
         var visible = nodes.Select(node => node.PersonId).ToHashSet();
         var graph = new PersonTreeProjection(tree.CenterPersonId,

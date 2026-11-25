@@ -116,7 +116,7 @@ internal static class PrivateTreeModeAssertions
                 return Task.FromResult(uri.AbsolutePath == membershipPrefix + "invitations"
                     ? Json(HttpStatusCode.OK,
                         """{"invitationId":"19a21fa7-2302-40eb-8f5e-7472ef64d0d5"}""")
-                    : new HttpResponseMessage(HttpStatusCode.NoContent));
+                    : CreateNoContentResponse());
             }
 
             var familyPrefix = $"/api/v1/families/{FamilyId:D}/branches/{BranchId:D}/";
@@ -161,6 +161,9 @@ internal static class PrivateTreeModeAssertions
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json")
             };
+
+        private static HttpResponseMessage CreateNoContentResponse() =>
+            new(HttpStatusCode.NoContent);
     }
 
     private sealed class SyntheticAuthorization(HashSet<Guid> visible) : IFamilyAuthorization
@@ -176,6 +179,7 @@ internal static class PrivateTreeModeAssertions
 
     public static async Task RunAsync(string verifiedSessionCookie)
     {
+        PrivateTreeUiAssertions.Run();
         var defaults = PrivateTreeModeOptions.FromConfiguration(new ConfigurationBuilder().Build());
         Ensure(!defaults.Enabled && defaults.ApiBaseUri is null, "private mode is disabled by default");
 
@@ -775,12 +779,12 @@ internal static class PrivateTreeModeAssertions
             return await client.SendAsync(request);
         }
 
-        private static Task<HttpResponseMessage> GetPrivateAsync(
+        private static async Task<HttpResponseMessage> GetPrivateAsync(
             HttpClient client, string sessionCookie)
         {
-            var request = new HttpRequestMessage(HttpMethod.Get, "https://localhost/private");
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://localhost/private");
             request.Headers.TryAddWithoutValidation("Cookie", sessionCookie);
-            return client.SendAsync(request);
+            return await client.SendAsync(request);
         }
 
         private static string GetCookie(HttpResponseMessage response, string name)
