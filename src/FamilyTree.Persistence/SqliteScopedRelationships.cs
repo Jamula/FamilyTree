@@ -237,13 +237,17 @@ public sealed partial class SqliteFamilyStore
     private sealed record LoadedLink(ScopedRelationshipProposal Proposal, byte[] Payload, byte[] Seal,
         string FromFingerprint, string ToFingerprint, int Version);
 
-    private static string PersonFingerprint(SqliteConnection con, SqliteTransaction tx, Guid family, Guid person)
+    private string PersonFingerprint(SqliteConnection con, SqliteTransaction tx, Guid family, Guid person)
     {
         using var cmd = Cmd(con, tx, "SELECT encrypted_name,living FROM people WHERE family_id=$f AND id=$p;",
             ("$f", family.ToString("D")), ("$p", person.ToString("D")));
         using var reader = cmd.ExecuteReader();
         if (!reader.Read()) throw new UnauthorizedAccessException("Access denied.");
-        return Convert.ToBase64String(SHA256.HashData(reader.GetFieldValue<byte[]>(0))) + "|" + reader.GetInt64(1);
+        var name = reader.GetFieldValue<byte[]>(0);
+        _ = Decrypt(family, person, name);
+        var living = reader.GetInt64(1);
+        if (living is not (0 or 1)) throw new InvalidDataException("Person invalid.");
+        return Convert.ToBase64String(SHA256.HashData(name)) + "|" + living;
     }
 
     private LoadedLink LoadScopedLink(SqliteConnection con, SqliteTransaction tx,

@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using FamilyTree.Domain;
 using FamilyTree.Persistence;
@@ -8,7 +7,6 @@ using PersonPermission = FamilyTree.Persistence.SqliteFamilyStore.ScopedPersonPe
 
 internal static class SqliteScopedRelationshipAssertions
 {
-    [ModuleInitializer]
     internal static void Run()
     {
         var directory = Path.Join(Path.GetTempPath(), "scoped-link-" + Guid.NewGuid().ToString("N"));
@@ -117,8 +115,17 @@ internal static class SqliteScopedRelationshipAssertions
                 change.Parameters.AddWithValue("$id", second.Id.ToString("D"));
                 change.ExecuteNonQuery();
                 Expect<InvalidDataException>(() => store.ReviewScopedRelationship(family, branch, reviewer, id, true));
+                Expect<InvalidDataException>(() => Propose());
+                Check(AuditCount(path) == beforeDenials && Publications(path) == 0,
+                    "corrupt endpoint cannot be proposed or published");
                 change.Parameters["$name"].Value = name;
                 change.ExecuteNonQuery();
+                Execute(db, "PRAGMA ignore_check_constraints=ON; UPDATE people SET living=2 WHERE id=$id;", second.Id);
+                Expect<InvalidDataException>(() => Propose());
+                Expect<InvalidDataException>(() => store.ReviewScopedRelationship(family, branch, reviewer, id, true));
+                Check(AuditCount(path) == beforeDenials && Publications(path) == 0,
+                    "invalid living flag cannot be proposed or published");
+                Execute(db, "UPDATE people SET living=1 WHERE id=$id; PRAGMA ignore_check_constraints=OFF;", second.Id);
             }
             using (var db = Connect(path))
             {
