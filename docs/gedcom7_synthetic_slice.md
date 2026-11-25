@@ -63,6 +63,11 @@ without relationship or date/source grants. The relationship review work in
 yet construct a complete authorized GEDCOM projection or apply an approved
 reconciliation atomically.
 
+The scoped typed-link review work in #117 does not establish persisted
+relationship read grants or atomic GEDCOM import; those remain dependencies.
+Tests using explicit synthetic in-memory relationship and field grants exercise
+the domain projection only, not a persisted-grant or production GEDCOM adapter.
+
 The local `GedcomAuthorizedPersonSlice` provides a narrower synthetic
 building block, not a private route or approval mechanism. Its viewer ID must
 come from a verified server session, never request data. Each operation loads
