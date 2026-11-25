@@ -187,8 +187,26 @@ internal static class ProfileClaimPersistenceAssertions
                 Check((await service.ListPendingAsync(Context(adminCookie), familyId))
                     .Select(item => item.Id).SequenceEqual([claim.Id]),
                     "inbox includes visible claims but excludes hidden claims");
-                await service.WithdrawAsync(Context(noViewCookie), familyId, hiddenClaim.Id);
+                grants.RevokePerson(familyId, branchId, adminId, noViewId, secondPersonId);
+                var deniedWithdrawal = await Denied(() => service.WithdrawAsync(
+                    Context(noViewCookie), familyId, hiddenClaim.Id));
+                var unknownWithdrawal = await Denied(() => service.WithdrawAsync(
+                    Context(noViewCookie), familyId, Guid.NewGuid()));
+                Check(deniedWithdrawal == unknownWithdrawal,
+                    "hidden and unknown withdrawal outcomes match");
                 grants.GrantPerson(familyId, branchId, adminId, adminId, secondPersonId);
+                Check((await service.ListPendingAsync(Context(adminCookie), familyId))
+                    .Select(item => item.Id).ToHashSet()
+                    .SetEquals([claim.Id, hiddenClaim.Id]),
+                    "denied withdrawal leaves the pending claim unchanged");
+                Check((await service.ReadAuditAsync(Context(adminCookie), familyId,
+                    hiddenClaim.Id)).Select(entry => entry.Action)
+                    .SequenceEqual(["profile-claim-proposed"]),
+                    "denied withdrawal writes no audit event");
+                grants.GrantPerson(familyId, branchId, adminId, noViewId, secondPersonId);
+                Check((await service.WithdrawAsync(Context(noViewCookie), familyId,
+                    hiddenClaim.Id)).State == ProfileClaimState.Withdrawn,
+                    "visible claimant can withdraw a pending claim");
                 grants.RevokePerson(familyId, branchId, adminId, reviewerId, personId);
                 Check((await service.ListPendingAsync(Context(reviewerCookie), familyId)).Count == 0,
                     "revoked reviewer grant hides the claim");

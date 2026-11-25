@@ -101,6 +101,15 @@ public sealed partial class SqliteFamilyStore
         using var tx = con.BeginTransaction();
         EnsureProfileClaimSchema(con, tx);
         RequireMember(con, tx, familyId, principalId, administrator: false);
+        if (Scalar<long>(con, tx, """
+            SELECT COUNT(*) FROM profile_claims c
+            WHERE c.family_id=$f AND c.id=$id AND c.principal_id=$p AND c.state='Pending'
+              AND EXISTS (SELECT 1 FROM person_visibility v
+                  WHERE v.family_id=c.family_id AND v.branch_id=c.branch_id
+                    AND v.person_id=c.person_id AND v.principal_id=$p);
+            """, ("$f", familyId.ToString("D")), ("$id", claimId.ToString("D")),
+            ("$p", principalId.ToString("D"))) != 1)
+            throw new UnauthorizedAccessException("Access denied.");
         var claim = FindPendingProfileClaim(con, tx, familyId, claimId);
         if (claim.PrincipalId != principalId)
             throw new UnauthorizedAccessException("Withdrawal denied.");
