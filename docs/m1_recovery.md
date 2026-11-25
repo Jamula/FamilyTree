@@ -30,9 +30,23 @@ layer, while relational metadata is not).
 
 ## Windows use
 
-Run from the repository root in PowerShell. Use a private, backed-up key
-location separate from the encrypted backup destination. Losing the key
-prevents recovery; do not put a copy beside the backup.
+Run the reproducible Windows verification from the repository root in
+PowerShell:
+
+```powershell
+.\tests\FamilyTree.RecoveryTests\verify-windows-recovery.ps1
+```
+
+The script provisions a temporary external 32-byte backup key under
+`$env:LOCALAPPDATA`, restricts and checks its Windows ACL to the current user,
+and runs the synthetic recovery suite using that key for its API and CLI
+backup/restore checks. It also requires the suite's symlink tests to run; if
+Windows denies symlink creation, enable Developer Mode or grant the required
+symlink privilege, then rerun. It deletes the temporary key after the tests.
+
+For regular use outside this disposable verification, use a private,
+backed-up key location separate from the encrypted backup destination. Losing
+the key prevents recovery; do not put a copy beside the backup.
 
 ```powershell
 $keyDirectory = Join-Path $env:LOCALAPPDATA 'FamilyTree\recovery'
@@ -109,6 +123,12 @@ acceptance remain outstanding. Do not treat Linux results as Windows
 validation or as completion of #109's Windows acceptance. An independent
 security-focused review of key separation, authenticated encryption and path
 safety found no vulnerabilities; it does not establish Windows behavior.
+
+No Windows runner is configured in the repository workflows; the build-test
+workflow uses `ubuntu-latest`, and no separate authorized Windows runner was
+available in this environment. Run the PowerShell verifier on an authorized
+Windows machine and record its output before marking Windows backup/restore
+and ACL acceptance complete.
 
 This evidence is partial work for #90 and does not close or sign off the M1
 private-family MVP. Have the independent security review and coordinate

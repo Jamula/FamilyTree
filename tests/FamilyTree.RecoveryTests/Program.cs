@@ -26,12 +26,19 @@ static void RunRecoveryAssertions()
     var databasePath = Path.Combine(directory, "synthetic.sqlite");
     var backupPath = Path.Combine(directory, "synthetic.backup");
     var restoredPath = Path.Combine(restoreDirectory, "recovered.sqlite");
-    var keyPath = Path.Combine(directory, "recovery.key");
+    var externalBackupKeyPath = Environment.GetEnvironmentVariable(
+        "FAMILYTREE_RECOVERY_TEST_KEY_FILE");
+    var usesExternalBackupKey = !string.IsNullOrWhiteSpace(externalBackupKeyPath);
+    var keyPath = usesExternalBackupKey
+        ? Path.GetFullPath(externalBackupKeyPath!)
+        : Path.Combine(directory, "recovery.key");
     var familyKeyPath = Path.Combine(directory, "family.key");
     var identityKeyPath = Path.Combine(directory, "identity.key");
     var familyKey = RandomNumberGenerator.GetBytes(32);
     var identityKey = RandomNumberGenerator.GetBytes(32);
-    var backupKey = RandomNumberGenerator.GetBytes(32);
+    var backupKey = usesExternalBackupKey
+        ? File.ReadAllBytes(keyPath)
+        : RandomNumberGenerator.GetBytes(32);
     var wrongKey = RandomNumberGenerator.GetBytes(32);
     var familyId = Guid.NewGuid();
     var adminId = Guid.NewGuid();
@@ -45,7 +52,8 @@ static void RunRecoveryAssertions()
     {
         Check(!familyKey.SequenceEqual(identityKey) && !familyKey.SequenceEqual(backupKey) &&
               !identityKey.SequenceEqual(backupKey), "database, identity and backup keys are separate");
-        File.WriteAllBytes(keyPath, backupKey);
+        if (!usesExternalBackupKey)
+            File.WriteAllBytes(keyPath, backupKey);
         File.WriteAllBytes(familyKeyPath, familyKey);
         File.WriteAllBytes(identityKeyPath, identityKey);
         using (var store = new SqliteFamilyStore(databasePath, familyKey))
