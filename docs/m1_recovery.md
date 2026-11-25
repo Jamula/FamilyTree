@@ -94,11 +94,12 @@ and enforces the repository's 90% Persistence component floor.
 ## Verification evidence
 
 On 2026-11-25, the focused recovery suite passed on Ubuntu 24.04 x64 with
-.NET SDK 11.0.100. The run exercises the backup and restore CLI as separate
-processes and reopens restored membership, grants, revocations and audit state
-from a fresh process. Wrong-key, authenticated-corruption, truncated-backup,
-existing-target rollback, and isolated-target assertions passed. The Linux
-filesystem allowed the symlink assertions to run.
+.NET SDK 11.0.100. It launches the backup and restore CLI commands as separate
+processes. Separately, it restores a snapshot and launches a fresh process to
+verify restored membership, grants, revocations and audit state. Wrong-key,
+authenticated-corruption, truncated-backup, existing-target rollback, and
+isolated-target assertions passed. The Linux filesystem allowed the symlink
+assertions to run.
 
 GitHub Actions `build-test` for commit `3994add` also passed on
 `ubuntu-latest` (run 45500801114). **No Windows execution has been performed
